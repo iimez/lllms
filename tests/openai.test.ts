@@ -1,17 +1,17 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import { Server } from 'node:http'
 import OpenAI from 'openai'
-import { createServer } from '../src/server.js'
-import { LLMPoolConfig } from '../src/pool.js'
+import { createServer, InferenceServerOptions } from '../src/server.js'
 
-const testPoolConfig: LLMPoolConfig = {
+const testConfig: InferenceServerOptions = {
 	concurrency: 1,
-	variants: [
-		{
-			model: 'orca-mini-3b-gguf2-q4_0',
+	models: {
+		'orca:3b': {
+			url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
 			preload: true,
+			engine: 'gpt4all',
 		},
-	],
+	},
 }
 
 suite('OpenAI Client Integration Tests', () => {
@@ -22,8 +22,10 @@ suite('OpenAI Client Integration Tests', () => {
 	})
 
 	beforeAll(async () => {
-		server = await createServer(testPoolConfig)
+		const res = await createServer(testConfig)
+		server = res.server
 		server.listen(3000)
+		await res.initPromise
 	})
 
 	afterAll(async () => {
@@ -32,7 +34,7 @@ suite('OpenAI Client Integration Tests', () => {
 
 	test('openai.chat.completions.create', async () => {
 		const chatCompletion = await openai.chat.completions.create({
-			model: 'orca-mini-3b-gguf2-q4_0',
+			model: 'orca:3b',
 			temperature: 0,
 			messages: [
 				{ role: 'user', content: 'This is a test. Just answer with "Test".' },

@@ -1,25 +1,28 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import { Server } from 'node:http'
 import request from 'supertest'
-import { createServer } from '../src/server.js'
+import { createServer, InferenceServerOptions } from '../src/server.js'
 import { LLMPoolConfig } from '../src/pool.js'
 
-const testPoolConfig: LLMPoolConfig = {
+const testConfig: InferenceServerOptions = {
 	concurrency: 1,
-	variants: [
-		{
-			model: 'orca-mini-3b-gguf2-q4_0',
+	models: {
+		'orca:3b': {
+			url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
 			preload: true,
+			engine: 'gpt4all',
 		},
-	],
+	},
 }
 
 suite('API Integration Tests', () => {
 	let server: Server
 
 	beforeAll(async () => {
-		server = await createServer(testPoolConfig)
+		const res = await createServer(testConfig)
+		server = res.server
 		server.listen()
+		await res.initPromise
 	})
 
 	afterAll(async () => {
@@ -30,7 +33,7 @@ suite('API Integration Tests', () => {
 		const response = await request(server)
 			.post('/v1/chat/completions')
 			.send({
-				model: 'orca-mini-3b-gguf2-q4_0',
+				model: 'orca:3b',
 				temperature: 0,
 				messages: [
 					{ role: 'user', content: 'This is a test. Just answer with "Test".' },

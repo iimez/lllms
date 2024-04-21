@@ -1,6 +1,6 @@
 {
 	"name": "lllms",
-	"version": "1.0.0",
+	"version": "1.0.0-alpha.1",
 	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
 	"main": "build/standalone.js",
 	"type": "module",

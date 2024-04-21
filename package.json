@@ -1,16 +1,28 @@
 {
-	"name": "inference-server",
+	"name": "lllms",
 	"version": "1.0.0",
-	"description": "",
+	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
 	"main": "build/standalone.js",
 	"type": "module",
+	"keywords": [
+		"llm",
+		"inference server",
+		"llm server",
+		"local llm",
+		"gpt4all",
+		"node-llama-cpp",
+		"ai",
+		"nlp",
+		"openai",
+		"openai api"
+	],
 	"scripts": {
 		"upgrade": "npx npm-check-updates -i",
 		"reinstall": "rimraf ./node_modules ./package-lock.json && npm install",
-		"prebuild": "rimraf ./dist ./tsconfig.tsbuildinfo",
+		"prebuild": "rimraf ./dist ./tsconfig.release.tsbuildinfo",
 		"build": "tsc --build tsconfig.release.json --force",
 		"test": "vitest --test-timeout=-1 --pool=forks --maxConcurrency=1",
-		"prewatch": "rimraf ./dist ./tsconfig.tsbuildinfo",
+		"prewatch": "rimraf ./dist ./tsconfig.release.tsbuildinfo",
 		"watch": "tsc -w -p tsconfig.release.json",
 		"start": "cross-env NODE_ENV=production node dist/standalone.js"
 	},

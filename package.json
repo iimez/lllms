@@ -33,6 +33,7 @@
 	"dependencies": {
 		"gpt4all": "^4.0.0",
 		"ipull": "^3.0.11",
+		"nanoid": "^5.0.7",
 		"node-llama-cpp": "^3.0.0-beta.16",
 		"p-queue": "^8.0.1"
 	},

@@ -3,10 +3,9 @@ import { URL } from 'node:url'
 import { LLMPool, LLMPoolOptions } from './pool.js'
 import { createOpenAIRequestHandlers } from './api/openai.js'
 
-export type InferenceServerOptions = LLMPoolOptions
+export type LLMServerOptions = LLMPoolOptions
 
-export async function createServer(opts: InferenceServerOptions) {
-	// "const inferServer = new InferenceServer(config)" ?
+export async function createServer(opts: LLMServerOptions) {
 	const pool = new LLMPool(opts)
 	const initPromise = pool.init()
 

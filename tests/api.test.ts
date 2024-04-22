@@ -1,15 +1,15 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import { Server } from 'node:http'
 import request from 'supertest'
-import { createServer, InferenceServerOptions } from '../src/server.js'
+import { createServer, LLMServerOptions } from '../src/server.js'
 import { LLMPoolConfig } from '../src/pool.js'
 
-const testConfig: InferenceServerOptions = {
+const testConfig: LLMServerOptions = {
 	concurrency: 1,
 	models: {
-		'orca:3b': {
+		'orca-3b': {
 			url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
-			preload: true,
+			minInstances: 1,
 			engine: 'gpt4all',
 		},
 	},
@@ -33,7 +33,7 @@ suite('API Integration Tests', () => {
 		const response = await request(server)
 			.post('/v1/chat/completions')
 			.send({
-				model: 'orca:3b',
+				model: 'orca-3b',
 				temperature: 0,
 				messages: [
 					{ role: 'user', content: 'This is a test. Just answer with "Test".' },

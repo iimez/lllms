@@ -3,7 +3,6 @@
 		"target": "es2022",
 		"module": "es2022",
 		"sourceMap": true,
-		"composite": true,
 		"declaration": true,
 		"stripInternal": true,
 		"strict": true,

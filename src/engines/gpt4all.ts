@@ -1,16 +1,11 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { loadModel, createCompletion, InferenceModel, LoadModelOptions } from 'gpt4all'
-import { LLMConfig, ChatCompletionRequest, ChatMessage } from '../pool'
+import { LLMConfig,  } from '../pool.js'
+import { ChatCompletionArgs, EngineChatCompletionResult, ChatMessage } from '../types/index.js'
 
-function createConversationHash(messages: ChatMessage[]): string {
-	return crypto.createHash('sha256').update(JSON.stringify(messages)).digest('hex')
-}
-
-export async function createInstance(config: LLMConfig) {
+export async function loadInstance(config: LLMConfig) {
 	const modelName = config.name
-	// const modelsDir = process.env.MODELS_DIR || 'models'
-	// const modelPath = path.join(modelsDir, modelName)
 	const loadOpts: LoadModelOptions = {
 		modelPath: path.dirname(config.file),
 		// file: config.file,
@@ -25,8 +20,6 @@ export async function createInstance(config: LLMConfig) {
 		loadOpts,
 	})
 	const instance = await loadModel(path.basename(config.file), loadOpts)
-	// await instance.createChatSession()
-
 	return instance
 }
 
@@ -34,44 +27,83 @@ export async function disposeInstance(instance: InferenceModel) {
 	return instance.dispose()
 }
 
-export function onChatCompletionRequest(
-	instance: InferenceModel,
-	request: ChatCompletionRequest,
-): ChatCompletionRequest {
-	if (!instance.activeChatSession) {
-		return {
-			...request,
-			cached: false,
-		}
-	}
+// export function onChatCompletionRequest(
+// 	instance: InferenceModel,
+// 	args: ChatCompletionArgs,
+// ): ChatCompletionRequest {
+// 	if (!instance.activeChatSession) {
+// 		return {
+// 			...request,
+// 			cached: false,
+// 		}
+// 	}
 
-	const incomingMessages = [...request.messages]
-	const lastMessage = incomingMessages.pop()
-	const incomingStateHash = createConversationHash(incomingMessages)
-	const currentStateHash = createConversationHash(instance.activeChatSession?.messages)
-	const requestMatchesState = incomingStateHash === currentStateHash
+// 	const incomingMessages = [...request.messages]
+// 	const lastMessage = incomingMessages.pop()
+// 	const incomingStateHash = createConversationHash(incomingMessages)
+// 	const currentStateHash = createConversationHash(instance.activeChatSession?.messages)
+// 	const requestMatchesState = incomingStateHash === currentStateHash
 
-	if (requestMatchesState && lastMessage) {
-		return {
-			...request,
-			cached: true,
-			messages: [lastMessage],
-		}
-	}
+// 	if (requestMatchesState && lastMessage) {
+// 		return {
+// 			...request,
+// 			cached: true,
+// 			messages: [lastMessage],
+// 		}
+// 	}
 
-	return {
-		...request,
-		cached: false,
-	}
-}
+// 	return {
+// 		...request,
+// 		cached: false,
+// 	}
+// }
 
 export async function processChatCompletion(
 	instance: InferenceModel,
-	req: ChatCompletionRequest,
-) {
-	if (instance.activeChatSession) {
-		return await createCompletion(instance.activeChatSession, req.messages)
+	args: ChatCompletionArgs,
+): Promise<EngineChatCompletionResult> {
+
+	let session = instance.activeChatSession
+	if (!session) {
+		
+		let systemPrompt = args.systemPrompt
+		if (!systemPrompt && args.messages[0].role === 'system') {
+			systemPrompt = args.messages[0].content
+
+		}
+		systemPrompt = `<|im_start|>system\n${systemPrompt}\n<|im_end|>`
+		// systemPrompt = `<|start_header_id|>system<|end_header_id|>\n\n${systemPrompt}<|eot_id|>`
+		console.debug('using system prompt', systemPrompt)
+		session = await instance.createChatSession({
+			systemPrompt: args.systemPrompt,
+		})
 	}
-	const session = await instance.createChatSession()
-	return await createCompletion(session, req.messages)
+	
+	const nonSystemMessages = args.messages.filter((m) => m.role !== 'system')
+
+	const result = await createCompletion(session, nonSystemMessages, {
+		temperature: args.temperature,
+		nPredict: args.maxTokens,
+		// seed: args.seed,
+		// frequencyPenalty: args.frequencyPenalty,
+		// presencePenalty: args.presencePenalty,
+		// topK: 40,
+		topP: args.topP,
+		// minP: args.minP,
+		// promptTemplate:
+		// nBatch: 8,
+		// repeatPenalty: 1.18,
+		// repeatLastN: 10,
+	})
+	
+	return {
+		finishReason: "stopGenerationTrigger", // not available
+		message: {
+			role: 'assistant',
+			content: result.choices[0].message.content,
+		},
+		promptTokens: result.usage.prompt_tokens,
+		completionTokens: result.usage.completion_tokens,
+		totalTokens: result.usage.total_tokens,
+	}
 }

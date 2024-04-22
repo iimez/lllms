@@ -1,35 +1,19 @@
 import os from 'node:os'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { promises as fs, existsSync } from 'node:fs'
 import PQueue from 'p-queue'
 import { downloadFile } from 'ipull'
-import * as gpt4all from './engines/gpt4all.js'
-import * as nodeLlamaCpp from './engines/node-llama-cpp.js'
-
-const engines = {
-	gpt4all: gpt4all,
-	'node-llama-cpp': nodeLlamaCpp,
-}
-
-export interface ChatMessage {
-	role: 'system' | 'user' | 'assistant'
-	content: string
-}
-
-export interface ChatCompletionRequest {
-	model: string
-	messages: ChatMessage[]
-	cached?: boolean
-}
-
-type EngineType = 'gpt4all' | 'node-llama-cpp'
-
+import { engines, EngineType } from './engines/index.js'
+import { ChatMessage, ChatCompletionArgs, EngineChatCompletionResult } from './types/index.js'
+import { nanoid } from 'nanoid'
 export interface LLMOptions {
-	preload?: boolean
 	gpu?: boolean | string
 	url?: string
 	file?: string
-	engine?: EngineType
+	engine: EngineType
+	minInstances?: number
+	maxInstances?: number
 }
 
 export interface LLMConfig extends Partial<LLMOptions> {
@@ -50,81 +34,20 @@ export interface LLMPoolConfig {
 	models: Record<string, LLMConfig>
 }
 
-type ChatCompletionResponse = any
-type LLMEngineInstance = any
-type CompletionToken = any
-
-interface LLMEngine {
-	createInstance: (config: LLMConfig) => Promise<LLMEngineInstance>
-	disposeInstance: (instance: LLMEngineInstance) => Promise<void>
-	onChatCompletionRequest: (
-		instance: LLMEngineInstance,
-		request: ChatCompletionRequest,
-	) => ChatCompletionRequest
-	processChatCompletion: (
-		instance: LLMEngineInstance,
-		request: ChatCompletionRequest,
-		onToken?: (token: CompletionToken) => void,
-	) => Promise<ChatCompletionResponse>
+interface TaskResult {
+	instance: LLMInstance
+	args: any
 }
 
-export class LLMInstance {
-	locked: boolean
-	model: string
-	ref: LLMEngineInstance | null
-	engine: LLMEngine
-	config: LLMConfig
-	download?: {
-		progress: number
-		speed: number
-	}
+type LLMEngineInstance = any
 
-	constructor(engine: LLMEngine, config: LLMConfig) {
-		this.engine = engine
-		this.config = config
-		this.model = config.name
-		this.ref = null
-		this.locked = false
-	}
-
-	async init() {
-		if (this.ref) {
-			return
-		}
-		const time = Date.now()
-		this.ref = await this.engine.createInstance(this.config)
-		console.debug('Instance initialized', {
-			model: this.model,
-			time: Date.now() - time,
-		})
-	}
-
-	dispose() {
-		if (this.ref) {
-			this.engine.disposeInstance(this.ref)
-		}
-	}
-
-	lock() {
-		this.locked = true
-	}
-
-	unlock() {
-		this.locked = false
-	}
-
-	onChatCompletionRequest(request: ChatCompletionRequest) {
-		console.debug('onChatCompletionRequest', request)
-		return this.engine.onChatCompletionRequest(this.ref, request)
-	}
-
-	processChatCompletion(
-		request: ChatCompletionRequest,
-		onToken?: (token: CompletionToken) => void,
-	) {
-		console.debug('processChatCompletion', request)
-		return this.engine.processChatCompletion(this.ref, request, onToken)
-	}
+interface LLMEngine {
+	loadInstance: (config: LLMConfig) => Promise<LLMEngineInstance>
+	disposeInstance: (instance: LLMEngineInstance) => Promise<void>
+	processChatCompletion: (
+		instance: LLMEngineInstance,
+		args: ChatCompletionArgs,
+	) => Promise<EngineChatCompletionResult>
 }
 
 function resolveModelFile(opts: LLMOptions, modelsDir: string) {
@@ -146,6 +69,88 @@ function resolveModelFile(opts: LLMOptions, modelsDir: string) {
 	throw new Error('Model file or url is required')
 }
 
+interface ChatState {
+	messages: ChatMessage[]
+	systemPrompt?: string
+}
+function createChatStateHash(
+	state: ChatState,
+	dropLastMessage: boolean = false,
+): string {
+	const data = {
+		messages: [...state.messages],
+		systemPrompt: state.systemPrompt,
+	}
+	if (dropLastMessage && data.messages.length > 1) {
+		data.messages.pop()
+	}
+	return crypto.createHash('sha1').update(JSON.stringify(data)).digest('hex')
+}
+
+export class LLMInstance {
+	id: string
+	locked: boolean
+	model: string
+	llm: LLMEngineInstance | null
+	engine: LLMEngine
+	config: LLMConfig
+	download?: {
+		progress: number
+		speed: number
+	}
+	chatStateHash?: string
+	fingerprint: string
+
+	constructor(engine: LLMEngine, config: LLMConfig) {
+		this.id = config.name + ':' + nanoid()
+		this.engine = engine
+		this.config = config
+		this.model = config.name
+		this.llm = null
+		this.locked = false
+		// TODO to implement this properly we should only include what changes the "behavior" of the model
+		this.fingerprint = crypto.createHash('sha1').update(JSON.stringify(config)).digest('hex')
+	}
+
+	async load() {
+		if (this.llm) {
+			return
+		}
+		const time = Date.now()
+		this.llm = await this.engine.loadInstance(this.config)
+		console.debug('Instance initialized', {
+			id: this.id,
+			time: Date.now() - time,
+		})
+	}
+
+	dispose() {
+		if (this.llm) {
+			this.engine.disposeInstance(this.llm)
+		}
+	}
+
+	lock() {
+		this.locked = true
+	}
+
+	unlock() {
+		this.locked = false
+	}
+
+	async processChatCompletion(args: ChatCompletionArgs) {
+		console.debug('processChatCompletion', args)
+		const result = await this.engine.processChatCompletion(this.llm, args)
+		console.debug('processChatCompletion result', result)
+		return {
+			id: this.config.engine + '-' + nanoid(),
+			model: this.model,
+			created: new Date(),
+			...result,
+		}
+	}
+}
+
 export class LLMPool {
 	queue: PQueue
 	instances: Record<string, LLMInstance>
@@ -162,16 +167,14 @@ export class LLMPool {
 			models: {},
 		}
 
-		// const modelsDir = opts.modelsDir || path.resolve(os.homedir(), '.cache')
-
 		for (const modelName in opts.models) {
 			const modelOpts = opts.models[modelName]
 			const file = resolveModelFile(modelOpts, modelsDir)
 			const modelConfig = {
+				minInstances: modelOpts.minInstances || 0,
 				...modelOpts,
 				file,
 				name: modelName,
-				engine: modelOpts.engine || 'gpt4all',
 			}
 			config.models[modelName] = modelConfig
 		}
@@ -188,33 +191,56 @@ export class LLMPool {
 		await Promise.all(disposePromises)
 	}
 
-	// create model instances, preloading if configured
+	// initializing pool, creating instances and loading models
 	async init() {
 		await fs.mkdir(this.config.modelsDir, { recursive: true })
-		const preloadPromises = []
+		const loadingPromises = []
 		const modelConfigs = this.config.models
-		
+
 		for (const modelName in modelConfigs) {
-			const config = modelConfigs[modelName]
-			const engine = engines[config.engine]
-			const key = `${modelName}`
-			// const key = `${i}:${config.name}`
-			this.instances[key] = new LLMInstance(engine, config)
-			// this needs to happen beforehand, otherwise multiple instances 
-			// (of the same model) might download the same file
-			await this.prepareInstance(this.instances[key])
-			if (config.preload) {
-				preloadPromises.push(this.instances[key].init())
+			const modelConfig = modelConfigs[modelName]
+			const engineMethods = engines[modelConfig.engine]
+			const instanceCount = modelConfig.minInstances ?? 0
+
+			for (let i = 0; i < instanceCount; i++) {
+				const instance = new LLMInstance(engineMethods, modelConfig)
+				this.instances[instance.id] = instance
+				// TODO rethink model download strategy, consider doing this outside of pool init
+				// - models could be downloaded in parallel, might be faster in total?
+				// - or sequentially, to make them available as fast as possible
+				// currently we download sequentially, but we still wait until all are done to continue
+				await this.downloadInstanceModel(instance)
+				loadingPromises.push(instance.load())
 			}
 		}
 
-		await Promise.all(preloadPromises)
-		console.debug('Pool initialized')
+		await Promise.all(loadingPromises)
+		// console.debug('Pool initialized')
 	}
-	
-	// prepare an instance, downloading the model weights if necessary
-	async prepareInstance(instance: LLMInstance) {
-		
+
+	getStatusInfo() {
+		return {
+			queue: this.queue.size,
+			instances: Object.fromEntries(
+				Object.entries(this.instances).map(([key, instance]) => {
+					return [
+						key,
+						{
+							model: instance.model,
+							locked: instance.locked,
+							url: instance.config.url,
+							file: instance.config.file,
+							engine: instance.config.engine,
+							download: instance.download,
+						},
+					]
+				}),
+			),
+		}
+	}
+
+	// download weights for a model, if necessary
+	private async downloadInstanceModel(instance: LLMInstance) {
 		const config = instance.config
 		if (!existsSync(config.file)) {
 			if (config.url) {
@@ -247,73 +273,108 @@ export class LLMPool {
 			}
 		}
 	}
-	
-	getStatusInfo() {
-		return {
-			queue: this.queue.size,
-			instances: Object.fromEntries(
-				Object.entries(this.instances).map(([key, instance]) => {
-					return [
-						key,
-						{
-							model: instance.model,
-							locked: instance.locked,
-							url: instance.config.url,
-							file: instance.config.file,
-							engine: instance.config.engine,
-							download: instance.download,
-						},
-					]
-				}),
-			),
-		}
+
+	private canSpawnInstance(modelName: string) {
+		const modelConfig = this.config.models[modelName]
+		const maxInstances = modelConfig.maxInstances ?? 1
+		const currentInstances = Object.values(this.instances).filter(
+			(instance) => instance.model === modelName,
+		)
+		return currentInstances.length < maxInstances
 	}
 
-	// picks an instance from the pool to handle a chat completion request
-	async requestChatCompletionInstance(request: ChatCompletionRequest) {
-		console.debug('requestChatCompletionInstance', request)
-
-		// 1st search for an instance that has the messages already ingested and the context ready
+	// acquire an instance from the pool, or create a new one if necessary
+	// the instance will be locked and must be released when done
+	async acquireInstance(modelName: string) {
+		
+		// first check if theres an available instance that can be reused
 		for (const key in this.instances) {
 			const instance = this.instances[key]
-	
-			if (instance.ref && !instance.locked && instance.model === request.model) {
-				console.debug('hm', instance)
-				// can't think of better names for either the left or right side of the assignment
-				const preprocessedRequest = instance.onChatCompletionRequest(request)
-				if (preprocessedRequest.cached) {
-					console.debug('instance found by cached messages')
-					instance.lock()
-					return {
-						instance,
-						request: preprocessedRequest,
-					}
-				}
+			if (!instance.locked && instance.model === modelName) {
+				console.debug('using loaded instance')
+				// TODO make sure we reset context
+				instance.lock()
+				return instance
 			}
 		}
 
-		// 2nd search for an instance that has the same model name
-		const matchingInstances = []
+		// see if we can spawn a new instance
+		if (this.canSpawnInstance(modelName)) {
+			console.debug('spawning new instance')
+			const modelConfig = this.config.models[modelName]
+			const engineMethods = engines[modelConfig.engine]
+			const instance = new LLMInstance(engineMethods, modelConfig)
+			this.instances[instance.id] = instance
+			await this.downloadInstanceModel(instance)
+			await instance.load()
+			instance.lock()
+			return instance
+		}
 
+		// wait until an instance of that model is released
+		const modelInstanceIsReleased = (): Promise<LLMInstance> => {
+			return new Promise((resolve, reject) => {
+				const onComplete = ({ instance, args }: TaskResult) => {
+					if (instance.model === args.model) {
+						this.queue.off('completed', onComplete)
+						instance.lock()
+						resolve(instance)
+					}
+				}
+				this.queue.on('completed', onComplete)
+			})
+		}
+
+		return await modelInstanceIsReleased()
+	}
+
+	// attepts to acquire an instance that has the chat state ready, or forwards to acquireInstance
+	async acquireChatCompletionInstance(args: ChatCompletionArgs) {
+		// for chat completions first search for an instance that has the messages already ingested and the context ready
+		const incomingChatHash = createChatStateHash(args, true)
 		for (const key in this.instances) {
 			const instance = this.instances[key]
-			if (instance.model === request.model) {
-				console.debug('instance found by model name')
-				
-				if (!instance.locked) {
-					if (!instance.ref) {
-						await instance.init()
-					}
-					instance.lock()
-					return { instance, request }
-				}
-				matchingInstances.push(instance)
+
+			if (
+				!instance.locked &&
+				instance.model === args.model &&
+				instance.chatStateHash === incomingChatHash
+			) {
+				console.debug('using cached instance', instance)
+				// return createInstanceLock(instance)
+				instance.lock()
+				return instance
 			}
 		}
 
-		// TODO no instance found for the requested model.
-		// no matchingInstances -> error
-		// matchingInstances -> wait for one to be available
-		throw new Error('No available instances')
+		return await this.acquireInstance(args.model)
+	}
+
+	// requests an instance from the pool to handle a chat completion request
+	async requestChatCompletionInstance(args: ChatCompletionArgs) {
+		if (!this.config.models[args.model]) {
+			throw new Error(`Model not found: ${args.model}`)
+		}
+		console.debug('requesting chat completion instance', args)
+
+		const instance = await this.acquireChatCompletionInstance(args)
+		
+		// once instance is acquired & locked, we can pass it on to the caller
+		// the queue task promise will be forwarded as "relase" function
+		let resolveTask: (value: TaskResult) => void
+
+		this.queue.add(() => {
+			return new Promise((resolve, reject) => {
+				resolveTask = resolve
+			})
+		})
+
+		return {
+			instance,
+			release: () => {
+				instance.unlock()
+				resolveTask({ instance, args })
+			},
+		}
 	}
 }

@@ -1,123 +1,113 @@
-import crypto from 'node:crypto'
-// import { loadModel, createCompletion, InferenceModel } from 'gpt4all'
-// import {LlamaModel, LlamaContext, LlamaChatSession} from "node-llama-cpp";
 import {
 	getLlama,
 	LlamaChatSession,
 	LlamaModel,
 	LlamaContext,
 	ChatHistoryItem,
-	// ChatMLChatPromptWrapper,
-	ChatMLChatWrapper
+	ChatMLChatWrapper,
+	LlamaCompletion,
 } from 'node-llama-cpp'
-import { LLMConfig, ChatCompletionRequest, ChatMessage } from '../pool'
+import { LLMConfig } from '../pool'
+import { ChatCompletionArgs, EngineChatCompletionResult, ChatMessage } from '../types/index.js'
 
-// https://github.com/withcatai/node-llama-cpp/pull/105
-
-interface LlamaCppInstanceWrap {
+interface LlamaCppInstance {
 	model: LlamaModel
 	context: LlamaContext
-	session: LlamaChatSession
+	session: LlamaChatSession | null
 }
 
-export async function createInstance(config: LLMConfig) {
+export async function loadInstance(config: LLMConfig) {
 	console.debug('Creating llama instance', config)
+	
+	// https://github.com/withcatai/node-llama-cpp/pull/105
 
 	const llama = await getLlama()
 	const model = await llama.loadModel({
-		modelPath: config.file,
-		// modelPath: path.join(__dirname, "models", "dolphin-2.1-mistral-7b.Q4_K_M.gguf")
+		modelPath: config.file, // full model absolute path
+		// useMlock: false,
+		// loadSignal: null, // cancel
 	})
 
-	const context = await model.createContext()
-	const session = new LlamaChatSession({
-		contextSequence: context.getSequence(),
-		chatWrapper: new ChatMLChatWrapper(),
+	const context = await model.createContext({
+		// sequences: 1,
+		// contextSize: "auto",
+		// threads: 6, // 0 = max
+		// createSignal: null, // cancel
+		// seed: 0,
 	})
-
-	// @ts-ignore
-	// const model = new LlamaModel({
-	// 		// modelPath: path.join(__dirname, "models", "codellama-13b.Q3_K_M.gguf")
-	// });
-	// // @ts-ignore
-	// const context = new LlamaContext({model});
-
-	// const session = new LlamaChatSession({context});
 
 	return {
 		model,
 		context,
-		session,
+		session: null
 	}
 }
 
-export async function disposeInstance(instance: LlamaCppInstanceWrap) {
-	// instance.dispose()
+export async function disposeInstance(instance: LlamaCppInstance) {
 	instance.model.dispose()
 }
 
-function createConversationHash(messages: ChatMessage[]): string {
-	return crypto
-		.createHash('sha256')
-		.update(JSON.stringify(messages))
-		.digest('hex')
-}
-
-function getChatMessages(messages: ChatHistoryItem[]): ChatMessage[] {
-	return messages.map((message) => {
-		if (message.type === 'user' || message.type === 'system') {
-			return {
-				content: message.text,
-				role: message.type,
-			}
-		}
-		return {
-			content: message.response.join(''),
-			role: 'assistant',
-		}
-	})
-}
-
-export function onChatCompletionRequest(
-	instance: LlamaCppInstanceWrap,
-	request: ChatCompletionRequest,
-) {
-	const incomingMessages = [...request.messages]
-	const lastMessage = incomingMessages.pop()
-	const incomingStateHash = createConversationHash(incomingMessages)
-	const currentMessages = getChatMessages(instance.session.getChatHistory())
-	const currentStateHash = createConversationHash(currentMessages)
-	const requestMatchesState = incomingStateHash === currentStateHash
-
-	if (requestMatchesState && lastMessage) {
-		return {
-			...request,
-			cached: true,
-			messages: [lastMessage],
-		}
-	}
-
-	return {
-		...request,
-		cached: false,
-	}
-}
+// function getChatMessages(messages: ChatHistoryItem[]): ChatMessage[] {
+// 	return messages.map((message) => {
+// 		if (message.type === 'user' || message.type === 'system') {
+// 			return {
+// 				content: message.text,
+// 				role: message.type,
+// 			}
+// 		}
+// 		return {
+// 			content: message.response.join(''),
+// 			role: 'assistant',
+// 		}
+// 	})
+// }
 
 export async function processChatCompletion(
-	instance: LlamaCppInstanceWrap,
-	request: ChatCompletionRequest,
+	instance: LlamaCppInstance,
+	args: ChatCompletionArgs,
+): Promise<EngineChatCompletionResult> {
+	if (!instance.session) {
+		instance.session = new LlamaChatSession({
+			contextSequence: instance.context.getSequence(),
+			chatWrapper: new ChatMLChatWrapper(),
+			// systemPrompt: '',
+		})
+	}
+	
+	const input = args.messages.map((m) => m.content).join('\n')
+	const result = await instance.session.promptWithMeta(input, {
+		maxTokens: args.maxTokens,
+		temperature: args.temperature,
+		topP: args.topP,
+	})
+	
+	// console.debug('response:', res)
+	
+	return {
+		finishReason: result.stopReason,
+		message: {
+			content: result.responseText,
+			role: 'assistant',
+		},
+		promptTokens: 0,
+		completionTokens: 0,
+		totalTokens: 0,
+	}
+}
+
+
+export async function processCompletion(
+	instance: LlamaCppInstance,
+	args: any,
 ) {
-	// if (!instance.activeChatSession) {
-	// 	await instance.createChatSession()
-	// }
-
-	// return await createCompletion(instance.activeChatSession, req.messages)
-
-	const res = await instance.session.prompt(
-		request.messages.map((m) => m.content).join('\n'),
-	)
+	// TODO
+	// const completion = new LlamaCompletion({
+	// 	contextSequence: instance.context.getSequence()
+	// })
 	
-	// instance.session.chatWrapper.
+	// const res = await completion.generateCompletionWithMeta(request.prompt, {
+	// 	maxTokens: request.maxTokens,
+	// })
 	
-	console.debug('Chat completion response:', res)
+	
 }

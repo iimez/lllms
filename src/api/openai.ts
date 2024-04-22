@@ -20,10 +20,16 @@ function parseJSONRequestBody(req: IncomingMessage): Promise<any> {
 	})
 }
 
+const finishReasonMap = {
+	maxTokens: 'length',
+	functionCall: 'function_call',
+	eosToken: 'stop',
+	stopGenerationTrigger: 'stop',
+}
+
 // https://platform.openai.com/docs/api-reference/chat/create
 function createChatCompletionHandler(pool: LLMPool) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
-
 		let model, messages
 
 		try {
@@ -32,7 +38,7 @@ function createChatCompletionHandler(pool: LLMPool) {
 			messages = reqBody.messages
 		} catch (e) {
 			console.error(e)
-			res.writeHead(400, { "Content-Type": 'application/json' })
+			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid request' }))
 		}
 
@@ -41,21 +47,46 @@ function createChatCompletionHandler(pool: LLMPool) {
 			res.end(JSON.stringify({ error: 'Invalid request' }))
 			return
 		}
+		
+		req.on('close', () => {
+			// TODO abort generation if client closes connection
+			console.log('Client closed connection')
+		})
 
 		try {
-			const { instance, request } = await pool.requestChatCompletionInstance({
+
+			const { instance, release } = await pool.requestChatCompletionInstance({
 				model,
 				messages,
 			})
-
-			const completion = await instance.processChatCompletion(request, (token) => {
-				// TODO streaming
+			const completion = await instance.processChatCompletion({
+				model,
+				messages,
 			})
-			instance.unlock()
-
+			release()
+			
+			const response = {
+				id: completion.id,
+				model: completion.model,
+				object: 'chat.completion',
+				created: Math.floor(Date.now() / 1000),
+				system_fingerprint: instance.fingerprint,
+				choices: [
+					{
+						index: 0,
+						message: completion.message,
+						logprobs: null,
+						finish_reason: finishReasonMap[completion.finishReason],
+					},
+				],
+				usage: {
+					prompt_tokens: completion.promptTokens,
+					completion_tokens: completion.completionTokens,
+					total_tokens: completion.totalTokens,
+				},
+			}
 			res.writeHead(200, { 'Content-Type': 'application/json' })
-			res.end(JSON.stringify(completion, null, 2))
-
+			res.end(JSON.stringify(response, null, 2))
 		} catch (e) {
 			console.error(e)
 			res.writeHead(500, { 'Content-Type': 'application/json' })

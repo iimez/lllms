@@ -100,7 +100,7 @@ export class LLMInstance {
 	}
 	chatStateHash?: string
 	fingerprint: string
-
+        created_by: Date
 	constructor(engine: LLMEngine, config: LLMConfig) {
 		this.id = config.name + ':' + nanoid()
 		this.engine = engine
@@ -110,6 +110,7 @@ export class LLMInstance {
 		this.locked = false
 		// TODO to implement this properly we should only include what changes the "behavior" of the model
 		this.fingerprint = crypto.createHash('sha1').update(JSON.stringify(config)).digest('hex')
+                this.created_by = new Date()
 	}
 
 	async load() {

@@ -42,4 +42,9 @@ suite('API Integration Tests', () => {
 		expect(response.status).toBe(200)
 		expect(response.body.choices[0].message.content).toContain('Test')
 	})
+
+        test('openai.models.list ', async () => {
+            const response = await request(server).post("/v1/models").send();
+            expect(response.status).toBe(200)
+        })
 })

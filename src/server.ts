@@ -5,10 +5,9 @@ import { createOpenAIRequestHandlers } from './api/openai.js'
 
 export type LLMServerOptions = LLMPoolOptions
 
-export async function createServer(opts: LLMServerOptions) {
+export function createLLMServer(opts: LLMServerOptions) {
 	const pool = new LLMPool(opts)
 	const initPromise = pool.init()
-
 	const requestHandlers = createOpenAIRequestHandlers(pool)
 
 	const server = http.createServer((req, res) => {

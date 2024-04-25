@@ -7,3 +7,4 @@ export const engines = {
 } as const
 
 export type EngineType = keyof typeof engines
+export type EngineInstance = any

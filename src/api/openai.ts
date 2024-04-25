@@ -114,7 +114,7 @@ function createListModelsHandler(pool: LLMPool) {
                                      owned_by: v.config.engine,
                                      id: v.config.name,
                                      //https://stackoverflow.com/a/51442878
-                                     created_by: Math.floor(v.created_by.getTime() / 1000)  })) }))
+                                     created: Math.floor(v.createdBy.getTime() / 1000)  })) }))
 	}
 }
 

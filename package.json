@@ -1,8 +1,10 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-alpha.1",
+	"version": "1.0.0-alpha.2",
 	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
-	"main": "build/standalone.js",
+	"main": "dist/index.js",
+	"source": "src/index.ts",
+	"types": "dist/index.d.ts",
 	"type": "module",
 	"keywords": [
 		"llm",
@@ -34,7 +36,7 @@
 		"gpt4all": "^4.0.0",
 		"ipull": "^3.0.11",
 		"nanoid": "^5.0.7",
-		"node-llama-cpp": "^3.0.0-beta.16",
+		"node-llama-cpp": "^3.0.0-beta.17",
 		"p-queue": "^8.0.1"
 	},
 	"devDependencies": {
@@ -42,7 +44,7 @@
 		"@types/supertest": "^6.0.2",
 		"cross-env": "^7.0.3",
 		"openai": "^4.38.2",
-		"supertest": "^6.3.4",
+		"supertest": "^7.0.0",
 		"typescript": "^5.4.4",
 		"vitest": "^1.4.0"
 	}

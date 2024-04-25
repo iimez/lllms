@@ -1,10 +1,11 @@
 ## lllms
 
-Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all).
+Local Large Language Models. Providing an LLM instance pool and tools to run and host multiple large language models on any machine. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all).
 
 ⚠️ This package is currently just a draft/experiment and not ready for consumption.
 
 ### Goals
+
 - Allow configuring GGUF's and automatically download them.
 - Abstract away the underlying "engine" - implement engine interface for both gpt4all and node-llama-cpp.
 - Support running multiple models concurrently and allow configuration specific to use case and hardware.
@@ -14,58 +15,60 @@ Local Large Language Models. Providing a toolkit to run and host multiple large 
 - Allow usage of the package as (a) library (no http involved) or (b) standalone server or (c) node http request handler.
 
 #### Possible Future Goals
+
 - Create a separate HTTP API thats independent of the OpenAI spec.
 - Add a clientside library for use of this independent HTTP API.
 - Provide a CLI.
 - Provide a Docker image.
 
 #### Currently not the Goals
+
 - Something that is production ready or scalable. Theres more appropriate tools/servies if you wanna host open models at scale.
 - Another facade to LLM hoster HTTP API's. This is for local/private/offline use.
 - Worry about authentication or rate limiting or misuse. Host this responsibly.
 - Any kind of distributed or multi-node setup. This is not scope for this project.
 
-
 ### Progress
 
 #### OpenAI API
 
-| OpenAI API Feature   | gpt4all | node-llama-cpp |
-|----------------------|---------|----------------|
-| v1/chat/completions  |   🚧    |       🚧       |
-| v1/completions       |   ❌    |       ❌       |
-| Streaming            |   ❌    |       ❌       |
+| OpenAI API Feature  | gpt4all | node-llama-cpp |
+| ------------------- | ------- | -------------- |
+| v1/chat/completions | ✅      | ✅             |
+| v1/completions      | ✅      | ✅             |
+| Streaming           | ✅      | ✅             |
+| v1/embeddings       | ❌      | ❌             |
+| v1/models           | 🚧      |
 
 ### Use as a library
 
 All APIs subject to change.
 
 ```ts
-import { LLMPool } from 'inference-server'
+import { LLMPool } from 'lllms'
 const pool = new LLMPool({
-  concurrency: 1,
+  concurrency: 2,
   models: {
-    'orca:3b': {
-      url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
-      preload: true,
-      engine: 'gpt4all',
-    },
-    'llama3:8b': {
-      url: 'https://huggingface.co/NousResearch/Meta-Llama-3-8B-GGUF/resolve/main/Meta-Llama-3-8B-Q4_K_M.gguf',
-      preload: true,
+    'phi3-4k': {
+      url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+      minInstances: 1,
+      maxInstances: 3,
       engine: 'node-llama-cpp',
+    },
+    'orca-3b': {
+      url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
+      minInstances: 1,
+      engine: 'gpt4all',
     },
   },
 })
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   try {
-    const messages = JSON.parse(req.body)
-    const { instance, request } = await pool.requestChatCompletionInstance({
-      model,
-      messages,
-    })
+    const { messages, model } = JSON.parse(req.body)
+    const lock = await pool.requestCompletionInstance({ model, messages })
+    const completion = lock.instance.createChatCompletion({ messages })
     const completion = await instance.processChatCompletion(request)
-    instance.unlock()
+    lock.release()
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(completion, null, 2))
   } catch (e) {
@@ -78,7 +81,9 @@ pool.init()
 server.listen(3000)
 ```
 
-### Run standalone
+### Use server with OpenAI API Endpoints
+
+See [./src/standalone.ts](./src/standalone.ts) for an example.
 
 ```bash
 npm install
@@ -90,7 +95,7 @@ npm run start
 curl http://localhost:3000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-      "model": "llama3:8b",
+      "model": "llama3-8b",
       "messages": [
           {
               "role": "user",
@@ -104,15 +109,16 @@ curl http://localhost:3000/v1/chat/completions \
 curl http://localhost:3000/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-3.5-turbo-instruct",
-    "prompt": "Say this is a test",
-    "max_tokens": 7,
-    "temperature": 0
+      "model": "phi3-4k",
+      "prompt": "To verify our code works we will first write an integration",
+      "temperature": 0,
+      "max_tokens": 1
   }'
 ```
 
 ### Related Solutions
 
 If you look at this package, you should also look at these other solutions:
+
 - [ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md) - Uses llama.cpp and provides a HTTP API. Also has experimental OpenAI API compatibility.
 - [llama.cpp Server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server#llamacpp-http-server) - The official llama.cpp HTTP API.

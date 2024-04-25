@@ -3,12 +3,19 @@ import {
 	LlamaChatSession,
 	LlamaModel,
 	LlamaContext,
-	ChatHistoryItem,
 	ChatMLChatWrapper,
 	LlamaCompletion,
+	Llama3ChatWrapper,
+	Token,
 } from 'node-llama-cpp'
-import { LLMConfig } from '../pool'
-import { ChatCompletionArgs, EngineChatCompletionResult, ChatMessage } from '../types/index.js'
+import {
+	LLMConfig,
+	CompletionRequest,
+	EngineChatCompletionResult,
+	EngineCompletionResult,
+	GenerationArgs,
+} from '../types/index.js'
+import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector.js'
 
 interface LlamaCppInstance {
 	model: LlamaModel
@@ -16,30 +23,38 @@ interface LlamaCppInstance {
 	session: LlamaChatSession | null
 }
 
-export async function loadInstance(config: LLMConfig) {
+export async function loadInstance(config: LLMConfig, signal?: AbortSignal) {
 	console.debug('Creating llama instance', config)
-	
-	// https://github.com/withcatai/node-llama-cpp/pull/105
 
-	const llama = await getLlama()
+	// https://github.com/withcatai/node-llama-cpp/pull/105
+	// https://github.com/withcatai/node-llama-cpp/discussions/109
+
+	const llama = await getLlama({
+		gpu: config.gpu ? 'auto' : false, // "auto" | "metal" | "cuda" | "vulkan"
+		// logLevel: 'warn',
+		// logger: (level, message) => {},
+	})
 	const model = await llama.loadModel({
 		modelPath: config.file, // full model absolute path
 		// useMlock: false,
-		// loadSignal: null, // cancel
+		loadSignal: signal,
 	})
 
 	const context = await model.createContext({
 		// sequences: 1,
 		// contextSize: "auto",
-		// threads: 6, // 0 = max
-		// createSignal: null, // cancel
 		// seed: 0,
+		// threads: 4, // 0 = max
+		// sequences: 1,
+		// batchSize: 128,
+		// contextSize: 2048,
+		createSignal: signal,
 	})
 
 	return {
 		model,
 		context,
-		session: null
+		session: null,
 	}
 }
 
@@ -47,67 +62,142 @@ export async function disposeInstance(instance: LlamaCppInstance) {
 	instance.model.dispose()
 }
 
-// function getChatMessages(messages: ChatHistoryItem[]): ChatMessage[] {
-// 	return messages.map((message) => {
-// 		if (message.type === 'user' || message.type === 'system') {
-// 			return {
-// 				content: message.text,
-// 				role: message.type,
-// 			}
-// 		}
-// 		return {
-// 			content: message.response.join(''),
-// 			role: 'assistant',
-// 		}
-// 	})
-// }
+function pickTemplateFormatter(templateFormat: string | undefined) {
+	switch (templateFormat) {
+		case 'chatml':
+			return new ChatMLChatWrapper()
+		case 'llama3':
+			return new Llama3ChatWrapper()
+		default:
+			return new ChatMLChatWrapper()
+	}
+}
 
 export async function processChatCompletion(
 	instance: LlamaCppInstance,
-	args: ChatCompletionArgs,
+	request: CompletionRequest,
+	args: GenerationArgs,
 ): Promise<EngineChatCompletionResult> {
+	if (!request.messages) {
+		throw new Error('Messages are required for chat completion.')
+	}
 	if (!instance.session) {
+		let systemPrompt = request.systemPrompt
+		if (!systemPrompt && request.messages[0].role === 'system') {
+			systemPrompt = request.messages[0].content
+		}
+		// if (systemPrompt) {
+		// 	console.debug('using system prompt', systemPrompt)
+		// }
 		instance.session = new LlamaChatSession({
 			contextSequence: instance.context.getSequence(),
-			chatWrapper: new ChatMLChatWrapper(),
-			// systemPrompt: '',
+			chatWrapper: pickTemplateFormatter(request.templateFormat),
+			systemPrompt,
 		})
 	}
-	
-	const input = args.messages.map((m) => m.content).join('\n')
+
+	const nonSystemMessages = request.messages.filter((m) => m.role !== 'system')
+
+	const input = nonSystemMessages.map((m) => m.content).join('\n')
+	let inputTokens = instance.model.tokenize(input)
+	let generatedTokenCount = 0
+
 	const result = await instance.session.promptWithMeta(input, {
-		maxTokens: args.maxTokens,
-		temperature: args.temperature,
-		topP: args.topP,
+		maxTokens: request.maxTokens,
+		temperature: request.temperature,
+		topP: request.topP,
+		repeatPenalty: {
+			frequencyPenalty: request.frequencyPenalty,
+			presencePenalty: request.presencePenalty,
+		},
+		// stop // TODO integrate stopGenerationTriggers
+		// topK: completionArgs.topK,
+		// minP: completionArgs.minP,
+		signal: args.signal,
+		onToken: (tokens) => {
+			generatedTokenCount++
+			const text = instance.model.detokenize(tokens) // TODO will this break emojis?
+			// console.debug('onToken', {tokens, text})
+			if (args.onChunk) {
+				args.onChunk({
+					tokenId: tokens[0],
+					token: text,
+				})
+			}
+		},
 	})
-	
-	// console.debug('response:', res)
-	
+
 	return {
 		finishReason: result.stopReason,
 		message: {
 			content: result.responseText,
 			role: 'assistant',
 		},
-		promptTokens: 0,
-		completionTokens: 0,
-		totalTokens: 0,
+		promptTokens: inputTokens.length,
+		completionTokens: generatedTokenCount,
+		totalTokens: inputTokens.length + generatedTokenCount,
 	}
 }
 
-
 export async function processCompletion(
 	instance: LlamaCppInstance,
-	args: any,
-) {
-	// TODO
-	// const completion = new LlamaCompletion({
-	// 	contextSequence: instance.context.getSequence()
+	request: CompletionRequest,
+	args: GenerationArgs,
+): Promise<EngineCompletionResult> {
+	if (!request.prompt) {
+		throw new Error('Prompt is required for completion.')
+	}
+	
+	// console.debug('context size', instance.context.getAllocatedContextSize())
+	
+	// instance.context.getAllocatedContextSize()
+	instance.context = await instance.model.createContext({
+		createSignal: args.signal,
+	})
+
+	// console.debug('context', {
+	// 	allocated: instance.context.getAllocatedContextSize(),
+	// 	sequencesLeft: instance.context.sequencesLeft,
 	// })
-	
-	// const res = await completion.generateCompletionWithMeta(request.prompt, {
-	// 	maxTokens: request.maxTokens,
-	// })
-	
-	
+
+	const completion = new LlamaCompletion({
+		contextSequence: instance.context.getSequence(),
+	})
+
+	const stopTriggers: StopGenerationTrigger = []
+	if (request.stop) {
+		stopTriggers.push(...request.stop)
+	}
+
+	const tokens = instance.model.tokenize(request.prompt)
+	let generatedTokenCount = 0
+	const result = await completion.generateCompletionWithMeta(tokens, {
+		maxTokens: request.maxTokens,
+		temperature: request.temperature,
+		topP: request.topP,
+		repeatPenalty: {
+			frequencyPenalty: request.frequencyPenalty,
+			presencePenalty: request.presencePenalty,
+		},
+		signal: args.signal,
+		stopGenerationTriggers: stopTriggers.length ? [stopTriggers] : undefined,
+		onToken: (tokens) => {
+			generatedTokenCount++
+			const text = instance.model.detokenize(tokens)
+			if (args.onChunk) {
+				args.onChunk({
+					tokenId: tokens[0],
+					token: text,
+				})
+			}
+		},
+	})
+
+	return {
+		finishReason: result.metadata.stopReason,
+		text: result.response,
+		promptTokens: tokens.length,
+		completionTokens: generatedTokenCount,
+		totalTokens: tokens.length + generatedTokenCount,
+	}
 }

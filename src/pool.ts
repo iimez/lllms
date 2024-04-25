@@ -2,25 +2,19 @@ import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { promises as fs, existsSync } from 'node:fs'
+import { nanoid } from 'nanoid'
 import PQueue from 'p-queue'
 import { downloadFile } from 'ipull'
-import { engines, EngineType } from './engines/index.js'
-import { ChatMessage, ChatCompletionArgs, EngineChatCompletionResult } from './types/index.js'
-import { nanoid } from 'nanoid'
-export interface LLMOptions {
-	gpu?: boolean | string
-	url?: string
-	file?: string
-	engine: EngineType
-	minInstances?: number
-	maxInstances?: number
-}
-
-export interface LLMConfig extends Partial<LLMOptions> {
-	name: string
-	file: string
-	engine: EngineType
-}
+import { engines, EngineInstance } from './engines/index.js'
+import {
+	ChatMessage,
+	CompletionRequest,
+	GenerationArgs,
+	LLMEngine,
+	LLMConfig,
+	LLMOptions,
+} from './types/index.js'
+import type { ProgressStatusWithIndex } from 'ipull/dist/download/transfer-visualize/progress-statistics-builder.js'
 
 export interface LLMPoolOptions {
 	modelsDir?: string
@@ -37,17 +31,6 @@ export interface LLMPoolConfig {
 interface TaskResult {
 	instance: LLMInstance
 	args: any
-}
-
-type LLMEngineInstance = any
-
-interface LLMEngine {
-	loadInstance: (config: LLMConfig) => Promise<LLMEngineInstance>
-	disposeInstance: (instance: LLMEngineInstance) => Promise<void>
-	processChatCompletion: (
-		instance: LLMEngineInstance,
-		args: ChatCompletionArgs,
-	) => Promise<EngineChatCompletionResult>
 }
 
 function resolveModelFile(opts: LLMOptions, modelsDir: string) {
@@ -69,36 +52,92 @@ function resolveModelFile(opts: LLMOptions, modelsDir: string) {
 	throw new Error('Model file or url is required')
 }
 
-interface ChatState {
-	messages: ChatMessage[]
+interface DownloadOptions {
+	downloadUrl?: string
+	signal?: AbortSignal
+	onProgress?: (progress: ProgressStatusWithIndex) => void
+	onError?: (error: Error) => void
+}
+
+async function ensureModelFile(file: string, opts: DownloadOptions = {}) {
+	// const config = instance.config
+	if (!existsSync(file)) {
+		if (opts.downloadUrl) {
+			console.debug('download', opts)
+			const downloader = await downloadFile({
+				url: opts.downloadUrl,
+				savePath: file,
+				// parallelStreams: 3 // Number of parallel connections (default: 3)
+			})
+			if (opts.signal) {
+				opts.signal.addEventListener('abort', () => {
+					downloader.close()
+				})
+			}
+			if (opts.onProgress) {
+				downloader.on('progress', opts.onProgress)
+			}
+
+			try {
+				await downloader.download()
+			} catch (error: any) {
+				console.error(`Download failed: ${error.message}`)
+				if (opts.onError) {
+					opts.onError(error)
+				}
+			}
+		}
+
+		if (!existsSync(file)) {
+			throw new Error(`Failed to assert model file at ${file}`)
+		}
+	}
+}
+
+interface ContextStateData {
+	messages?: ChatMessage[]
+	prompt?: string
 	systemPrompt?: string
 }
-function createChatStateHash(
-	state: ChatState,
+function createContextStateHash(
+	state: ContextStateData,
 	dropLastMessage: boolean = false,
 ): string {
-	const data = {
-		messages: [...state.messages],
-		systemPrompt: state.systemPrompt,
+	const messages = state.messages ? [...state.messages] : []
+	if (dropLastMessage && messages.length > 1) {
+		messages.pop()
 	}
-	if (dropLastMessage && data.messages.length > 1) {
-		data.messages.pop()
+	return crypto
+		.createHash('sha1')
+		.update(
+			JSON.stringify({
+				messages,
+				prompt: state.prompt,
+				systemPrompt: state.systemPrompt,
+			}),
+		)
+		.digest('hex')
+}
+
+class AbortError extends Error {
+	constructor(message = 'Operation aborted') {
+		super(message)
+		this.name = 'AbortError'
 	}
-	return crypto.createHash('sha1').update(JSON.stringify(data)).digest('hex')
 }
 
 export class LLMInstance {
 	id: string
 	locked: boolean
 	model: string
-	llm: LLMEngineInstance | null
+	llm: EngineInstance | null
 	engine: LLMEngine
 	config: LLMConfig
 	download?: {
 		progress: number
 		speed: number
 	}
-	chatStateHash?: string
+	contextStateHash?: string
 	fingerprint: string
 
 	constructor(engine: LLMEngine, config: LLMConfig) {
@@ -109,18 +148,21 @@ export class LLMInstance {
 		this.llm = null
 		this.locked = false
 		// TODO to implement this properly we should only include what changes the "behavior" of the model
-		this.fingerprint = crypto.createHash('sha1').update(JSON.stringify(config)).digest('hex')
+		this.fingerprint = crypto
+			.createHash('sha1')
+			.update(JSON.stringify(config))
+			.digest('hex')
 	}
 
-	async load() {
+	async load(signal?: AbortSignal) {
 		if (this.llm) {
 			return
 		}
 		const time = Date.now()
-		this.llm = await this.engine.loadInstance(this.config)
+		this.llm = await this.engine.loadInstance(this.config, signal)
 		console.debug('Instance initialized', {
 			id: this.id,
-			time: Date.now() - time,
+			tookMillis: Date.now() - time,
 		})
 	}
 
@@ -138,15 +180,64 @@ export class LLMInstance {
 		this.locked = false
 	}
 
-	async processChatCompletion(args: ChatCompletionArgs) {
-		console.debug('processChatCompletion', args)
-		const result = await this.engine.processChatCompletion(this.llm, args)
-		console.debug('processChatCompletion result', result)
+	createChatCompletion(completionArgs: CompletionRequest) {
+		const id = this.config.engine + '-' + nanoid()
+
+		console.debug(
+			'Creating ChatCompletion',
+			id,
+			JSON.stringify(completionArgs, null, 2),
+		)
+		// const created
+		// const result = await this.engine.processChatCompletion(this.llm, args)
+		// console.debug('processChatCompletion result', result)
 		return {
-			id: this.config.engine + '-' + nanoid(),
+			id,
 			model: this.model,
-			created: new Date(),
-			...result,
+			createdAt: new Date(),
+			process: async (processingArgs: GenerationArgs) => {
+				const time = Date.now()
+				const result = await this.engine.processChatCompletion(
+					this.llm,
+					completionArgs,
+					processingArgs,
+				)
+				console.debug('Finished ChatCompletion', {
+					id,
+					completion: result,
+					tookMillis: Date.now() - time,
+				})
+				return result
+			},
+		}
+	}
+
+	createCompletion(completionArgs: CompletionRequest) {
+		const id = this.config.engine + '-' + nanoid()
+
+		console.debug('Creating Completion', {
+			id,
+			args: completionArgs,
+		})
+
+		return {
+			id,
+			model: this.model,
+			createdAt: new Date(),
+			process: async (processingArgs: GenerationArgs) => {
+				const time = Date.now()
+				const result = await this.engine.processCompletion(
+					this.llm,
+					completionArgs,
+					processingArgs,
+				)
+				console.debug('Finished ChatCompletion', {
+					id,
+					completion: result,
+					tookMillis: Date.now() - time,
+				})
+				return result
+			},
 		}
 	}
 }
@@ -209,7 +300,16 @@ export class LLMPool {
 				// - models could be downloaded in parallel, might be faster in total?
 				// - or sequentially, to make them available as fast as possible
 				// currently we download sequentially, but we still wait until all are done to continue
-				await this.downloadInstanceModel(instance)
+				await ensureModelFile(modelConfig.file, {
+					downloadUrl: modelConfig.url,
+					onProgress: (progress) => {
+						instance.download = {
+							progress: progress.percentage,
+							speed: progress.speed,
+						}
+					},
+				})
+				instance.download = undefined
 				loadingPromises.push(instance.load())
 			}
 		}
@@ -239,41 +339,6 @@ export class LLMPool {
 		}
 	}
 
-	// download weights for a model, if necessary
-	private async downloadInstanceModel(instance: LLMInstance) {
-		const config = instance.config
-		if (!existsSync(config.file)) {
-			if (config.url) {
-				console.debug('download', {
-					url: config.url,
-					savePath: config.file,
-				})
-				const downloader = await downloadFile({
-					url: config.url,
-					savePath: config.file,
-				})
-				downloader.on('progress', (progress) => {
-					instance.download = {
-						progress: progress.percentage,
-						speed: progress.speed,
-					}
-				})
-
-				try {
-					await downloader.download()
-				} catch (error: any) {
-					console.error(`Download failed: ${error.message}`)
-				} finally {
-					instance.download = undefined
-				}
-			}
-
-			if (!existsSync(config.file)) {
-				throw new Error(`Model file not found: ${config.file}`)
-			}
-		}
-	}
-
 	private canSpawnInstance(modelName: string) {
 		const modelConfig = this.config.models[modelName]
 		const maxInstances = modelConfig.maxInstances ?? 1
@@ -285,8 +350,7 @@ export class LLMPool {
 
 	// acquire an instance from the pool, or create a new one if necessary
 	// the instance will be locked and must be released when done
-	async acquireInstance(modelName: string) {
-		
+	async acquireInstance(modelName: string, signal?: AbortSignal) {
 		// first check if theres an available instance that can be reused
 		for (const key in this.instances) {
 			const instance = this.instances[key]
@@ -305,60 +369,83 @@ export class LLMPool {
 			const engineMethods = engines[modelConfig.engine]
 			const instance = new LLMInstance(engineMethods, modelConfig)
 			this.instances[instance.id] = instance
-			await this.downloadInstanceModel(instance)
-			await instance.load()
+			// await this.downloadInstanceModel(instance)
+			await ensureModelFile(modelConfig.file, {
+				downloadUrl: modelConfig.url,
+				signal,
+				onProgress: (progress) => {
+					instance.download = {
+						progress: progress.percentage,
+						speed: progress.speed,
+					}
+				},
+			})
+			await instance.load(signal)
 			instance.lock()
 			return instance
 		}
 
 		// wait until an instance of that model is released
-		const modelInstanceIsReleased = (): Promise<LLMInstance> => {
+		const modelInstanceReleased = (): Promise<LLMInstance> => {
 			return new Promise((resolve, reject) => {
 				const onComplete = ({ instance, args }: TaskResult) => {
+					console.debug('task result is', { instance, args })
 					if (instance.model === args.model) {
 						this.queue.off('completed', onComplete)
 						instance.lock()
 						resolve(instance)
 					}
 				}
+				if (signal) {
+					const onAbort = () => {
+						this.queue.off('completed', onComplete)
+						reject(new AbortError('Processing cancelled'))
+					}
+					signal.addEventListener('abort', onAbort)
+				}
 				this.queue.on('completed', onComplete)
 			})
 		}
 
-		return await modelInstanceIsReleased()
+		return await modelInstanceReleased()
 	}
 
 	// attepts to acquire an instance that has the chat state ready, or forwards to acquireInstance
-	async acquireChatCompletionInstance(args: ChatCompletionArgs) {
-		// for chat completions first search for an instance that has the messages already ingested and the context ready
-		const incomingChatHash = createChatStateHash(args, true)
+	async acquireCachedInstance(args: CompletionRequest, signal?: AbortSignal) {
+		// for completions first search for an instance that has the messages already ingested and the context ready
+		const incomingStateHash = createContextStateHash(args, true)
 		for (const key in this.instances) {
 			const instance = this.instances[key]
 
 			if (
 				!instance.locked &&
 				instance.model === args.model &&
-				instance.chatStateHash === incomingChatHash
+				instance.contextStateHash === incomingStateHash
 			) {
-				console.debug('using cached instance', instance)
-				// return createInstanceLock(instance)
+				console.debug('reusing cached instance', instance)
+				if (signal?.aborted) {
+					throw new AbortError('Processing cancelled')
+				}
 				instance.lock()
 				return instance
 			}
 		}
 
-		return await this.acquireInstance(args.model)
+		return await this.acquireInstance(args.model, signal)
 	}
 
 	// requests an instance from the pool to handle a chat completion request
-	async requestChatCompletionInstance(args: ChatCompletionArgs) {
+	async requestCompletionInstance(
+		args: CompletionRequest,
+		signal: AbortSignal,
+	) {
 		if (!this.config.models[args.model]) {
 			throw new Error(`Model not found: ${args.model}`)
 		}
 		console.debug('requesting chat completion instance', args)
 
-		const instance = await this.acquireChatCompletionInstance(args)
-		
+		const instance = await this.acquireCachedInstance(args, signal)
+
 		// once instance is acquired & locked, we can pass it on to the caller
 		// the queue task promise will be forwarded as "relase" function
 		let resolveTask: (value: TaskResult) => void

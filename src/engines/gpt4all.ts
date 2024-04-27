@@ -4,9 +4,11 @@ import {
 	createCompletion,
 	InferenceModel,
 	LoadModelOptions,
+	CompletionInput,
 } from 'gpt4all'
 import {
 	LLMConfig,
+	ChatCompletionRequest,
 	CompletionRequest,
 	GenerationArgs,
 	EngineChatCompletionResult,
@@ -16,6 +18,8 @@ import {
 } from '../types/index.js'
 
 export async function loadInstance(config: LLMConfig, signal?: AbortSignal) {
+		console.debug('Starting instance', config)
+
 	const modelName = config.name
 	const loadOpts: LoadModelOptions = {
 		modelPath: path.dirname(config.file),
@@ -26,10 +30,10 @@ export async function loadInstance(config: LLMConfig, signal?: AbortSignal) {
 		// ngl: 100,
 		// verbose: true,
 	}
-	console.debug('creating gpt4all model instance', {
-		modelName,
-		loadOpts,
-	})
+	// console.debug('creating gpt4all model instance', {
+	// 	modelName,
+	// 	loadOpts,
+	// })
 	// TODO no way to cancel it / use signal
 	const instance = await loadModel(path.basename(config.file), loadOpts)
 	return instance
@@ -42,7 +46,7 @@ export async function disposeInstance(instance: InferenceModel) {
 export async function processCompletion(
 	instance: InferenceModel,
 	request: CompletionRequest,
-	args: GenerationArgs,
+	args?: GenerationArgs,
 ): Promise<EngineCompletionResult> {
 	if (!request.prompt) {
 		throw new Error('Prompt is required for completion.')
@@ -72,13 +76,13 @@ export async function processCompletion(
 				finishReason = 'stopGenerationTrigger'
 				return false
 			}
-			if (args.onChunk) {
+			if (args?.onChunk) {
 				args.onChunk({
 					token: token,
 					tokenId,
 				})
 			}
-			return !args.signal?.aborted
+			return !args?.signal?.aborted
 		},
 	})
 
@@ -105,41 +109,63 @@ function addSystemPromptTemplate(systemPrompt: string, templateFormat: ChatTempl
 	if (templateFormat === 'alpaca') {
 		return `### System:\n${systemPrompt}\n\n`
 	}
+	if (templateFormat === 'phi') {
+		return `<|system|>\n${systemPrompt}<|end|>\n`
+	}
+	if (templateFormat === 'llama2') {
+		// return `[INST]${systemPrompt}[/INST]\n`
+		return `<s>[INST] <<SYS>>\n${systemPrompt}\n<</SYS>>[/INST]</s>\n\n`
+	}
 	return systemPrompt
 
 }
 
 export async function processChatCompletion(
 	instance: InferenceModel,
-	request: CompletionRequest,
-	args: GenerationArgs,
+	request: ChatCompletionRequest,
+	args?: GenerationArgs,
 ): Promise<EngineChatCompletionResult> {
-	if (!request.messages) {
-		throw new Error('Messages are required for chat completion.')
-	}
+
 
 	let session = instance.activeChatSession
-	if (!session) {
+	if (!session || args?.resetContext) {
 		let systemPrompt = request.systemPrompt
+		
+		// allow setting system prompt via initial message.
 		if (!systemPrompt && request.messages[0].role === 'system') {
 			systemPrompt = request.messages[0].content
 			if (request.templateFormat) {
 				systemPrompt = addSystemPromptTemplate(systemPrompt, request.templateFormat)
 			}
 		}
-
 		// console.debug('using system prompt', systemPrompt)
 		session = await instance.createChatSession({
 			systemPrompt,
 		})
 	}
-
+	
+	// if we have reset context, we need to reingest the chat history,
+	// or otherwise just append the last user message.
 	const nonSystemMessages = request.messages.filter(
 		(m) => m.role !== 'system',
 	)
+	let input: CompletionInput
+	
+	if (args?.resetContext) {
+		// reingests all, then prompts automatically for last user message
+		input = nonSystemMessages
+	} else {
+		// append the last (user) message
+		const lastMessage = nonSystemMessages[nonSystemMessages.length - 1]
+		if (lastMessage.role !== 'user') {
+			throw new Error('Last message must be from user.')
+		}
+		input = lastMessage.content
+	}
+	
 	let finishReason: CompletionFinishReason = 'eogToken'
 
-	const result = await createCompletion(session, nonSystemMessages, {
+	const result = await createCompletion(session, input, {
 		temperature: request.temperature,
 		nPredict: request.maxTokens,
 		topP: request.topP,
@@ -156,14 +182,18 @@ export async function processChatCompletion(
 		// presencePenalty: args.presencePenalty,
 		// topK: 40,
 		onResponseToken: (tokenId, token) => {
-			if (args.onChunk) {
+			if (request.stop && request.stop.includes(token)) {
+				finishReason = 'stopGenerationTrigger'
+				return false
+			}
+			if (args?.onChunk) {
 				args.onChunk({
 					tokenId,
 					token: token,
 				})
 			}
 
-			return !args.signal?.aborted
+			return !args?.signal?.aborted
 		},
 	})
 	

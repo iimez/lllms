@@ -1,10 +1,25 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
+import type { Request } from 'express'
+import { existsSync, promises as fs, statSync } from 'node:fs'
 import { OpenAI } from 'openai'
 import { LLMPool } from '../pool.js'
 import { ChatMessage, CompletionFinishReason } from '../types/index.js'
 
-function parseJSONRequestBody(req: IncomingMessage): Promise<any> {
+function parseJSONRequestBody(req: IncomingMessage | Request): Promise<any> {
 	return new Promise((resolve, reject) => {
+		
+		// console.debug('parseJSONRequestBody', {
+		// 	url: req.url,
+		// 	method: req.method,
+		// 	headers: req.headers,
+		// 	// @ts-ignore
+		// 	body: req.body,
+		// })
+		
+		if ('body' in req) {
+			resolve(req.body)
+			return
+		}
 		let body = ''
 
 		req.on('data', (chunk) => {
@@ -49,9 +64,16 @@ function createChatCompletionHandler(pool: LLMPool) {
 			return
 		}
 
+		// TODO ajv schema validation?
 		if (!args.model || !args.messages) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid request' }))
+			return
+		}
+		
+		if (!pool.modelExists(args.model)) {
+			res.writeHead(400, { 'Content-Type': 'application/json' })
+			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
 		}
 
@@ -67,7 +89,7 @@ function createChatCompletionHandler(pool: LLMPool) {
 				res.writeHead(200, {
 					'Content-Type': 'text/event-stream',
 					'Cache-Control': 'no-cache',
-					// 'Connection': 'keep-alive',
+					'Connection': 'keep-alive',
 				})
 				res.flushHeaders()
 			}
@@ -96,11 +118,12 @@ function createChatCompletionHandler(pool: LLMPool) {
 					: undefined,
 				topP: args.top_p ? args.top_p : undefined,
 			}
-
+			console.debug('calling requestCompletionInstance')
 			const lock = await pool.requestCompletionInstance(
 				completionArgs,
 				controller.signal,
 			)
+			console.debug('lock acquired', lock.instance.id)
 			const completion = lock.instance.createChatCompletion(completionArgs)
 
 			const result = await completion.process({
@@ -114,7 +137,10 @@ function createChatCompletionHandler(pool: LLMPool) {
 							choices: [
 								{
 									index: 0,
-									delta: { content: chunk.token },
+									delta: {
+										role: 'assistant',
+										content: chunk.token,
+									},
 									logprobs: null,
 									finish_reason: null,
 								},
@@ -127,10 +153,14 @@ function createChatCompletionHandler(pool: LLMPool) {
 			lock.release()
 
 			if (args.stream) {
+				// beta chat completions pick up the meta data from the last chunk
 				res.write(
 					`data: ${JSON.stringify({
 						id: completion.id,
+						model: completion.model,
 						object: 'chat.completion.chunk',
+						created: Math.floor(completion.createdAt.getTime() / 1000),
+						system_fingerprint: lock.instance.fingerprint,
 						choices: [
 							{
 								index: 0,
@@ -141,6 +171,11 @@ function createChatCompletionHandler(pool: LLMPool) {
 									: '',
 							},
 						],
+						usage: {
+							prompt_tokens: result.promptTokens,
+							completion_tokens: result.completionTokens,
+							total_tokens: result.totalTokens,
+						},
 					})}\n\n`,
 				)
 				res.write('data: [DONE]')
@@ -335,19 +370,26 @@ function createCompletionHandler(pool: LLMPool) {
 		}
 	}
 }
-// TODO https://platform.openai.com/docs/api-reference/models/list
+
+// https://platform.openai.com/docs/api-reference/models/list
 function createListModelsHandler(pool: LLMPool) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
-	    res.writeHead(200, { 'Content-Type': 'application/json' })
-	    res.end(JSON.stringify({
-                object: 'list',
-                data: Object
-                        .values(pool.instances)
-                        .map(v => ({ object: "model",
-                                     owned_by: v.config.engine,
-                                     id: v.config.name,
-                                     //https://stackoverflow.com/a/51442878
-                                     created: Math.floor(v.createdBy.getTime() / 1000)  })) }))
+		const data = Object.entries(pool.config.models).map(([id, config]) => {
+			let created = 0
+			if (existsSync(config.file)) {
+				//https://stackoverflow.com/a/51442878
+				created = Math.floor(statSync(config.file).birthtime.getTime() / 1000)
+			}
+			return {
+				object: 'model',
+				owned_by: config.engine,
+				id,
+				created,
+			}
+		})
+
+		res.writeHead(200, { 'Content-Type': 'application/json' })
+		res.end(JSON.stringify({ object: 'list', data }, null, 2))
 	}
 }
 

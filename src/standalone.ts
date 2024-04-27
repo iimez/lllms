@@ -1,39 +1,49 @@
-import { createLLMServer, LLMServerOptions } from './server.js'
+import type { AddressInfo } from 'node:net'
+import { format as formatURL } from 'node:url'
+import { startStandaloneServer, LLMServerOptions } from './server.js'
 
-const config: LLMServerOptions = {
-	concurrency: 1,
+const serverOptions: LLMServerOptions = {
+	concurrency: 2,
 	models: {
+		'phi3-4k': {
+			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+			engine: 'gpt4all',
+			// url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+			// engine: 'node-llama-cpp',
+			minInstances: 1,
+			maxInstances: 2,
+			templateFormat: 'phi',
+		},
 		'orca-3b': {
 			url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
-			minInstances: 1,
+			maxInstances: 2,
 			engine: 'gpt4all',
 			templateFormat: 'alpaca',
 		},
-		phi3: {
-			url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-			minInstances: 1,
-			engine: 'node-llama-cpp',
-		},
 		'llama3-8b': {
-			url: 'https://huggingface.co/NousResearch/Meta-Llama-3-8B-GGUF/resolve/main/Meta-Llama-3-8B-Q4_K_M.gguf',
+			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 			engine: 'node-llama-cpp',
-			templateFormat: 'llama3',
+			// url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+			// engine: 'gpt4all',
 		},
-		// 'llama3-8b-instruct': {
-		// 	url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-		// 	engine: 'gpt4all',
-		// },
+		'llama3-70b': {
+			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-70B-Instruct-GGUF/resolve/main/Meta-Llama-3-70B-Instruct.Q4_0.gguf',
+			engine: 'node-llama-cpp',
+		},
 	},
 }
 
 async function main() {
-	const { server, initPromise } = createLLMServer(config)
-	server.listen(3000, () => {
-		console.debug('Server up')
+	const server = await startStandaloneServer(serverOptions, { port: 3000 })
+	const { address, port } = server.address() as AddressInfo
+	const hostname = address === '' || address === '::' ? 'localhost' : address
+	const url = formatURL({
+		protocol: 'http',
+		hostname,
+		port,
+		pathname: '/',
 	})
-	initPromise.then(() => {
-		console.debug('Pool ready')
-	})
+	console.log(`Server listening at ${url}`)
 }
 
 main().catch((err: Error) => {

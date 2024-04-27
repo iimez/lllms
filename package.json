@@ -1,11 +1,31 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-alpha.2",
+	"version": "1.0.0-alpha.3",
 	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
 	"types": "dist/index.d.ts",
 	"type": "module",
+	"license": "MIT",
+	"bin": {
+		"lllms": "./dist/cli.js"
+	},
+	"repository": "github:iimez/lllms",
+	"bugs": {
+		"url": "https://github.com/iimez/lllms/issues"
+	},
+	"scripts": {
+		"upgrade": "npx npm-check-updates -i",
+		"reinstall": "rimraf ./node_modules ./package-lock.json && npm install",
+		"prebuild": "rimraf ./dist",
+		"build": "tsc --build tsconfig.release.json --force",
+		"test": "vitest --test-timeout=-1 --pool=forks --maxConcurrency=1",
+		"test:openai": "vitest tests/openai.test.ts --test-timeout=-1 --pool=forks",
+		"test:cache": "vitest tests/cache.test.ts --test-timeout=-1 --pool=forks",
+		"prewatch": "rimraf ./dist",
+		"watch": "tsc -w -p tsconfig.release.json",
+		"start": "cross-env NODE_ENV=production node dist/standalone.js"
+	},
 	"keywords": [
 		"llm",
 		"inference server",
@@ -18,21 +38,12 @@
 		"openai",
 		"openai api"
 	],
-	"scripts": {
-		"upgrade": "npx npm-check-updates -i",
-		"reinstall": "rimraf ./node_modules ./package-lock.json && npm install",
-		"prebuild": "rimraf ./dist ./tsconfig.release.tsbuildinfo",
-		"build": "tsc --build tsconfig.release.json --force",
-		"test": "vitest --test-timeout=-1 --pool=forks --maxConcurrency=1",
-		"prewatch": "rimraf ./dist ./tsconfig.release.tsbuildinfo",
-		"watch": "tsc -w -p tsconfig.release.json",
-		"start": "cross-env NODE_ENV=production node dist/standalone.js"
-	},
-	"license": "MIT",
 	"engines": {
 		"node": ">=18.16.0"
 	},
 	"dependencies": {
+		"cors": "^2.8.5",
+		"express": "^4.19.2",
 		"gpt4all": "^4.0.0",
 		"ipull": "^3.0.11",
 		"nanoid": "^5.0.7",
@@ -40,6 +51,8 @@
 		"p-queue": "^8.0.1"
 	},
 	"devDependencies": {
+		"@types/cors": "^2.8.17",
+		"@types/express": "^4.17.21",
 		"@types/node": "^20.12.5",
 		"@types/supertest": "^6.0.2",
 		"cross-env": "^7.0.3",

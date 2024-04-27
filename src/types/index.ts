@@ -15,13 +15,10 @@ export interface ChatMessage {
 	content: string
 }
 
-export type ChatTemplateFormat = 'chatml' | 'llama3' | 'alpaca'
+export type ChatTemplateFormat = 'chatml' | 'llama3' | 'alpaca' |'phi'
 
-export interface CompletionRequest {
+export interface CompletionRequestBase {
 	model: string
-	messages?: ChatMessage[]
-	prompt?: string
-	systemPrompt?: string
 	temperature?: number
 	stream?: boolean
 	maxTokens?: number
@@ -30,7 +27,28 @@ export interface CompletionRequest {
 	frequencyPenalty?: number
 	presencePenalty?: number
 	topP?: number
+}
+
+export interface CompletionRequest extends CompletionRequestBase {
+	prompt?: string
+}
+
+export interface ChatCompletionRequest extends CompletionRequestBase {
+	// model: string
+	systemPrompt?: string
+	messages: ChatMessage[]
 	templateFormat?: ChatTemplateFormat
+	// prompt?: string
+	// systemPrompt?: string
+	// temperature?: number
+	// stream?: boolean
+	// maxTokens?: number
+	// seed?: number
+	// stop?: string[]
+	// frequencyPenalty?: number
+	// presencePenalty?: number
+	// topP?: number
+	// templateFormat?: ChatTemplateFormat
 }
 
 export interface GenerationArgs {
@@ -68,13 +86,13 @@ export interface LLMEngine {
 	disposeInstance: (instance: EngineInstance) => Promise<void>
 	processChatCompletion: (
 		instance: EngineInstance,
-		completionArgs: CompletionRequest,
-		processingArgs: GenerationArgs,
+		completionArgs: ChatCompletionRequest,
+		processingArgs?: GenerationArgs,
 	) => Promise<EngineChatCompletionResult>
 	processCompletion: (
 		instance: EngineInstance,
 		completionArgs: CompletionRequest,
-		processingArgs: GenerationArgs,
+		processingArgs?: GenerationArgs,
 	) => Promise<EngineCompletionResult>
 }
 

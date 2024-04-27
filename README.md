@@ -67,10 +67,10 @@ const server = http.createServer(async (req, res) => {
     const { messages, model } = JSON.parse(req.body)
     const lock = await pool.requestCompletionInstance({ model, messages })
     const completion = lock.instance.createChatCompletion({ messages })
-    const completion = await instance.processChatCompletion(request)
+    const result = await completion.processChatCompletion(request)
     lock.release()
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify(completion, null, 2))
+    res.end(JSON.stringify(result, null, 2))
   } catch (e) {
     console.error(e)
     res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -118,7 +118,8 @@ curl http://localhost:3000/v1/completions \
 
 ### Related Solutions
 
-If you look at this package, you should also look at these other solutions:
+If you look at this package, you probably also want to take a look at these other solutions:
 
 - [ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md) - Uses llama.cpp and provides a HTTP API. Also has experimental OpenAI API compatibility.
 - [llama.cpp Server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server#llamacpp-http-server) - The official llama.cpp HTTP API.
+- [VLLM](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) - A more production ready solution for hosting large language models.

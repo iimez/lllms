@@ -8,7 +8,7 @@ import {
 	LLMConfig,
 	LLMOptions,
 } from './types/index.js'
-import { createContextStateHash } from './util/createContextStateHash.js'
+import { Logger, LogLevels, createLogger } from './util/log.js'
 
 class AbortError extends Error {
 	constructor(message = 'Operation aborted') {
@@ -16,7 +16,6 @@ class AbortError extends Error {
 		this.name = 'AbortError'
 	}
 }
-
 
 interface CompletionTask {
 	instance: LLMInstance
@@ -41,21 +40,20 @@ export interface LLMPoolModelOptions extends LLMOptions {
 export interface LLMPoolOptions {
 	concurrency?: number
 	models: Record<string, LLMPoolModelOptions>
+	logger?: Logger
 }
 
 export class LLMPool extends EventEmitter3 {
 	queue: PQueue
 	config: LLMPoolConfig
+	logger: Logger
 	waitingRequests: number = 0
 	instances: Record<string, LLMInstance>
 	prepareInstance?: PrepareInstanceCallback
 
-	constructor(
-		opts: LLMPoolOptions,
-		prepareInstance?: PrepareInstanceCallback,
-	) {
+	constructor(opts: LLMPoolOptions, prepareInstance?: PrepareInstanceCallback) {
 		super()
-
+		this.logger = opts.logger ?? createLogger(LogLevels.warn)
 		const models: Record<string, LLMConfig> = {}
 		for (const modelName in opts.models) {
 			const modelConfig = opts.models[modelName]
@@ -70,7 +68,7 @@ export class LLMPool extends EventEmitter3 {
 			models,
 		}
 		this.queue = new PQueue({
-			concurrency: config.inferenceConcurrency
+			concurrency: config.inferenceConcurrency,
 		})
 		this.config = config
 		this.instances = {}
@@ -78,6 +76,7 @@ export class LLMPool extends EventEmitter3 {
 	}
 
 	async dispose() {
+		this.logger(LogLevels.info, 'Disposing LLMPool')
 		const disposePromises = Object.values(this.instances).map((instance) =>
 			instance.dispose(),
 		)
@@ -99,7 +98,10 @@ export class LLMPool extends EventEmitter3 {
 			// create the initial, minimum number of instances for each model
 			const instanceCount = modelConfig.minInstances ?? 0
 			for (let i = 0; i < instanceCount; i++) {
-				const instance = new LLMInstance(engineMethods, modelConfig)
+				const instance = new LLMInstance(engineMethods, {
+					...modelConfig,
+					logger: this.logger,
+				})
 				this.instances[instance.id] = instance
 				if (this.prepareInstance) {
 					await this.prepareInstance(instance)
@@ -127,7 +129,7 @@ export class LLMPool extends EventEmitter3 {
 							url: instance.config.url,
 							file: instance.config.file,
 							engine: instance.config.engine,
-							context: instance.contextStateHash,
+							context: instance.getContextState(),
 							lastUsed: new Date(instance.lastUsed).toISOString(),
 						},
 					]
@@ -148,8 +150,13 @@ export class LLMPool extends EventEmitter3 {
 	private async spawnInstance(modelName: string, signal?: AbortSignal) {
 		const modelConfig = this.config.models[modelName]
 		const engineMethods = engines[modelConfig.engine]
-		const instance = new LLMInstance(engineMethods, modelConfig)
-		console.debug(`${instance.id} spawning`)
+		const instance = new LLMInstance(engineMethods, {
+			...modelConfig,
+			logger: this.logger,
+		})
+		this.logger(LogLevels.info, `Spawning instance for model ${modelName}`, {
+			instance: instance.id,
+		})
 		this.instances[instance.id] = instance
 		if (this.prepareInstance) {
 			await this.prepareInstance(instance, signal)
@@ -162,10 +169,13 @@ export class LLMPool extends EventEmitter3 {
 	modelExists(modelName: string) {
 		return this.config.models[modelName] !== undefined
 	}
-	
+
 	// wait to acquire the next idle instance of the given model.
 	// if this gets called multiple times, promises will resolve in the order they were called.
-	acquireIdleInstance(modelName: string, signal?: AbortSignal): Promise<LLMInstance> {
+	acquireIdleInstance(
+		modelName: string,
+		signal?: AbortSignal,
+	): Promise<LLMInstance> {
 		return new Promise((resolve, reject) => {
 			const listener = (instance: LLMInstance) => {
 				if (instance.model === modelName && instance.status === 'idle') {
@@ -196,9 +206,13 @@ export class LLMPool extends EventEmitter3 {
 			if (
 				instance.status === 'idle' &&
 				instance.model === modelName &&
-				!instance.contextStateHash
+				!instance.hasContext()
 			) {
-				console.debug('reusing instance with no context state', instance.id)
+				this.logger(
+					LogLevels.verbose,
+					'Reusing instance with no context state',
+					{ instance: instance.id },
+				)
 				instance.lock()
 				return instance
 			}
@@ -209,16 +223,15 @@ export class LLMPool extends EventEmitter3 {
 			(instance) => instance.status === 'idle' && instance.model === modelName,
 		)
 		if (availableInstances.length > 0) {
-			const leastRecentlyUsedInstance = availableInstances.reduce(
-				(prev, current) => (prev.lastUsed < current.lastUsed ? prev : current),
+			const lruInstance = availableInstances.reduce((prev, current) =>
+				prev.lastUsed < current.lastUsed ? prev : current,
 			)
-			console.debug(
-				'reusing least recently used instance',
-				leastRecentlyUsedInstance.id,
-			)
-			leastRecentlyUsedInstance.lock()
-			leastRecentlyUsedInstance.resetContext() // make sure we reset its cache.
-			return leastRecentlyUsedInstance
+			this.logger(LogLevels.verbose, 'Reusing least recently used instance', {
+				instance: lruInstance.id,
+			})
+			lruInstance.lock()
+			lruInstance.resetContext() // make sure we reset its cache.
+			return lruInstance
 		}
 
 		// see if we're allowed to spawn a new instance
@@ -229,11 +242,13 @@ export class LLMPool extends EventEmitter3 {
 		}
 
 		// otherwise wait until an instance of our model is released or spawned
-		console.debug(`awaiting instance of ${modelName} ...`)
-
+		this.logger(LogLevels.verbose, 'Awaiting idle instance', {
+			model: modelName,
+		})
 		const instance = await this.acquireIdleInstance(modelName)
-		
-		console.debug(`${instance.id} acquired`)
+		this.logger(LogLevels.verbose, 'Instance acquired', {
+			instance: instance.id,
+		})
 
 		if (signal?.aborted) {
 			instance.unlock()
@@ -249,21 +264,25 @@ export class LLMPool extends EventEmitter3 {
 		signal?: AbortSignal,
 	) {
 		// for completions first search for an instance that has the messages already ingested and the context ready
-		const incomingStateHash = createContextStateHash(req, true)
 		for (const key in this.instances) {
 			const instance = this.instances[key]
 			if (
 				instance.status === 'idle' &&
 				instance.model === req.model &&
-				instance.contextStateHash === incomingStateHash
+				instance.matchesContext(req)
 			) {
-				console.debug('cache hit - reusing cached instance', instance.id)
+				this.logger(LogLevels.verbose, 'Cache hit - reusing cached instance', {
+					instance: instance.id,
+				})
 				instance.lock()
 				return instance
 			}
 		}
 
-		console.debug('cache miss - acquiring fresh model instance')
+		this.logger(
+			LogLevels.verbose,
+			'Cache miss - acquiring fresh model instance',
+		)
 		return await this.acquireInstance(req.model, signal)
 	}
 
@@ -273,13 +292,9 @@ export class LLMPool extends EventEmitter3 {
 		signal?: AbortSignal,
 	) {
 		if (!this.config.models[req.model]) {
+			this.logger(LogLevels.error, `Model not found: ${req.model}`)
 			throw new Error(`Model not found: ${req.model}`)
 		}
-
-		// if ('messages' in args) {
-		// 	const lastMessage = args.messages[args.messages.length - 1]
-		// 	console.debug('Requesting chat completion instance', lastMessage)
-		// }
 
 		// if we can, prepare a new instance to be ready for the next incoming request
 		// TODO this slows down the response time for all requests until maxInstances is reached.
@@ -304,28 +319,23 @@ export class LLMPool extends EventEmitter3 {
 				})
 			})
 			.then((task) => {
-				console.debug('task resolved')
 				if (task?.instance) {
 					const instance = task.instance
-					console.debug(`${instance.id} releasing`)
+					this.logger(LogLevels.verbose, 'Task completed, releasing instance', {
+						instance: instance.id,
+					})
 					instance.unlock()
-					console.debug(`${instance.id} now`, instance.status)
 					this.emit('release', instance)
 				}
 			})
 
 		// TODO what if user never calls release? automatically resolve or reject after a timeout?
-		const releaseInstance = () => {
-			console.debug('calling resolveQueueTask')
-			resolveQueueTask({ instance, req })
-		}
+
 		return {
 			instance,
-			releaseInstance,
-			// releaseInstance: () => {
-			// 	console.debug('calling resolveQueueTask')
-			// 	resolveQueueTask({ instance, req })
-			// }
+			releaseInstance: () => {
+				resolveQueueTask({ instance, req })
+			},
 		}
 	}
 }

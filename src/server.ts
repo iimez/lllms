@@ -11,28 +11,36 @@ import { ModelDownloader } from './downloader.js'
 import { LLMOptions } from './types/index.js'
 import { createOpenAIRequestHandlers } from './api/openai.js'
 import { resolveModelConfig } from './util/resolveModelConfig.js'
-
+import { Logger, LogLevel, LogLevels, createLogger } from './util/log.js'
 
 export interface LLMServerOptions {
 	concurrency?: number
 	modelsDir?: string
+	logger?: Logger
 	models: Record<string, LLMOptions>
 }
 
 export class LLMServer {
 	pool: LLMPool
 	loader: ModelDownloader
+	logger: Logger
 	modelsDir: string
 	constructor(opts: LLMServerOptions) {
-		this.modelsDir = opts.modelsDir || path.resolve(os.homedir(), '.cache/lllms')
+		this.logger = opts.logger ?? createLogger(LogLevels.warn)
+		this.modelsDir =
+			opts.modelsDir || path.resolve(os.homedir(), '.cache/lllms')
 		const poolModels = resolveModelConfig(opts.models, this.modelsDir)
-		this.pool = new LLMPool({
-			concurrency: opts.concurrency ?? 1,
-			models: poolModels
-		}, this.prepareInstance.bind(this))
+		this.pool = new LLMPool(
+			{
+				concurrency: opts.concurrency ?? 1,
+				logger: this.logger,
+				models: poolModels,
+			},
+			this.prepareInstance.bind(this),
+		)
 		this.loader = new ModelDownloader()
 	}
-	
+
 	async start() {
 		await fs.mkdir(this.modelsDir, { recursive: true })
 		await this.pool.init()
@@ -98,15 +106,18 @@ export function createExpressMiddleware(llmServer: LLMServer) {
 
 export interface StandaloneServerOptions extends LLMServerOptions {
 	listen?: ListenOptions
+	logLevel?: LogLevel
 }
 
-export async function serveLLMs(
-	opts: StandaloneServerOptions
-) {
+export async function serveLLMs(opts: StandaloneServerOptions) {
+	console.debug('Starting LLMServer', opts.logLevel)
 	const { listen, ...serverOpts } = opts
 	const listenOpts = listen ?? { port: 3000 }
-	const llmServer = new LLMServer(serverOpts)
-	
+	const llmServer = new LLMServer({
+		logger: createLogger(opts.logLevel || LogLevels.warn),
+		...serverOpts,
+	})
+
 	const app = express()
 	app.use(
 		cors(),

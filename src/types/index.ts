@@ -1,4 +1,5 @@
 import type { EngineType, EngineInstance } from '../engines'
+import type { Logger } from '../util/log.js'
 export interface CompletionChunk {
 	tokenId: number
 	token: string
@@ -51,10 +52,21 @@ export interface ChatCompletionRequest extends CompletionRequestBase {
 	// templateFormat?: ChatTemplateFormat
 }
 
-export interface GenerationArgs {
+// export interface GenerationArgs {
+// 	onChunk?: (chunk: CompletionChunk) => void
+// 	resetContext?: boolean
+// 	signal?: AbortSignal
+// }
+
+export interface EngineCompletionContext extends EngineContext {
 	onChunk?: (chunk: CompletionChunk) => void
 	resetContext?: boolean
+}
+
+export interface EngineContext {
 	signal?: AbortSignal
+	logger: Logger
+	instance: string
 }
 
 export interface EngineChatCompletionResult {
@@ -81,18 +93,18 @@ export interface ChatCompletionResult extends EngineChatCompletionResult {
 export interface LLMEngine {
 	loadInstance: (
 		config: LLMConfig,
-		signal?: AbortSignal,
+		ctx: EngineContext,
 	) => Promise<EngineInstance>
 	disposeInstance: (instance: EngineInstance) => Promise<void>
 	processChatCompletion: (
 		instance: EngineInstance,
-		completionArgs: ChatCompletionRequest,
-		processingArgs?: GenerationArgs,
+		req: ChatCompletionRequest,
+		ctx: EngineCompletionContext,
 	) => Promise<EngineChatCompletionResult>
 	processCompletion: (
 		instance: EngineInstance,
-		completionArgs: CompletionRequest,
-		processingArgs?: GenerationArgs,
+		req: CompletionRequest,
+		ctx: EngineCompletionContext,
 	) => Promise<EngineCompletionResult>
 }
 

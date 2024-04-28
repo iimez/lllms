@@ -112,7 +112,7 @@ async function runResetContextConversation(llms: LLMServer) {
 
 suite('Caching behavior (node-llama-cpp)', () => {
 	const llms = new LLMServer({
-		inferenceConcurrency: 1,
+		concurrency: 1,
 		models: {
 			[testModel]: {
 				url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
@@ -138,7 +138,7 @@ suite('Caching behavior (node-llama-cpp)', () => {
 
 suite('Caching behavior (gpt4all)', () => {
 	const llms = new LLMServer({
-		inferenceConcurrency: 1,
+		concurrency: 1,
 		models: {
 			[testModel]: {
 				url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',

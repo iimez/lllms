@@ -9,6 +9,7 @@ import {
 	GeneralChatWrapper,
 	ChatWrapper,
 	ChatHistoryItem,
+	LlamaLogLevel,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector.js'
 import {
@@ -17,8 +18,10 @@ import {
 	ChatCompletionRequest,
 	EngineChatCompletionResult,
 	EngineCompletionResult,
-	GenerationArgs,
+	EngineCompletionContext,
+	EngineContext,
 } from '../types/index.js'
+import { LogLevels } from '../util/log.js'
 
 interface LlamaCppInstance {
 	model: LlamaModel
@@ -26,8 +29,10 @@ interface LlamaCppInstance {
 	session: LlamaChatSession | null
 }
 
-export async function loadInstance(config: LLMConfig, signal?: AbortSignal) {
-	console.debug('Starting instance', config)
+export async function loadInstance(config: LLMConfig, ctx: EngineContext) {
+	ctx.logger(LogLevels.verbose, `Load Llama model from ${config.file}`, {
+		instance: ctx.instance,
+	})
 
 	// https://github.com/withcatai/node-llama-cpp/pull/105
 	// https://github.com/withcatai/node-llama-cpp/discussions/109
@@ -35,12 +40,24 @@ export async function loadInstance(config: LLMConfig, signal?: AbortSignal) {
 	const llama = await getLlama({
 		gpu: config.gpu ? 'auto' : false, // "auto" | "metal" | "cuda" | "vulkan"
 		// logLevel: 'warn',
-		// logger: (level, message) => {},
+		logLevel: LlamaLogLevel.info,
+		logger: (level, message) => {
+			if (level === LlamaLogLevel.warn) {
+				ctx.logger(LogLevels.warn, message, { instance: ctx.instance })
+			} else if (
+				level === LlamaLogLevel.error ||
+				level === LlamaLogLevel.fatal
+			) {
+				ctx.logger(LogLevels.error, message, { instance: ctx.instance })
+			} else if (level === LlamaLogLevel.info) {
+				ctx.logger(LogLevels.info, message, { instance: ctx.instance })
+			}
+		},
 	})
 	const model = await llama.loadModel({
 		modelPath: config.file, // full model absolute path
 		// useMlock: false,
-		loadSignal: signal,
+		loadSignal: ctx.signal,
 	})
 
 	const context = await model.createContext({
@@ -51,7 +68,7 @@ export async function loadInstance(config: LLMConfig, signal?: AbortSignal) {
 		// sequences: 1,
 		// batchSize: 128,
 		// contextSize: 2048,
-		createSignal: signal,
+		createSignal: ctx.signal,
 	})
 
 	return {
@@ -85,11 +102,11 @@ function pickTemplateFormatter(
 export async function processChatCompletion(
 	instance: LlamaCppInstance,
 	request: ChatCompletionRequest,
-	args?: GenerationArgs,
+	ctx: EngineCompletionContext,
 ): Promise<EngineChatCompletionResult> {
 	if (
 		!instance.session ||
-		args?.resetContext ||
+		ctx.resetContext ||
 		!instance.context.sequencesLeft
 	) {
 		// allow setting system prompt via initial message.
@@ -97,14 +114,11 @@ export async function processChatCompletion(
 		if (!systemPrompt && request.messages[0].role === 'system') {
 			systemPrompt = request.messages[0].content
 		}
-		// if (systemPrompt) {
-		// 	console.debug('using system prompt', systemPrompt)
-		// }
 		if (!instance.context.sequencesLeft) {
 			// TODO is there a better way? cant get context shift to work
 			instance.context.dispose()
 			instance.context = await instance.model.createContext({
-				createSignal: args?.signal,
+				createSignal: ctx.signal,
 			})
 		}
 		instance.session = new LlamaChatSession({
@@ -133,7 +147,7 @@ export async function processChatCompletion(
 	const input = lastMessage.content
 
 	// if context got reset, we need to reingest the chat history
-	if (args?.resetContext) {
+	if (ctx.resetContext) {
 		const historyItems: ChatHistoryItem[] = nonSystemMessages.map((m) => {
 			return {
 				type: m.role,
@@ -163,13 +177,12 @@ export async function processChatCompletion(
 		// stopGenerationTriggers: stopTriggers.length ? [stopTriggers] : undefined,
 		// topK: completionArgs.topK,
 		// minP: completionArgs.minP,
-		signal: args?.signal,
+		signal: ctx.signal,
 		onToken: (tokens) => {
 			generatedTokenCount++
 			const text = instance.model.detokenize(tokens) // TODO will this break emojis?
-			// console.debug('onToken', {tokens, text})
-			if (args?.onChunk) {
-				args?.onChunk({
+			if (ctx.onChunk) {
+				ctx.onChunk({
 					tokenId: tokens[0],
 					token: text,
 				})
@@ -192,7 +205,7 @@ export async function processChatCompletion(
 export async function processCompletion(
 	instance: LlamaCppInstance,
 	request: CompletionRequest,
-	args?: GenerationArgs,
+	ctx: EngineCompletionContext,
 ): Promise<EngineCompletionResult> {
 	if (!request.prompt) {
 		throw new Error('Prompt is required for completion.')
@@ -202,7 +215,7 @@ export async function processCompletion(
 
 	// instance.context.getAllocatedContextSize()
 	instance.context = await instance.model.createContext({
-		createSignal: args?.signal,
+		createSignal: ctx.signal,
 	})
 
 	// console.debug('context', {
@@ -229,13 +242,13 @@ export async function processCompletion(
 			frequencyPenalty: request.frequencyPenalty,
 			presencePenalty: request.presencePenalty,
 		},
-		signal: args?.signal,
+		signal: ctx.signal,
 		stopGenerationTriggers: stopTriggers.length ? [stopTriggers] : undefined,
 		onToken: (tokens) => {
 			generatedTokenCount++
 			const text = instance.model.detokenize(tokens)
-			if (args?.onChunk) {
-				args?.onChunk({
+			if (ctx.onChunk) {
+				ctx.onChunk({
 					tokenId: tokens[0],
 					token: text,
 				})

@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import request from 'supertest'
-import { Express } from 'express'
-import { createExpressApp, LLMServerOptions, LLMServer } from '../src/server.js'
+import express, { Express } from 'express'
+import { createExpressMiddleware, LLMServerOptions, LLMServer } from '../src/server.js'
 
 const testModel = 'phi3-mini-4k'
 
 const testConfig: LLMServerOptions = {
-	inferenceConcurrency: 1,
+	concurrency: 1,
 	models: {
 		[testModel]: {
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
@@ -22,7 +22,11 @@ describe('Express App', () => {
 
 	beforeAll(async () => {
 		llmServer = new LLMServer(testConfig)
-		app = createExpressApp(llmServer)
+		app = express()
+		app.use(
+			express.json(),
+			createExpressMiddleware(llmServer),
+		)
 	})
 	
 	it('Responds to requests before starting', async () => {

@@ -146,7 +146,7 @@ Not in any particular order:
 - [x] Basic OpenAI API compatibility
 - [x] POC of chat context reuse across requests
 - [x] Tests for context reuse and context leaking
-- [ ] Logging Interface
+- [x] Logging Interface
 - [ ] Tests for longer conversations
 - [ ] Tests for request cancellation
 - [ ] GPU support

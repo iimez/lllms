@@ -1,14 +1,16 @@
 import type { AddressInfo } from 'node:net'
 import { format as formatURL } from 'node:url'
 import { serveLLMs, StandaloneServerOptions } from './server.js'
+import { LogLevels } from './util/log.js'
 
 const serverOptions: StandaloneServerOptions = {
 	listen: {
 		port: 3000,
 	},
+	logLevel: LogLevels.verbose,
 	concurrency: 2,
 	models: {
-		'phi3-mini': {
+		'phi3-mini-4k': {
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 			engine: 'gpt4all',
 			// url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',

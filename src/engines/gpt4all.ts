@@ -10,17 +10,20 @@ import {
 	LLMConfig,
 	ChatCompletionRequest,
 	CompletionRequest,
-	GenerationArgs,
+	EngineCompletionContext,
 	EngineChatCompletionResult,
 	EngineCompletionResult,
 	CompletionFinishReason,
 	ChatTemplateFormat,
+	EngineContext,
 } from '../types/index.js'
+import { LogLevels } from '../util/log.js'
 
-export async function loadInstance(config: LLMConfig, signal?: AbortSignal) {
-		console.debug('Starting instance', config)
+export async function loadInstance(config: LLMConfig, ctx: EngineContext) {
+	ctx.logger(LogLevels.info, `Load GPT4All model from ${config.file}`, {
+		instance: ctx.instance,
+	})
 
-	const modelName = config.name
 	const loadOpts: LoadModelOptions = {
 		modelPath: path.dirname(config.file),
 		// file: config.file,
@@ -46,7 +49,7 @@ export async function disposeInstance(instance: InferenceModel) {
 export async function processCompletion(
 	instance: InferenceModel,
 	request: CompletionRequest,
-	args?: GenerationArgs,
+	ctx: EngineCompletionContext,
 ): Promise<EngineCompletionResult> {
 	if (!request.prompt) {
 		throw new Error('Prompt is required for completion.')
@@ -76,13 +79,13 @@ export async function processCompletion(
 				finishReason = 'stopGenerationTrigger'
 				return false
 			}
-			if (args?.onChunk) {
-				args.onChunk({
+			if (ctx.onChunk) {
+				ctx.onChunk({
 					token: token,
 					tokenId,
 				})
 			}
-			return !args?.signal?.aborted
+			return !ctx?.signal?.aborted
 		},
 	})
 
@@ -99,7 +102,10 @@ export async function processCompletion(
 	}
 }
 
-function addSystemPromptTemplate(systemPrompt: string, templateFormat: ChatTemplateFormat) {
+function addSystemPromptTemplate(
+	systemPrompt: string,
+	templateFormat: ChatTemplateFormat,
+) {
 	if (templateFormat === 'chatml') {
 		return `<|im_start|>system\n${systemPrompt}<|im_end|>\n`
 	}
@@ -117,25 +123,25 @@ function addSystemPromptTemplate(systemPrompt: string, templateFormat: ChatTempl
 		return `<s>[INST] <<SYS>>\n${systemPrompt}\n<</SYS>>[/INST]</s>\n\n`
 	}
 	return systemPrompt
-
 }
 
 export async function processChatCompletion(
 	instance: InferenceModel,
 	request: ChatCompletionRequest,
-	args?: GenerationArgs,
+	ctx: EngineCompletionContext,
 ): Promise<EngineChatCompletionResult> {
-
-
 	let session = instance.activeChatSession
-	if (!session || args?.resetContext) {
+	if (!session || ctx.resetContext) {
 		let systemPrompt = request.systemPrompt
-		
+
 		// allow setting system prompt via initial message.
 		if (!systemPrompt && request.messages[0].role === 'system') {
 			systemPrompt = request.messages[0].content
 			if (request.templateFormat) {
-				systemPrompt = addSystemPromptTemplate(systemPrompt, request.templateFormat)
+				systemPrompt = addSystemPromptTemplate(
+					systemPrompt,
+					request.templateFormat,
+				)
 			}
 		}
 		// console.debug('using system prompt', systemPrompt)
@@ -143,15 +149,13 @@ export async function processChatCompletion(
 			systemPrompt,
 		})
 	}
-	
+
 	// if we have reset context, we need to reingest the chat history,
 	// or otherwise just append the last user message.
-	const nonSystemMessages = request.messages.filter(
-		(m) => m.role !== 'system',
-	)
+	const nonSystemMessages = request.messages.filter((m) => m.role !== 'system')
 	let input: CompletionInput
-	
-	if (args?.resetContext) {
+
+	if (ctx.resetContext) {
 		// reingests all, then prompts automatically for last user message
 		input = nonSystemMessages
 	} else {
@@ -162,7 +166,7 @@ export async function processChatCompletion(
 		}
 		input = lastMessage.content
 	}
-	
+
 	let finishReason: CompletionFinishReason = 'eogToken'
 
 	const result = await createCompletion(session, input, {
@@ -186,17 +190,17 @@ export async function processChatCompletion(
 				finishReason = 'stopGenerationTrigger'
 				return false
 			}
-			if (args?.onChunk) {
-				args.onChunk({
+			if (ctx.onChunk) {
+				ctx.onChunk({
 					tokenId,
 					token: token,
 				})
 			}
 
-			return !args?.signal?.aborted
+			return !ctx?.signal?.aborted
 		},
 	})
-	
+
 	if (result.usage.completion_tokens === request.maxTokens) {
 		finishReason = 'maxTokens'
 	}

@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import express from 'express'
-import { LLMServer, createAPIMiddleware } from '../dist/index.js'
+import { LLMServer, createExpressMiddleware } from '../dist/index.js'
 
 // Create a server with a single model, limiting to 2 instances that can run concurrently.
 // Models will be downloaded on-demand or during LLMServer.start() if minInstances > 0.
@@ -23,7 +23,7 @@ const app = express()
 app.use(
   '/infer',
   express.json(),
-  createAPIMiddleware(llmServer),
+  createExpressMiddleware(llmServer),
 )
 const server = http.createServer(app)
 server.listen(3000)

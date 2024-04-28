@@ -1,6 +1,3 @@
-import os from 'node:os'
-import path from 'node:path'
-import { promises as fs } from 'node:fs'
 import PQueue from 'p-queue'
 import EventEmitter3 from 'eventemitter3'
 import { engines } from './engines/index.js'
@@ -13,42 +10,6 @@ import {
 } from './types/index.js'
 import { createContextStateHash } from './util/createContextStateHash.js'
 
-export interface LLMPoolOptions {
-	modelsDir?: string
-	concurrency?: number
-	models: Record<string, LLMOptions>
-}
-
-export interface LLMPoolConfig {
-	modelsDir: string
-	concurrency: number
-	models: Record<string, LLMConfig>
-}
-
-interface TaskResult {
-	instance: LLMInstance
-	args: any
-}
-
-function resolveModelFile(opts: LLMOptions, modelsDir: string) {
-	if (opts.file) {
-		if (path.isAbsolute(opts.file)) {
-			return opts.file
-		} else {
-			return path.join(modelsDir, opts.file)
-		}
-	}
-
-	if (opts.url) {
-		const url = new URL(opts.url)
-		const modelName = path.basename(url.pathname)
-		const modelPath = path.join(modelsDir, modelName)
-		return modelPath
-	}
-
-	throw new Error('Model file or url is required')
-}
-
 class AbortError extends Error {
 	constructor(message = 'Operation aborted') {
 		super(message)
@@ -56,51 +17,61 @@ class AbortError extends Error {
 	}
 }
 
-const modelNamePattern = /^[a-zA-Z0-9_:\-]+$/
-function validateModelName(modelName: string) {
-	if (!modelNamePattern.test(modelName)) {
-		throw new Error(`Model name must match pattern: ${modelNamePattern} (got ${modelName})`)
-	}
+
+interface CompletionTask {
+	instance: LLMInstance
+	req: CompletionRequest | ChatCompletionRequest
 }
 
-type PrepareCallback = (
+type PrepareInstanceCallback = (
 	instance: LLMInstance,
 	signal?: AbortSignal,
 ) => Promise<void>
 
+interface LLMPoolConfig {
+	inferenceConcurrency: number
+	models: Record<string, LLMConfig>
+}
+
+export interface LLMPoolModelOptions extends LLMOptions {
+	file: string
+	name?: string
+}
+
+export interface LLMPoolOptions {
+	concurrency?: number
+	models: Record<string, LLMPoolModelOptions>
+}
+
 export class LLMPool extends EventEmitter3 {
 	queue: PQueue
-	instances: Record<string, LLMInstance>
 	config: LLMPoolConfig
-	pendingRequests: number = 0
-	prepareInstance?: PrepareCallback
+	waitingRequests: number = 0
+	instances: Record<string, LLMInstance>
+	prepareInstance?: PrepareInstanceCallback
 
-	constructor(opts: LLMPoolOptions, prepareInstance?: PrepareCallback) {
+	constructor(
+		opts: LLMPoolOptions,
+		prepareInstance?: PrepareInstanceCallback,
+	) {
 		super()
-		const modelsDir =
-			opts.modelsDir || path.resolve(os.homedir(), '.cache/lllms')
 
-		const config: LLMPoolConfig = {
-			modelsDir,
-			concurrency: 1,
-			...opts,
-			models: {},
-		}
-
+		const models: Record<string, LLMConfig> = {}
 		for (const modelName in opts.models) {
-			validateModelName(modelName)
-			const modelOpts = opts.models[modelName]
-			const file = resolveModelFile(modelOpts, modelsDir)
-			const modelConfig = {
-				minInstances: modelOpts.minInstances || 0,
-				...modelOpts,
-				file,
-				name: modelName,
+			const modelConfig = opts.models[modelName]
+			models[modelName] = {
+				...modelConfig,
+				name: modelConfig.name ?? modelName,
 			}
-			config.models[modelName] = modelConfig
 		}
-
-		this.queue = new PQueue({ concurrency: config.concurrency })
+		const config: LLMPoolConfig = {
+			inferenceConcurrency: 1,
+			...opts,
+			models,
+		}
+		this.queue = new PQueue({
+			concurrency: config.inferenceConcurrency
+		})
 		this.config = config
 		this.instances = {}
 		this.prepareInstance = prepareInstance
@@ -115,14 +86,16 @@ export class LLMPool extends EventEmitter3 {
 
 	// start up pool, creating instances and loading models
 	async init() {
-		await fs.mkdir(this.config.modelsDir, { recursive: true })
 		const loadingPromises = []
 		const modelConfigs = this.config.models
 
 		for (const modelName in modelConfigs) {
 			const modelConfig = modelConfigs[modelName]
+			if (!modelConfig.name) {
+				modelConfig.name = modelName
+			}
 			const engineMethods = engines[modelConfig.engine]
-			
+
 			// create the initial, minimum number of instances for each model
 			const instanceCount = modelConfig.minInstances ?? 0
 			for (let i = 0; i < instanceCount; i++) {
@@ -132,7 +105,7 @@ export class LLMPool extends EventEmitter3 {
 					await this.prepareInstance(instance)
 				}
 				const loadPromise = instance.load()
-				loadPromise.then(() => this.emit('init', instance))
+				loadPromise.then(() => this.emit('spawn', instance))
 				loadingPromises.push(loadPromise)
 			}
 		}
@@ -142,8 +115,8 @@ export class LLMPool extends EventEmitter3 {
 
 	getStatusInfo() {
 		return {
-			queue: this.queue.size,
-			pending: this.pendingRequests,
+			processing: this.queue.size,
+			waiting: this.waitingRequests,
 			instances: Object.fromEntries(
 				Object.entries(this.instances).map(([key, instance]) => {
 					return [
@@ -155,7 +128,7 @@ export class LLMPool extends EventEmitter3 {
 							file: instance.config.file,
 							engine: instance.config.engine,
 							context: instance.contextStateHash,
-							lastUse: new Date(instance.lastUse).toISOString(),
+							lastUsed: new Date(instance.lastUsed).toISOString(),
 						},
 					]
 				}),
@@ -176,33 +149,47 @@ export class LLMPool extends EventEmitter3 {
 		const modelConfig = this.config.models[modelName]
 		const engineMethods = engines[modelConfig.engine]
 		const instance = new LLMInstance(engineMethods, modelConfig)
+		console.debug(`${instance.id} spawning`)
 		this.instances[instance.id] = instance
 		if (this.prepareInstance) {
 			await this.prepareInstance(instance, signal)
 		}
 		await instance.load(signal)
-		this.emit('init', instance)
+		this.emit('spawn', instance)
+		return instance
 	}
 
 	modelExists(modelName: string) {
 		return this.config.models[modelName] !== undefined
 	}
+	
+	// wait to acquire the next idle instance of the given model.
+	// if this gets called multiple times, promises will resolve in the order they were called.
+	acquireIdleInstance(modelName: string, signal?: AbortSignal): Promise<LLMInstance> {
+		return new Promise((resolve, reject) => {
+			const listener = (instance: LLMInstance) => {
+				if (instance.model === modelName && instance.status === 'idle') {
+					this.off('release', listener)
+					this.off('spawn', listener)
+					instance.lock()
+					resolve(instance)
+				}
+			}
+			this.on('spawn', listener)
+			this.on('release', listener)
+			if (signal) {
+				signal.addEventListener('abort', () => {
+					this.off('release', listener)
+					this.off('spawn', listener)
+					reject(new AbortError())
+				})
+			}
+		})
+	}
 
-	// modelReady(modelName: string) {
-	// 	const modelInstances = Object.values(this.instances).filter(
-	// 		(instance) => instance.model === modelName,
-	// 	)
-	// 	if (modelInstances.length > 0) {
-	// 		return modelInstances.some(
-	// 			(instance) => instance.status === 'idle' || instance.status === 'busy',
-	// 		)
-	// 	}
-	// 	return false
-	// }
-
-	// acquire an instance from the pool, or create a new one if necessary
+	// acquire an instance from the pool, or create a new one if possible, or wait until one is available
 	// the instance will be locked and must be released before it can be used again
-	async acquireModelInstance(modelName: string, signal?: AbortSignal) {
+	async acquireInstance(modelName: string, signal?: AbortSignal) {
 		// prefer an instance of the model that has no context state.
 		for (const key in this.instances) {
 			const instance = this.instances[key]
@@ -223,7 +210,7 @@ export class LLMPool extends EventEmitter3 {
 		)
 		if (availableInstances.length > 0) {
 			const leastRecentlyUsedInstance = availableInstances.reduce(
-				(prev, current) => (prev.lastUse < current.lastUse ? prev : current),
+				(prev, current) => (prev.lastUsed < current.lastUsed ? prev : current),
 			)
 			console.debug(
 				'reusing least recently used instance',
@@ -236,103 +223,57 @@ export class LLMPool extends EventEmitter3 {
 
 		// see if we're allowed to spawn a new instance
 		if (this.canSpawnInstance(modelName)) {
-			console.debug('spawning new instance')
-			const modelConfig = this.config.models[modelName]
-			const engineMethods = engines[modelConfig.engine]
-			const instance = new LLMInstance(engineMethods, modelConfig)
-			this.instances[instance.id] = instance
-			if (this.prepareInstance) {
-				await this.prepareInstance(instance, signal)
-			}
-			await instance.load(signal)
+			const instance = await this.spawnInstance(modelName, signal)
 			instance.lock()
 			return instance
 		}
 
-		// otherwise wait until an instance of our model is released
-		const modelInstanceReleased = (): Promise<LLMInstance> => {
-			return new Promise((resolve, reject) => {
-				const onComplete = ({ instance, args }: TaskResult) => {
-					// console.debug('deferred task result is', { instance, args })
-					if (instance.model === args.model && instance.status === 'idle') {
-						this.queue.off('completed', onComplete)
-						instance.lock()
-						resolve(instance)
-					}
-				}
-				if (signal) {
-					const onAbort = () => {
-						this.queue.off('completed', onComplete)
-						reject(new AbortError('Processing cancelled'))
-					}
-					signal.addEventListener('abort', onAbort)
-				}
-				this.queue.on('completed', onComplete)
-			})
-		}
-		
-		const modelInstanceInitialized = (): Promise<LLMInstance> => {
-			return new Promise((resolve, reject) => {
-				const onInit = (instance: LLMInstance) => {
-					if (instance.model === modelName && instance.status === 'idle') {
-						this.off('init', onInit)
-						instance.lock()
-						resolve(instance)
-					}
-				}
-				if (signal) {
-					const onAbort = () => {
-						this.off('init', onInit)
-					}
-					signal.addEventListener('abort', onAbort)
-				}
-				this.on('init', onInit)
-			})
-		}
+		// otherwise wait until an instance of our model is released or spawned
+		console.debug(`awaiting instance of ${modelName} ...`)
 
-		console.debug(`waiting for an instance of ${modelName} to become available`)
-		return await Promise.any([modelInstanceReleased(), modelInstanceInitialized()])
+		const instance = await this.acquireIdleInstance(modelName)
+		
+		console.debug(`${instance.id} acquired`)
+
+		if (signal?.aborted) {
+			instance.unlock()
+			throw new AbortError()
+		} else {
+			return instance
+		}
 	}
 
 	// attepts to acquire an instance that has the chat state ready, or forwards to acquireInstance
 	async acquireCompletionInstance(
-		args: CompletionRequest | ChatCompletionRequest,
+		req: CompletionRequest | ChatCompletionRequest,
 		signal?: AbortSignal,
 	) {
 		// for completions first search for an instance that has the messages already ingested and the context ready
-		const incomingStateHash = createContextStateHash(args, true)
+		const incomingStateHash = createContextStateHash(req, true)
 		for (const key in this.instances) {
 			const instance = this.instances[key]
 			if (
 				instance.status === 'idle' &&
-				instance.model === args.model &&
+				instance.model === req.model &&
 				instance.contextStateHash === incomingStateHash
 			) {
 				console.debug('cache hit - reusing cached instance', instance.id)
-				if (signal?.aborted) {
-					throw new AbortError('Processing cancelled')
-				}
 				instance.lock()
 				return instance
 			}
 		}
 
-		// const relevantInstances = Object.values(this.instances).filter(
-		// 	(instance) => instance.model === args.model && instance.contextStateHash && instance.status === 'idle',
-		// )
-
 		console.debug('cache miss - acquiring fresh model instance')
-
-		return await this.acquireModelInstance(args.model, signal)
+		return await this.acquireInstance(req.model, signal)
 	}
 
 	// requests an instance from the pool to handle a chat completion request
 	async requestCompletionInstance(
-		args: CompletionRequest | ChatCompletionRequest,
+		req: CompletionRequest | ChatCompletionRequest,
 		signal?: AbortSignal,
 	) {
-		if (!this.config.models[args.model]) {
-			throw new Error(`Model not found: ${args.model}`)
+		if (!this.config.models[req.model]) {
+			throw new Error(`Model not found: ${req.model}`)
 		}
 
 		// if ('messages' in args) {
@@ -341,42 +282,50 @@ export class LLMPool extends EventEmitter3 {
 		// }
 
 		// if we can, prepare a new instance to be ready for the next incoming request
-		if (this.canSpawnInstance(args.model)) {
-			this.spawnInstance(args.model)
+		// TODO this slows down the response time for all requests until maxInstances is reached.
+		// should do it after the request is completed. only spawn a new instance during completion
+		// processing if theres actually another request.
+		if (this.canSpawnInstance(req.model)) {
+			this.spawnInstance(req.model)
 		}
 
-		this.pendingRequests++
-		const instance = await this.acquireCompletionInstance(args, signal)
-		this.pendingRequests--
+		this.waitingRequests++
+		const instance = await this.acquireCompletionInstance(req, signal)
+		this.waitingRequests--
 
 		// once instance is acquired & locked, we can pass it on to the caller
-		// the queue task promise will be forwarded as "relase" function
-		let resolveTask: (value: TaskResult) => void
+		// the queue task promise will be forwarded as releaseInstance
+		let resolveQueueTask: (value: CompletionTask) => void
 
-		this.queue.add((): Promise<TaskResult> => {
-			return new Promise((resolve, reject) => {
-				resolveTask = resolve
+		this.queue
+			.add((): Promise<CompletionTask> => {
+				return new Promise((resolve, reject) => {
+					resolveQueueTask = resolve
+				})
 			})
-		}).then((result) => {
-			if (result?.instance) {
-				const instance = result.instance
-				console.debug(`Releasing ${instance.id}`)
-				instance.unlock()
-				this.emit('completed', result)
-			}
-			// console.debug('queue promise resolved', result.instance.id)
+			.then((task) => {
+				console.debug('task resolved')
+				if (task?.instance) {
+					const instance = task.instance
+					console.debug(`${instance.id} releasing`)
+					instance.unlock()
+					console.debug(`${instance.id} now`, instance.status)
+					this.emit('release', instance)
+				}
+			})
 
-			// console.debug('new status', result.instance.status)
-		})
-
+		// TODO what if user never calls release? automatically resolve or reject after a timeout?
+		const releaseInstance = () => {
+			console.debug('calling resolveQueueTask')
+			resolveQueueTask({ instance, req })
+		}
 		return {
 			instance,
-			release: () => {
-
-				// instance.unlock()
-				// console.debug('calling resolveTask')
-				resolveTask({ instance, args })
-			},
+			releaseInstance,
+			// releaseInstance: () => {
+			// 	console.debug('calling resolveQueueTask')
+			// 	resolveQueueTask({ instance, req })
+			// }
 		}
 	}
 }

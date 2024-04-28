@@ -1,4 +1,4 @@
-import { EngineType, EngineInstance } from '../engines'
+import type { EngineType, EngineInstance } from '../engines'
 export interface CompletionChunk {
 	tokenId: number
 	token: string
@@ -106,7 +106,8 @@ export interface LLMOptions {
 	templateFormat?: ChatTemplateFormat
 }
 
-export interface LLMConfig extends Partial<LLMOptions> {
+
+export interface LLMConfig extends LLMOptions {
 	name: string
 	file: string
 	engine: EngineType

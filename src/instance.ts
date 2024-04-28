@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { customAlphabet } from 'nanoid'
 import { EngineInstance } from './engines/index.js'
 import {
 	CompletionRequest,
@@ -8,7 +9,11 @@ import {
 	LLMEngine,
 	LLMConfig,
 } from './types/index.js'
-import { createContextStateHash, generateId } from './util/index.js'
+import { createContextStateHash } from './util/createContextStateHash.js'
+
+const idAlphabet =
+	'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+const generateId = customAlphabet(idAlphabet, 8)
 
 type LLMInstanceStatus = 'idle' | 'busy' | 'error' | 'loading' | 'preparing'
 
@@ -22,7 +27,7 @@ export class LLMInstance {
 	contextStateHash?: string
 	fingerprint: string
 	createdAt: Date
-	lastUse: number = 0
+	lastUsed: number = 0
 	modelCreatedAt?: Date
 	needsContextReset: boolean = false
 	constructor(engine: LLMEngine, config: LLMConfig) {
@@ -58,13 +63,16 @@ export class LLMInstance {
 		console.debug(`${this.id} instance loaded in ${Date.now() - time}ms`)
 	}
 
-	dispose() {
+	async dispose() {
 		if (this.llm) {
-			this.engine.disposeInstance(this.llm)
+			await this.engine.disposeInstance(this.llm)
 		}
 	}
 
 	lock() {
+		if (this.status !== 'idle') {
+			throw new Error(`Cannot lock: Instance ${this.id} is not idle`)
+		}
 		this.status = 'busy'
 	}
 
@@ -80,7 +88,7 @@ export class LLMInstance {
 		if (!completionArgs.messages) {
 			throw new Error('Messages are required for chat completions.')
 		}
-		this.lastUse = Date.now()
+		this.lastUsed = Date.now()
 		const id = this.id + '-' + generateId(8)
 		console.debug(`${id} creating chat completion`)
 		return {

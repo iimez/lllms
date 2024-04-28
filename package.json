@@ -19,9 +19,10 @@
 		"reinstall": "rimraf ./node_modules ./package-lock.json && npm install",
 		"prebuild": "rimraf ./dist",
 		"build": "tsc --build tsconfig.release.json --force",
-		"test": "vitest --test-timeout=-1 --pool=forks --maxConcurrency=1",
+		"test": "vitest --test-timeout=-1 --pool=forks",
 		"test:openai": "vitest tests/openai.test.ts --test-timeout=-1 --pool=forks",
 		"test:cache": "vitest tests/cache.test.ts --test-timeout=-1 --pool=forks",
+		"test:server": "vitest tests/server.test.ts --test-timeout=-1 --pool=forks",
 		"prewatch": "rimraf ./dist",
 		"watch": "tsc -w -p tsconfig.release.json",
 		"start": "cross-env NODE_ENV=production node dist/standalone.js"

@@ -1,11 +1,14 @@
 import type { AddressInfo } from 'node:net'
 import { format as formatURL } from 'node:url'
-import { startStandaloneServer, LLMServerOptions } from './server.js'
+import { serveLLMs, StandaloneServerOptions } from './server.js'
 
-const serverOptions: LLMServerOptions = {
+const serverOptions: StandaloneServerOptions = {
+	listen: {
+		port: 3000,
+	},
 	concurrency: 2,
 	models: {
-		'phi3-4k': {
+		'phi3-mini': {
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 			engine: 'gpt4all',
 			// url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
@@ -34,7 +37,7 @@ const serverOptions: LLMServerOptions = {
 }
 
 async function main() {
-	const server = await startStandaloneServer(serverOptions, { port: 3000 })
+	const server = await serveLLMs(serverOptions)
 	const { address, port } = server.address() as AddressInfo
 	const hostname = address === '' || address === '::' ? 'localhost' : address
 	const url = formatURL({

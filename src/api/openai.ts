@@ -1,31 +1,25 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { Request } from 'express'
-import { existsSync, promises as fs, statSync } from 'node:fs'
-import { OpenAI } from 'openai'
+import { existsSync, statSync } from 'node:fs'
+import path from 'node:path'
+import type { OpenAI } from 'openai'
 import { LLMPool } from '../pool.js'
 import { ChatMessage, CompletionFinishReason } from '../types/index.js'
 
 function parseJSONRequestBody(req: IncomingMessage | Request): Promise<any> {
 	return new Promise((resolve, reject) => {
-		
-		// console.debug('parseJSONRequestBody', {
-		// 	url: req.url,
-		// 	method: req.method,
-		// 	headers: req.headers,
-		// 	// @ts-ignore
-		// 	body: req.body,
-		// })
-		
+
+		// if request is from express theres no need to parse anything
 		if ('body' in req) {
 			resolve(req.body)
 			return
 		}
+		
+		// for native http server
 		let body = ''
-
 		req.on('data', (chunk) => {
 			body += chunk.toString()
 		})
-
 		req.on('end', () => {
 			try {
 				const data = JSON.parse(body)
@@ -78,7 +72,6 @@ function createChatCompletionHandler(pool: LLMPool) {
 		}
 
 		const controller = new AbortController()
-
 		req.on('close', () => {
 			console.debug('Client closed connection')
 			controller.abort()
@@ -99,7 +92,7 @@ function createChatCompletionHandler(pool: LLMPool) {
 				stop = [stop]
 			}
 
-			const completionArgs = {
+			const completionReq = {
 				model: args.model,
 				// TODO support multimodal image content array
 				messages: args.messages.filter((m) => {
@@ -118,13 +111,11 @@ function createChatCompletionHandler(pool: LLMPool) {
 					: undefined,
 				topP: args.top_p ? args.top_p : undefined,
 			}
-			console.debug('calling requestCompletionInstance')
-			const lock = await pool.requestCompletionInstance(
-				completionArgs,
+			const { instance, releaseInstance } = await pool.requestCompletionInstance(
+				completionReq,
 				controller.signal,
 			)
-			console.debug('lock acquired', lock.instance.id)
-			const completion = lock.instance.createChatCompletion(completionArgs)
+			const completion = instance.createChatCompletion(completionReq)
 
 			const result = await completion.process({
 				signal: controller.signal,
@@ -150,7 +141,7 @@ function createChatCompletionHandler(pool: LLMPool) {
 					}
 				},
 			})
-			lock.release()
+			releaseInstance()
 
 			if (args.stream) {
 				// beta chat completions pick up the meta data from the last chunk
@@ -160,7 +151,7 @@ function createChatCompletionHandler(pool: LLMPool) {
 						model: completion.model,
 						object: 'chat.completion.chunk',
 						created: Math.floor(completion.createdAt.getTime() / 1000),
-						system_fingerprint: lock.instance.fingerprint,
+						system_fingerprint: instance.fingerprint,
 						choices: [
 							{
 								index: 0,
@@ -186,7 +177,7 @@ function createChatCompletionHandler(pool: LLMPool) {
 					model: completion.model,
 					object: 'chat.completion',
 					created: Math.floor(completion.createdAt.getTime() / 1000),
-					system_fingerprint: lock.instance.fingerprint,
+					system_fingerprint: instance.fingerprint,
 					choices: [
 						{
 							index: 0,
@@ -265,7 +256,7 @@ function createCompletionHandler(pool: LLMPool) {
 				stop = [stop]
 			}
 
-			const completionArgs = {
+			const completionReq = {
 				model: args.model,
 				prompt: args.prompt as string,
 				temperature: args.temperature ? args.temperature : undefined,
@@ -282,18 +273,15 @@ function createCompletionHandler(pool: LLMPool) {
 				topP: args.top_p ? args.top_p : undefined,
 			}
 
-			const lock = await pool.requestCompletionInstance(
-				completionArgs,
+			const { instance, releaseInstance } = await pool.requestCompletionInstance(
+				completionReq,
 				controller.signal,
 			)
-			const completion = lock.instance.createCompletion(completionArgs)
+			const completion = instance.createCompletion(completionReq)
 
 			const result = await completion.process({
 				signal: controller.signal,
 				onChunk: (chunk) => {
-					// TODO abort generation if client closes connection
-					// console.debug('onToken', token)
-
 					if (args.stream) {
 						const chunkData = {
 							id: completion.id,
@@ -311,7 +299,7 @@ function createCompletionHandler(pool: LLMPool) {
 					}
 				},
 			})
-			lock.release()
+			releaseInstance()
 
 			if (args.stream) {
 				res.write(
@@ -338,11 +326,10 @@ function createCompletionHandler(pool: LLMPool) {
 					model: completion.model,
 					object: 'text_completion',
 					created: Math.floor(completion.createdAt.getTime() / 1000),
-					system_fingerprint: lock.instance.fingerprint,
+					system_fingerprint: instance.fingerprint,
 					choices: [
 						{
 							index: 0,
-							// message: result.message,
 							text: result.text,
 							logprobs: null,
 							finish_reason: result.finishReason
@@ -380,9 +367,10 @@ function createListModelsHandler(pool: LLMPool) {
 				//https://stackoverflow.com/a/51442878
 				created = Math.floor(statSync(config.file).birthtime.getTime() / 1000)
 			}
+			// TODO possible to get created/owned_by from gguf metadata?
 			return {
 				object: 'model',
-				owned_by: config.engine,
+				owned_by: path.basename(config.file),
 				id,
 				created,
 			}

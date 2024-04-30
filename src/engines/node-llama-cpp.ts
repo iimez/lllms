@@ -29,13 +29,14 @@ interface LlamaCppInstance {
 	session: LlamaChatSession | null
 }
 
+// https://github.com/withcatai/node-llama-cpp/pull/105
+// https://github.com/withcatai/node-llama-cpp/discussions/109
+
 export async function loadInstance(config: LLMConfig, ctx: EngineContext) {
 	ctx.logger(LogLevels.verbose, `Load Llama model from ${config.file}`, {
 		instance: ctx.instance,
 	})
 
-	// https://github.com/withcatai/node-llama-cpp/pull/105
-	// https://github.com/withcatai/node-llama-cpp/discussions/109
 
 	const llama = await getLlama({
 		gpu: config.gpu ? 'auto' : false, // "auto" | "metal" | "cuda" | "vulkan"
@@ -50,24 +51,23 @@ export async function loadInstance(config: LLMConfig, ctx: EngineContext) {
 			) {
 				ctx.logger(LogLevels.error, message, { instance: ctx.instance })
 			} else if (level === LlamaLogLevel.info) {
-				ctx.logger(LogLevels.info, message, { instance: ctx.instance })
+				ctx.logger(LogLevels.verbose, message, { instance: ctx.instance })
 			}
 		},
 	})
 	const model = await llama.loadModel({
 		modelPath: config.file, // full model absolute path
-		// useMlock: false,
 		loadSignal: ctx.signal,
+		// useMlock: false,
+		// onLoadProgress: (percent) => {}
 	})
 
 	const context = await model.createContext({
-		// sequences: 1,
-		contextSize: 'auto',
-		// seed: 0,
+		sequences: 2,
+		// TODO
+		// seed: ,
 		// threads: 4, // 0 = max
-		// sequences: 1,
 		// batchSize: 128,
-		// contextSize: 2048,
 		createSignal: ctx.signal,
 	})
 
@@ -105,8 +105,8 @@ export async function processChatCompletion(
 	ctx: EngineCompletionContext,
 ): Promise<EngineChatCompletionResult> {
 	if (
-		!instance.session ||
 		ctx.resetContext ||
+		!instance.session ||
 		!instance.context.sequencesLeft
 	) {
 		// allow setting system prompt via initial message.
@@ -115,21 +115,22 @@ export async function processChatCompletion(
 			systemPrompt = request.messages[0].content
 		}
 		if (!instance.context.sequencesLeft) {
-			// TODO is there a better way? cant get context shift to work
+			ctx.logger(LogLevels.warn, 'No sequences left, recreating context.')
 			instance.context.dispose()
 			instance.context = await instance.model.createContext({
 				createSignal: ctx.signal,
+				sequences: 2,
+				contextSize: 4096,
 			})
 		}
+		if (instance.session) {
+			instance.session.dispose()
+		}
 		instance.session = new LlamaChatSession({
-			contextSequence: instance.context.getSequence({
-				// contextShift: {
-				// 	size: 50,
-				// 	strategy: "eraseBeginning"
-				// }
-			}),
 			chatWrapper: pickTemplateFormatter(request.templateFormat),
 			systemPrompt,
+			contextSequence: instance.context.getSequence(),
+			autoDisposeSequence: true,
 			// contextShift: {
 			// 	size: 50,
 			// 	strategy: "eraseFirstResponseAndKeepFirstSystem"
@@ -169,18 +170,18 @@ export async function processChatCompletion(
 		maxTokens: request.maxTokens,
 		temperature: request.temperature,
 		topP: request.topP,
+		topK: request.topK,
+		minP: request.minP,
 		repeatPenalty: {
 			frequencyPenalty: request.frequencyPenalty,
 			presencePenalty: request.presencePenalty,
 		},
 		// TODO integrate stopGenerationTriggers
 		// stopGenerationTriggers: stopTriggers.length ? [stopTriggers] : undefined,
-		// topK: completionArgs.topK,
-		// minP: completionArgs.minP,
 		signal: ctx.signal,
 		onToken: (tokens) => {
 			generatedTokenCount++
-			const text = instance.model.detokenize(tokens) // TODO will this break emojis?
+			const text = instance.model.detokenize(tokens)
 			if (ctx.onChunk) {
 				ctx.onChunk({
 					tokens,
@@ -211,17 +212,9 @@ export async function processCompletion(
 		throw new Error('Prompt is required for completion.')
 	}
 
-	// console.debug('context size', instance.context.getAllocatedContextSize())
-
-	// instance.context.getAllocatedContextSize()
 	instance.context = await instance.model.createContext({
 		createSignal: ctx.signal,
 	})
-
-	// console.debug('context', {
-	// 	allocated: instance.context.getAllocatedContextSize(),
-	// 	sequencesLeft: instance.context.sequencesLeft,
-	// })
 
 	const completion = new LlamaCompletion({
 		contextSequence: instance.context.getSequence(),

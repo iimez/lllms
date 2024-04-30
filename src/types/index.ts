@@ -28,6 +28,8 @@ export interface CompletionRequestBase {
 	frequencyPenalty?: number
 	presencePenalty?: number
 	topP?: number
+	minP?: number
+	topK?: number
 }
 
 export interface CompletionRequest extends CompletionRequestBase {

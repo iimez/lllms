@@ -9,7 +9,7 @@ import { LLMPool } from './pool.js'
 import { LLMInstance } from './instance.js'
 import { ModelDownloader } from './downloader.js'
 import { LLMOptions, CompletionRequest, ChatCompletionRequest } from './types/index.js'
-import { createOpenAIRequestHandlers } from './api/openai.js'
+import { createOpenAIRequestHandlers } from './api/openai/index.js'
 import { resolveModelConfig } from './util/resolveModelConfig.js'
 import { Logger, LogLevel, LogLevels, createLogger } from './util/log.js'
 

@@ -1,4 +1,4 @@
-export * from './api/openai.js'
+export * from './api/openai/index.js'
 export * from './types/index.js'
 export * from './pool.js'
 export * from './instance.js'

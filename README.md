@@ -119,9 +119,9 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | max_tokens          | ✅      | ✅             |
 | top_p               | ✅      | ✅             |
 | stop                | ✅      | 🚧             |
-| seed                | ❌      | ❌             |
-| frequency_penalty   | ❌      | ✅             |
-| presence_penalty    | ❌      | ✅             |
+| seed                | ❌      | 🚧             |
+| frequency_penalty   | ❌      | 🚧             |
+| presence_penalty    | ❌      | 🚧             |
 | best_of             | ❌      | ❌             |
 | n                   | ❌      | ❌             |
 | logprobs            | ❌      | ❌             |
@@ -134,7 +134,7 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 
 | Feature             | gpt4all | node-llama-cpp |
 | ------------------- | ------- | -------------- |
-| Context reuse       | ✅      | 🚧             |
+| Context cache       | ✅      | ✅             |
 | System prompt       | ✅      | ✅             |
 
 

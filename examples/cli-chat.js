@@ -7,7 +7,6 @@ import { LLMPool } from '../dist/index.js'
 // A simple command-line chat example using the LLMPool class.
 // Can use LLMPool instead of LLMServer if you wanna manage your model files manually.
 
-// creates a pool with a single model and no concurrency.
 const pool = new LLMPool(
 	{
 		// default concurrency=1, which is okay for this example.

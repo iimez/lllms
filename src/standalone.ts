@@ -7,7 +7,7 @@ const serverOptions: StandaloneServerOptions = {
 	listen: {
 		port: 3000,
 	},
-	logLevel: LogLevels.verbose,
+	logLevel: LogLevels.debug,
 	concurrency: 2,
 	models: {
 		'phi3-mini-4k': {
@@ -15,8 +15,8 @@ const serverOptions: StandaloneServerOptions = {
 			engine: 'gpt4all',
 			// url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
 			// engine: 'node-llama-cpp',
-			minInstances: 1,
-			maxInstances: 2,
+			// minInstances: 1,
+			// maxInstances: 2,
 			templateFormat: 'phi',
 		},
 		'orca-3b': {
@@ -35,6 +35,11 @@ const serverOptions: StandaloneServerOptions = {
 			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-70B-Instruct-GGUF/resolve/main/Meta-Llama-3-70B-Instruct.Q4_0.gguf',
 			engine: 'node-llama-cpp',
 		},
+		'starcoder-7b': {
+			url: 'https://gpt4all.io/models/gguf/starcoder-newbpe-q4_0.gguf',
+			engine: 'gpt4all',
+			minInstances: 1,
+		}
 	},
 }
 

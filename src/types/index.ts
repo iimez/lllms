@@ -1,8 +1,8 @@
 import type { EngineType, EngineInstance } from '../engines'
 import type { Logger } from '../util/log.js'
 export interface CompletionChunk {
-	tokenId: number
-	token: string
+	tokens: number[]
+	text: string
 }
 
 export type CompletionFinishReason =
@@ -35,28 +35,10 @@ export interface CompletionRequest extends CompletionRequestBase {
 }
 
 export interface ChatCompletionRequest extends CompletionRequestBase {
-	// model: string
 	systemPrompt?: string
 	messages: ChatMessage[]
 	templateFormat?: ChatTemplateFormat
-	// prompt?: string
-	// systemPrompt?: string
-	// temperature?: number
-	// stream?: boolean
-	// maxTokens?: number
-	// seed?: number
-	// stop?: string[]
-	// frequencyPenalty?: number
-	// presencePenalty?: number
-	// topP?: number
-	// templateFormat?: ChatTemplateFormat
 }
-
-// export interface GenerationArgs {
-// 	onChunk?: (chunk: CompletionChunk) => void
-// 	resetContext?: boolean
-// 	signal?: AbortSignal
-// }
 
 export interface EngineCompletionContext extends EngineContext {
 	onChunk?: (chunk: CompletionChunk) => void
@@ -71,7 +53,7 @@ export interface EngineContext {
 
 export interface EngineChatCompletionResult {
 	message: ChatMessage
-	finishReason?: CompletionFinishReason
+	finishReason: CompletionFinishReason
 	promptTokens: number
 	completionTokens: number
 	totalTokens: number

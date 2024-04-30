@@ -1,78 +1,89 @@
 import os from 'node:os'
 import path from 'node:path'
-import http from 'node:http'
-import express from 'express'
+import chalk from 'chalk'
 import { LLMPool } from '../dist/index.js'
 
-// pool requires all models to have an absolute path configured
-const modelsDir = path.resolve(os.homedir(), '.cache/lllms')
+// Complete multiple prompts concurrently using LLMPool.
 
-// optional callback for custom initialization logic, used by LLMServer to download models on demand.
-const prepareInstance = (instance) => {
-	console.debug('Pool wants to start instance', instance)
-	return Promise.resolve()
+async function onPrepareInstance(instance) {
+	// can be used to set up the instance before it's used.
+	// the model will not be loaded until this promise resolves.
+	// console.log('Instance about to load:', instance)
 }
 
-// create our pool
-const pool = new LLMPool({
-	inferenceConcurrency: 2,
-	models: {
-		'phi3-mini-4k': {
-			// pool will error if this file does not exist
-			file: path.join(modelsDir, 'Phi-3-mini-4k-instruct-q4.gguf'),
-			engine: 'node-llama-cpp',
-			maxInstances: 2,
+const pool = new LLMPool(
+	{
+		// global inference concurrency limit, across all models
+		concurrency: 2,
+		models: {
+			'phi3-mini-4k': {
+				// note that this file needs to be downloaded manually when using the pool directly.
+				file: path.resolve(
+					os.homedir(),
+					'.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf',
+				),
+				engine: 'gpt4all',
+				// setting this to 1 will load the model on pool.init(), otherwise it will be loaded on-demand
+				minInstances: 1,
+				maxInstances: 2, // allow the pool to spawn additional instances of this model
+			},
 		},
 	},
-}, prepareInstance)
-pool.init()
+	onPrepareInstance,
+)
 
-// start a web server and add an endpoint for chat
-const app = express()
-app.use(express.json())
-app.set('json spaces', 2)
-app.use('/chat', async (req, res) => {
-	const { model, messages, temperature, maxTokens } = req.body
-	const { instance, releaseInstance } = await pool.requestCompletionInstance({
-		model,
-		messages,
-	})
-	const completion = instance.createChatCompletion({
-		model,
-		messages,
-		temperature,
-		maxTokens,
-	})
+console.log('Initializing pool...')
+await pool.init()
+
+console.log('Pool ready')
+
+async function createCompletion(prompt) {
+	const req = {
+		model: 'phi3-mini-4k',
+		prompt,
+		temperature: 3,
+		maxTokens: 50,
+	}
+	const { instance, releaseInstance } = await pool.requestCompletionInstance(
+		req,
+	)
+	const completion = instance.createCompletion(req)
+
+	const completionBegin = process.hrtime()
 	const result = await completion.process()
+	const elapsed = process.hrtime(completionBegin)
+
 	releaseInstance()
-	res.json(result)
-})
-const httpServer = http.createServer(app)
-httpServer.listen(3000)
-
-/*
-curl http://localhost:3000/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-      "model": "phi3-mini-4k",
-      "messages": [
-          {
-              "role": "user",
-              "content": "how to find my kernel version on linux=?"
-          }
-      ]
-  }'
-*/
-
-/*
-{
-  "finishReason": "eogToken",
-  "message": {
-    "role": "assistant",
-    "content": "To find your kernel version on Linux, you can use the following methods: [...]"
-  },
-  "promptTokens": 10,
-  "completionTokens": 344,
-  "totalTokens": 354
+	return {
+		text: result.text,
+		instance: instance.id,
+		speed: Math.round(req.maxTokens / (elapsed[0] + elapsed[1] / 1e9)),
+	}
 }
-*/
+
+const printResult = (title) => (result) => {
+	console.log(
+		chalk.yellow(title) +
+			' ' +
+			chalk.bold(result.instance) +
+			' ' +
+			chalk.dim(`generated ${result.speed} tokens/s`),
+	)
+	console.log(chalk.dim(prompt) + result.text)
+}
+
+console.log('Processing completions...')
+
+const prompt = 'Locality of '
+const res = await createCompletion(prompt)
+printResult('Solo completion')(res)
+
+const count = 5
+
+for (let i = 1; i <= count; i++) {
+	createCompletion(prompt).then(printResult(`#${i}`))
+}
+process.nextTick(() => {
+	const { waiting, processing } = pool.getStatus()
+	console.log('Pool processing', { waiting, processing })
+})

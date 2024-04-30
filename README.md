@@ -19,11 +19,9 @@ Note that this is a dev and learning tool and not meant for production use. It i
 
 #### JavaScript APIs
 
-See [./src/server.ts](./src/server.ts) for ways to integrate with existing HTTP servers.
+To integrate lllms directly with your application, you can use either the higher level `startLLMs` or the lower level `LLMPool`. For the latter check out [./examples/pool](./examples/pool.js).
 
-To integrate with web servers other than express use the `LLMServer` + `createOpenAIRequestHandlers`.
-
-If you're not interested in a HTTP API and just want to use LLMs within your node application check out these [./examples](./examples) for usage of the lower-level LLMServer and the underlying LLMPool.
+To attach lllms to your existing (express, or any other) web server see [./examples/express-openai](./examples/express-openai.js) and [./examples/node-server](./examples/node-server.js). See [./src/server.ts](./src/server.ts) for more ways to integrate with existing HTTP servers.
 
 The highest level API, to spin up a standalone server:
 
@@ -107,13 +105,15 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 
 #### OpenAI API
 
-| OpenAI API Feature  | gpt4all | node-llama-cpp |
+| Endpoint            | gpt4all | node-llama-cpp |
 | ------------------- | ------- | -------------- |
 | v1/chat/completions | ✅      | ✅             |
 | v1/completions      | ✅      | ✅             |
 | v1/embeddings       | ❌      | ❌             |
 | v1/models           | 🚧      |
-| ---                 | ---     | ---            |
+
+| Param               | gpt4all | node-llama-cpp |
+| ------------------- | ------- | -------------- |
 | stream              | ✅      | ✅             |
 | temperature         | ✅      | ✅             |
 | max_tokens          | ✅      | ✅             |
@@ -132,6 +132,12 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | tool_choice         | ❌      | ❌             |
 | suffix              | ❌      | ❌             |
 
+| Feature             | gpt4all | node-llama-cpp |
+| ------------------- | ------- | -------------- |
+| Context reuse       | ✅      | 🚧             |
+| System prompt       | ✅      | ✅             |
+
+
 System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored.
 
 Note that the current context-reuse implementation only works if (apart from the final user message) the same messages are resent in the same order. This is because the messages will be hashed to be compared during follow up turns. If no hash matches, a fresh context will be used and passed messages will be reingested.
@@ -147,6 +153,8 @@ Not in any particular order:
 - [x] POC of chat context reuse across requests
 - [x] Tests for context reuse and context leaking
 - [x] Logging Interface
+- [x] Better Examples
+- [ ] node-llama-cpp context reuse
 - [ ] Tests for longer conversations
 - [ ] Tests for request cancellation
 - [ ] GPU support
@@ -186,3 +194,4 @@ If you look at this package, you might also want to take a look at these other s
 - [ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md) - Uses llama.cpp and provides a HTTP API. Also has experimental OpenAI API compatibility.
 - [llama.cpp Server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server#llamacpp-http-server) - The official llama.cpp HTTP API.
 - [VLLM](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) - A more production ready solution for hosting large language models.
+- [LM Studio](https://lmstudio.ai/docs/local-server) - Also has a local server.

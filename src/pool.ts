@@ -115,7 +115,7 @@ export class LLMPool extends EventEmitter3 {
 		await Promise.all(loadingPromises)
 	}
 
-	getStatusInfo() {
+	getStatus() {
 		return {
 			processing: this.queue.size,
 			waiting: this.waitingRequests,
@@ -181,11 +181,24 @@ export class LLMPool extends EventEmitter3 {
 				if (instance.model === modelName && instance.status === 'idle') {
 					this.off('release', listener)
 					this.off('spawn', listener)
-					instance.lock()
-					resolve(instance)
+					try {
+						instance.lock()
+						resolve(instance)
+					} catch (err: any) {
+						this.logger(LogLevels.error, 'Error acquiring idle instance', {
+							error: err.message,
+						})
+						reject(err)
+					}
 				}
 			}
-			this.on('spawn', listener)
+
+			this.on('spawn', (instance) => {
+				process.nextTick(() => {
+					listener(instance)
+					// listener(this.instances[instance.id])
+				})
+			})
 			this.on('release', listener)
 			if (signal) {
 				signal.addEventListener('abort', () => {
@@ -208,11 +221,9 @@ export class LLMPool extends EventEmitter3 {
 				instance.model === modelName &&
 				!instance.hasContext()
 			) {
-				this.logger(
-					LogLevels.verbose,
-					'Reusing instance with no context state',
-					{ instance: instance.id },
-				)
+				this.logger(LogLevels.debug, 'Reusing instance with no context state', {
+					instance: instance.id,
+				})
 				instance.lock()
 				return instance
 			}
@@ -226,7 +237,7 @@ export class LLMPool extends EventEmitter3 {
 			const lruInstance = availableInstances.reduce((prev, current) =>
 				prev.lastUsed < current.lastUsed ? prev : current,
 			)
-			this.logger(LogLevels.verbose, 'Reusing least recently used instance', {
+			this.logger(LogLevels.debug, 'Reusing least recently used instance', {
 				instance: lruInstance.id,
 			})
 			lruInstance.lock()
@@ -242,11 +253,11 @@ export class LLMPool extends EventEmitter3 {
 		}
 
 		// otherwise wait until an instance of our model is released or spawned
-		this.logger(LogLevels.verbose, 'Awaiting idle instance', {
+		this.logger(LogLevels.debug, 'Awaiting idle instance', {
 			model: modelName,
 		})
 		const instance = await this.acquireIdleInstance(modelName)
-		this.logger(LogLevels.verbose, 'Instance acquired', {
+		this.logger(LogLevels.debug, 'Instance acquired', {
 			instance: instance.id,
 		})
 
@@ -271,7 +282,7 @@ export class LLMPool extends EventEmitter3 {
 				instance.model === req.model &&
 				instance.matchesContext(req)
 			) {
-				this.logger(LogLevels.verbose, 'Cache hit - reusing cached instance', {
+				this.logger(LogLevels.debug, 'Cache hit - reusing cached instance', {
 					instance: instance.id,
 				})
 				instance.lock()
@@ -279,10 +290,7 @@ export class LLMPool extends EventEmitter3 {
 			}
 		}
 
-		this.logger(
-			LogLevels.verbose,
-			'Cache miss - acquiring fresh model instance',
-		)
+		this.logger(LogLevels.debug, 'Cache miss - acquiring fresh model instance')
 		return await this.acquireInstance(req.model, signal)
 	}
 
@@ -310,7 +318,7 @@ export class LLMPool extends EventEmitter3 {
 
 		// once instance is acquired & locked, we can pass it on to the caller
 		// the queue task promise will be forwarded as releaseInstance
-		let resolveQueueTask: (value: CompletionTask) => void
+		let resolveQueueTask: (value: CompletionTask) => void = () => {}
 
 		this.queue
 			.add((): Promise<CompletionTask> => {
@@ -321,7 +329,7 @@ export class LLMPool extends EventEmitter3 {
 			.then((task) => {
 				if (task?.instance) {
 					const instance = task.instance
-					this.logger(LogLevels.verbose, 'Task completed, releasing instance', {
+					this.logger(LogLevels.debug, 'Task completed, releasing instance', {
 						instance: instance.id,
 					})
 					instance.unlock()
@@ -330,12 +338,12 @@ export class LLMPool extends EventEmitter3 {
 			})
 
 		// TODO what if user never calls release? automatically resolve or reject after a timeout?
-
+		const releaseInstance = () => {
+			resolveQueueTask({ instance, req })
+		}
 		return {
 			instance,
-			releaseInstance: () => {
-				resolveQueueTask({ instance, req })
-			},
+			releaseInstance,
 		}
 	}
 }

@@ -39,7 +39,7 @@ export function createLogger(minLevel: LogLevel) {
 	
 }
 
-export function formatMessage(level: LogLevel, message: string, meta?: any) {
+function formatMessage(level: LogLevel, message: string, meta: any = {}) {
 	const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 22)
 	let messageStr = `[${timestamp}] `
 	
@@ -61,18 +61,20 @@ export function formatMessage(level: LogLevel, message: string, meta?: any) {
 			break
 	}
 	
-	const { instance, elapsed, ...otherData } = meta
-	if (instance) {
-		messageStr += ` ${instance}`
-		
+	if (meta?.instance) {
+		messageStr += ` ${meta.instance}`
 	}
 
 	messageStr += ' ' + message
-	if (elapsed) {
-		messageStr += ' ' + chalk.magenta(`in ${elapsed}ms`)
-	}
-	if (Object.keys(otherData).length > 0) {
-		messageStr += ' ' + JSON.stringify(otherData, null, 2).replace(/\n/g, ' ').replace(/\s+/g, ' ')
+	
+	if (meta) {
+		const { instance, elapsed, ...otherData } = meta
+		if (elapsed) {
+			messageStr += ' ' + chalk.magenta(`+${elapsed}ms`)
+		}
+		if (Object.keys(otherData).length > 0) {
+			messageStr += ' ' + JSON.stringify(otherData, null, 2).replace(/\n/g, ' ').replace(/\s+/g, ' ')
+		}
 	}
 	return messageStr
 }

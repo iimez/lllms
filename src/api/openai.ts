@@ -130,7 +130,7 @@ function createChatCompletionHandler(pool: LLMPool) {
 									index: 0,
 									delta: {
 										role: 'assistant',
-										content: chunk.token,
+										content: chunk.text,
 									},
 									logprobs: null,
 									finish_reason: null,
@@ -289,7 +289,7 @@ function createCompletionHandler(pool: LLMPool) {
 							choices: [
 								{
 									index: 0,
-									text: chunk.token,
+									text: chunk.text,
 									logprobs: null,
 									finish_reason: null,
 								},

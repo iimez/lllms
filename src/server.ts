@@ -8,7 +8,7 @@ import cors from 'cors'
 import { LLMPool } from './pool.js'
 import { LLMInstance } from './instance.js'
 import { ModelDownloader } from './downloader.js'
-import { LLMOptions } from './types/index.js'
+import { LLMOptions, CompletionRequest, ChatCompletionRequest } from './types/index.js'
 import { createOpenAIRequestHandlers } from './api/openai.js'
 import { resolveModelConfig } from './util/resolveModelConfig.js'
 import { Logger, LogLevel, LogLevels, createLogger } from './util/log.js'
@@ -45,6 +45,10 @@ export class LLMServer {
 		await fs.mkdir(this.modelsDir, { recursive: true })
 		await this.pool.init()
 	}
+	
+	async requestCompletionInstance(req: CompletionRequest | ChatCompletionRequest) {
+		return this.pool.requestCompletionInstance(req)
+	}
 
 	// gets called by the pool right before a new instance is created
 	async prepareInstance(instance: LLMInstance, signal?: AbortSignal) {
@@ -73,8 +77,8 @@ export class LLMServer {
 		await this.pool.dispose()
 	}
 
-	getStatusInfo() {
-		const pool = this.pool.getStatusInfo()
+	getStatus() {
+		const pool = this.pool.getStatus()
 		return {
 			downloads: {
 				queue: this.loader.queue.size,
@@ -84,6 +88,12 @@ export class LLMServer {
 			pool,
 		}
 	}
+}
+
+export async function startLLMs(opts: LLMServerOptions) {
+	const server = new LLMServer(opts)
+	await server.start()
+	return server
 }
 
 export function createOpenAIMiddleware(llmServer: LLMServer) {
@@ -98,7 +108,7 @@ export function createOpenAIMiddleware(llmServer: LLMServer) {
 export function createExpressMiddleware(llmServer: LLMServer) {
 	const router = express.Router()
 	router.get('/', (req, res) => {
-		res.json(llmServer.getStatusInfo())
+		res.json(llmServer.getStatus())
 	})
 	router.use('/openai', createOpenAIMiddleware(llmServer))
 	return router
@@ -110,7 +120,6 @@ export interface StandaloneServerOptions extends LLMServerOptions {
 }
 
 export async function serveLLMs(opts: StandaloneServerOptions) {
-	console.debug('Starting LLMServer', opts.logLevel)
 	const { listen, ...serverOpts } = opts
 	const listenOpts = listen ?? { port: 3000 }
 	const llmServer = new LLMServer({

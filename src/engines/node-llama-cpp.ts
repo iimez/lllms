@@ -183,8 +183,8 @@ export async function processChatCompletion(
 			const text = instance.model.detokenize(tokens) // TODO will this break emojis?
 			if (ctx.onChunk) {
 				ctx.onChunk({
-					tokenId: tokens[0],
-					token: text,
+					tokens,
+					text,
 				})
 			}
 		},
@@ -249,8 +249,8 @@ export async function processCompletion(
 			const text = instance.model.detokenize(tokens)
 			if (ctx.onChunk) {
 				ctx.onChunk({
-					tokenId: tokens[0],
-					token: text,
+					tokens,
+					text,
 				})
 			}
 		},

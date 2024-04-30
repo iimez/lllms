@@ -81,8 +81,8 @@ export async function processCompletion(
 			}
 			if (ctx.onChunk) {
 				ctx.onChunk({
-					token: token,
-					tokenId,
+					text: token,
+					tokens: [tokenId],
 				})
 			}
 			return !ctx?.signal?.aborted
@@ -192,8 +192,8 @@ export async function processChatCompletion(
 			}
 			if (ctx.onChunk) {
 				ctx.onChunk({
-					tokenId,
-					token: token,
+					tokens: [tokenId],
+					text: token,
 				})
 			}
 

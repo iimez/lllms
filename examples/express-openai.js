@@ -1,5 +1,6 @@
 import http from 'node:http'
 import express from 'express'
+import OpenAI from 'openai'
 import { LLMServer, createExpressMiddleware } from '../dist/index.js'
 
 // Demonstration of using the LLMServer + Express middleware to serve an OpenAI API.
@@ -7,41 +8,38 @@ import { LLMServer, createExpressMiddleware } from '../dist/index.js'
 // Create a server with a single model, limiting to 2 instances that can run concurrently.
 // Models will be downloaded on-demand or during LLMServer.start() if minInstances > 0.
 const llms = new LLMServer({
-  // Default download directory is ~/.cache/lllms.
-  // modelsDir: path.resolve(os.homedir(), '.cache/models'),
-  concurrency: 2,
-  models: {
-    'phi3-mini-4k': {
-      url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-      engine: 'node-llama-cpp',
-      maxInstances: 2,
-    },
-  },
+	// Default download directory is ~/.cache/lllms.
+	// modelsDir: path.resolve(os.homedir(), '.cache/models'),
+	concurrency: 2,
+	models: {
+		'phi3-mini-4k': {
+			url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+			engine: 'node-llama-cpp',
+			maxInstances: 2,
+		},
+	},
 })
-llms.start()
+
+await llms.start()
+
 const app = express()
-app.use(
-  express.json(),
-  createExpressMiddleware(llms),
-)
+app.use(express.json(), createExpressMiddleware(llms))
 const server = http.createServer(app)
-server.listen(3000)
+server.listen(3001)
 
 console.log('Server up')
 
-/*
-curl http://localhost:3000/openai/v1/chat/completions \
-	-H "Content-Type: application/json" \
-	-d '{
-			"model": "phi3-mini-4k",
-			"messages": [
-					{
-							"role": "user",
-							"content": "Lets count to three!"
-					}
-			]
-	}'
-*/
+const openai = new OpenAI({
+	baseURL: 'http://localhost:3001/openai/v1/',
+	apiKey: '123',
+})
+
+const completion = await openai.chat.completions.create({
+	model: 'phi3-mini-4k',
+	messages: [{ role: 'user', content: 'Lets count to three!' }],
+})
+
+console.log(JSON.stringify(completion, null, 2))
 
 /*
 {

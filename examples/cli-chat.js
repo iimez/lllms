@@ -14,10 +14,15 @@ const pool = new LLMPool(
 		models: {
 			'phi3-mini-4k': {
 				// note that this file needs to be downloaded manually when using the pool directly.
-				file: path.resolve(os.homedir(), '.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf'),
-				engine: 'gpt4all',
+				// file: path.resolve(os.homedir(), '.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf'),
+				// engine: 'gpt4all',
 				// setting this to 1 will load the model on pool.init(), otherwise it will be loaded on-demand
 				// minInstances: 1,
+				file: path.resolve(
+					os.homedir(),
+					'.cache/lllms/Phi-3-mini-4k-instruct-q4.gguf',
+				),
+				engine: 'node-llama-cpp',
 			},
 		},
 	}
@@ -49,7 +54,7 @@ while (true) {
 		messages,
 	}
 	// ... both to decide which instance to use ...
-	const { instance, releaseInstance } = await pool.requestCompletionInstance(req)
+	const { instance, release } = await pool.requestLLM(req)
 	// ... and to create the completion
 	const completion = instance.createChatCompletion(req)
 	process.stdout.write(chalk.bold(chalk.dim('model > ')))
@@ -67,5 +72,5 @@ while (true) {
 		totalTokens: result.totalTokens,
 	})
 	// don't forget to release the instance, or the followup turn will be blocked
-	releaseInstance()
+	release()
 }

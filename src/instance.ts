@@ -7,10 +7,12 @@ import {
 	ChatCompletionRequest,
 	LLMEngine,
 	LLMConfig,
-	EngineCompletionContext,
-} from './types/index.js'
-import { createContextStateHash } from './util/createContextStateHash.js'
-import { LogLevels, Logger, createLogger } from './util/log.js'
+	LLMRequest,
+	CompletionProcessingOptions,
+} from '#lllms/types/index.js'
+import { createContextStateHash } from '#lllms/lib/createContextStateHash.js'
+import { LogLevels, Logger, createLogger } from '#lllms/lib/logger.js'
+import { elapsedMillis } from '#lllms/lib/elapsedMillis.js'
 
 const idAlphabet =
 	'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -20,6 +22,7 @@ type LLMInstanceStatus = 'idle' | 'busy' | 'error' | 'loading' | 'preparing'
 
 interface LLMInstanceOptions extends LLMConfig {
 	logger?: Logger
+	gpu: boolean
 }
 
 export class LLMInstance {
@@ -30,6 +33,8 @@ export class LLMInstance {
 	fingerprint: string
 	createdAt: Date
 	lastUsed: number = 0
+	gpu: boolean
+	ttl: number
 	logger: Logger
 
 	private engine: LLMEngine
@@ -37,15 +42,16 @@ export class LLMInstance {
 	private needsContextReset: boolean = false
 	private llm: EngineInstance | null
 
-	constructor(engine: LLMEngine, { logger, ...opts }: LLMInstanceOptions) {
+	constructor(engine: LLMEngine, { logger, gpu, ...opts }: LLMInstanceOptions) {
 		this.id = opts.name + ':' + generateId(8)
 		this.engine = engine
 		this.config = opts
 		this.model = opts.name
 		this.llm = null
+		this.gpu = gpu
+		this.ttl = opts.ttl ?? 300
 		this.status = 'preparing'
 		this.createdAt = new Date()
-		
 		this.logger = logger ?? createLogger(LogLevels.warn)
 
 		// TODO to implement this properly we should only include what changes the "behavior" of the model
@@ -63,23 +69,31 @@ export class LLMInstance {
 		if (!existsSync(this.config.file)) {
 			throw new Error(`Model file not found: ${this.config.file}`)
 		}
-		const time = Date.now()
 		this.status = 'loading'
-
-		this.llm = await this.engine.loadInstance(this.config, {
-			instance: this.id,
-			logger: this.logger,
+		const loadBegin = process.hrtime.bigint()
+		this.llm = await this.engine.loadInstance(
+			{
+				id: this.id,
+				log: this.logger,
+				config: {
+					...this.config,
+					engineOptions: {
+						...this.config.engineOptions,
+						gpu: this.gpu,
+					},
+				},
+			},
 			signal,
-		})
+		)
 		this.status = 'idle'
-
-		this.logger(LogLevels.verbose, 'Instance loaded', {
+		this.logger(LogLevels.debug, 'Instance loaded', {
 			instance: this.id,
-			elapsed: Date.now() - time,
+			elapsed: elapsedMillis(loadBegin),
 		})
 	}
 
 	async dispose() {
+		this.status = 'busy'
 		if (this.llm) {
 			await this.engine.disposeInstance(this.llm)
 		}
@@ -104,53 +118,70 @@ export class LLMInstance {
 		return this.contextStateHash
 	}
 
-	hasContext() {
+	hasContextState() {
 		return this.contextStateHash !== undefined
 	}
 
-	matchesContext(req: CompletionRequest | ChatCompletionRequest) {
+	matchesContextState(request: LLMRequest) {
 		if (!this.contextStateHash) {
 			return false
 		}
-		const incomingStateHash = createContextStateHash(req, true)
+		const incomingStateHash = createContextStateHash(request, true)
 		return this.contextStateHash === incomingStateHash
 	}
-
-	createChatCompletion(req: ChatCompletionRequest) {
-		if (!req.messages) {
+	
+	matchesRequirements(request: LLMRequest) {
+		const mustGpu = this.config.engineOptions?.gpu === true
+		const modelMatches = this.model === request.model
+		const gpuMatches = mustGpu ? this.gpu : true
+		return modelMatches && gpuMatches
+	}
+	
+	createChatCompletion(request: ChatCompletionRequest) {
+		if (!request.messages) {
 			throw new Error('Messages are required for chat completions.')
 		}
 		const id = this.id + '-' + generateId(8)
 		this.lastUsed = Date.now()
-		this.logger(LogLevels.verbose, 'Creating chat completion', { completion: id })
+		this.logger(LogLevels.verbose, 'Creating chat completion', {
+			completion: id,
+		})
 		return {
 			id,
 			model: this.model,
 			createdAt: new Date(),
-			process: async (ctx: Partial<EngineCompletionContext> = {}) => {
-				const time = Date.now()
+			process: async (opts?: CompletionProcessingOptions) => {
+				let resetContext = false
 				if (this.needsContextReset) {
 					this.contextStateHash = undefined
 					this.needsContextReset = false
-					ctx.resetContext = true
+					resetContext = true
 				}
-				const result = await this.engine.processChatCompletion(this.llm, req, {
-					...ctx,
-					instance: this.id,
-					logger: this.logger,
-				})
-
-				const newMessages = [...req.messages]
+				const processBegin = process.hrtime.bigint()
+				const result = await this.engine.processChatCompletion(
+					this.llm,
+					{
+						request,
+						config: this.config,
+						id: this.id,
+						log: this.logger,
+						resetContext,
+						onChunk: opts?.onChunk,
+					},
+					opts?.signal,
+				)
+				const processElapsed = elapsedMillis(processBegin)
+				const newMessages = [...request.messages]
 				newMessages.push(result.message)
 
 				this.contextStateHash = createContextStateHash({
-					systemPrompt: req.systemPrompt,
+					systemPrompt: request.systemPrompt,
 					messages: newMessages,
 				})
 
-				this.logger(LogLevels.verbose, 'Chat completion done', {
+				this.logger(LogLevels.info, 'Chat completion done', {
 					completion: id,
-					elapsed: Date.now() - time,
+					elapsed: processElapsed,
 				})
 
 				return result
@@ -158,8 +189,8 @@ export class LLMInstance {
 		}
 	}
 
-	createCompletion(completionArgs: CompletionRequest) {
-		if (!completionArgs.prompt) {
+	createCompletion(req: CompletionRequest) {
+		if (!req.prompt) {
 			throw new Error('Prompt is required for completions.')
 		}
 		this.lastUsed = Date.now()
@@ -170,20 +201,23 @@ export class LLMInstance {
 			id,
 			model: this.model,
 			createdAt: new Date(),
-			process: async (ctx: Partial<EngineCompletionContext> = {}) => {
-				const time = Date.now()
+			process: async (opts?: CompletionProcessingOptions) => {
+				const processBegin = process.hrtime.bigint()
 				const result = await this.engine.processCompletion(
 					this.llm,
-					completionArgs,
 					{
-						...ctx,
-						logger: this.logger,
-						instance: this.id,
+						config: this.config,
+						log: this.logger,
+						id: this.id,
+						request: req,
+						onChunk: opts?.onChunk,
 					},
+					opts?.signal,
 				)
+				
 				this.logger(LogLevels.verbose, 'Completion done', {
 					completion: id,
-					elapsed: Date.now() - time,
+					elapsed: elapsedMillis(processBegin),
 				})
 				return result
 			},

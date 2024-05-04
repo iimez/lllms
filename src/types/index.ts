@@ -1,5 +1,10 @@
-import type { EngineType, EngineInstance } from '../engines'
-import type { Logger } from '../util/log.js'
+import type {
+	EngineType,
+	EngineInstance,
+	LlamaCppOptions,
+	GPT4AllOptions,
+} from '#lllms/engines/index.js'
+import type { Logger } from '#lllms/lib/logger.js'
 export interface CompletionChunk {
 	tokens: number[]
 	text: string
@@ -11,12 +16,17 @@ export type CompletionFinishReason =
 	| 'eogToken'
 	| 'stopGenerationTrigger'
 
+export interface CompletionProcessingOptions {
+	signal?: AbortSignal
+	onChunk?: (chunk: CompletionChunk) => void
+}
+
 export interface ChatMessage {
 	role: 'user' | 'assistant' | 'system'
 	content: string
 }
 
-export type ChatTemplateFormat = 'chatml' | 'llama3' | 'alpaca' |'phi'
+export type ChatTemplateFormat = 'chatml' | 'llama3' | 'alpaca' | 'phi'
 
 export interface CompletionRequestBase {
 	model: string
@@ -25,11 +35,14 @@ export interface CompletionRequestBase {
 	maxTokens?: number
 	seed?: number
 	stop?: string[]
+	repeatPenalty?: number
+	repeatPenaltyNum?: number
 	frequencyPenalty?: number
 	presencePenalty?: number
 	topP?: number
 	minP?: number
 	topK?: number
+	logitBias?: Record<string, number>
 }
 
 export interface CompletionRequest extends CompletionRequestBase {
@@ -39,18 +52,73 @@ export interface CompletionRequest extends CompletionRequestBase {
 export interface ChatCompletionRequest extends CompletionRequestBase {
 	systemPrompt?: string
 	messages: ChatMessage[]
+}
+
+export type LLMRequest = CompletionRequest | ChatCompletionRequest
+
+
+
+export interface ChatCompletionResult extends EngineChatCompletionResult {
+	id: string
+	model: string
+}
+
+export interface LLMOptionsBase {
+	url?: string
+	file?: string
+	engine: EngineType
+	contextSize?: number
+	minInstances?: number
+	maxInstances?: number
 	templateFormat?: ChatTemplateFormat
 }
 
-export interface EngineCompletionContext extends EngineContext {
-	onChunk?: (chunk: CompletionChunk) => void
-	resetContext?: boolean
+export interface LLMConfig<T extends EngineOptionsBase = EngineOptionsBase>
+	extends LLMOptionsBase {
+	name: string
+	file: string
+	ttl?: number
+	engine: EngineType
+	engineOptions?: T
 }
 
-export interface EngineContext {
-	signal?: AbortSignal
-	logger: Logger
-	instance: string
+export interface LLMEngine<T extends EngineOptionsBase = EngineOptionsBase> {
+	loadInstance: (
+		ctx: EngineContext<T>,
+		signal?: AbortSignal,
+	) => Promise<EngineInstance>
+	disposeInstance: (instance: EngineInstance) => Promise<void>
+	processChatCompletion: (
+		instance: EngineInstance,
+		ctx: EngineChatCompletionContext<T>,
+		signal?: AbortSignal,
+	) => Promise<EngineChatCompletionResult>
+	processCompletion: (
+		instance: EngineInstance,
+		ctx: EngineCompletionContext<T>,
+		signal?: AbortSignal,
+	) => Promise<EngineCompletionResult>
+}
+
+export interface EngineCompletionContext<T extends EngineOptionsBase>
+	extends EngineContext<T> {
+	onChunk?: (chunk: CompletionChunk) => void
+	request: CompletionRequest
+}
+
+export interface EngineChatCompletionContext<T extends EngineOptionsBase>
+	extends EngineContext<T> {
+	onChunk?: (chunk: CompletionChunk) => void
+	resetContext?: boolean
+	request: ChatCompletionRequest
+}
+
+export interface EngineContext<
+	T extends EngineOptionsBase = EngineOptionsBase,
+> {
+	id: string
+	config: LLMConfig<T>
+	log: Logger
 }
 
 export interface EngineChatCompletionResult {
@@ -69,42 +137,21 @@ export interface EngineCompletionResult {
 	totalTokens: number
 }
 
-export interface ChatCompletionResult extends EngineChatCompletionResult {
-	id: string
-	model: string
+export interface EngineOptionsBase {
+	gpu?: boolean | 'auto' | string
+	gpuLayers?: number
+	batchSize?: number
+	cpuThreads?: number
 }
 
-export interface LLMEngine {
-	loadInstance: (
-		config: LLMConfig,
-		ctx: EngineContext,
-	) => Promise<EngineInstance>
-	disposeInstance: (instance: EngineInstance) => Promise<void>
-	processChatCompletion: (
-		instance: EngineInstance,
-		req: ChatCompletionRequest,
-		ctx: EngineCompletionContext,
-	) => Promise<EngineChatCompletionResult>
-	processCompletion: (
-		instance: EngineInstance,
-		req: CompletionRequest,
-		ctx: EngineCompletionContext,
-	) => Promise<EngineCompletionResult>
+interface NodeLlamaCppLLMOptions extends LLMOptionsBase {
+	engine: 'node-llama-cpp'
+	engineOptions?: LlamaCppOptions
 }
 
-export interface LLMOptions {
-	gpu?: boolean | string
-	url?: string
-	file?: string
-	engine: EngineType
-	minInstances?: number
-	maxInstances?: number
-	templateFormat?: ChatTemplateFormat
+interface GPT4AllLLMOptions extends LLMOptionsBase {
+	engine: 'gpt4all'
+	engineOptions?: GPT4AllOptions
 }
 
-
-export interface LLMConfig extends LLMOptions {
-	name: string
-	file: string
-	engine: EngineType
-}
+export type LLMOptions = NodeLlamaCppLLMOptions | GPT4AllLLMOptions

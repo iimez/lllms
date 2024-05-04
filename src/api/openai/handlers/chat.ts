@@ -1,17 +1,24 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import { LLMPool } from '../../../pool.js'
-import { ChatMessage } from '../../../types/index.js'
-import { parseJSONRequestBody } from '../parseJSONRequestBody.js'
+import { LLMPool } from '#lllms/pool.js'
+import { ChatCompletionRequest, ChatMessage } from '#lllms/types/index.js'
+import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
+import { removeEmptyValues } from '#lllms/lib/removeEmptyValues.js'
 import { finishReasons } from '../finishReasons.js'
+
+interface OpenAIChatCompletionParams
+	extends Omit<OpenAI.ChatCompletionCreateParamsStreaming, 'stream'> {
+	stream?: boolean
+	top_k?: number
+	min_p?: number
+	repeat_penalty_num?: number
+}
 
 // v1/chat/completions
 // https://platform.openai.com/docs/api-reference/chat/create
 export function createChatCompletionHandler(pool: LLMPool) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
-		let args:
-			| OpenAI.ChatCompletionCreateParamsStreaming
-			| OpenAI.ChatCompletionCreateParams
+		let args: OpenAIChatCompletionParams
 
 		try {
 			const body = await parseJSONRequestBody(req)
@@ -35,8 +42,6 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
 		}
-
-		console.debug('Chat Completion', JSON.stringify(args, null, 2))
 
 		const controller = new AbortController()
 		req.on('close', () => {
@@ -67,7 +72,9 @@ export function createChatCompletionHandler(pool: LLMPool) {
 				stop = [stop]
 			}
 
-			const completionReq = {
+			// args.logit_bias
+
+			const completionReq = removeEmptyValues<ChatCompletionRequest>({
 				model: args.model,
 				// TODO support multimodal image content array
 				messages: args.messages.filter((m) => {
@@ -85,9 +92,18 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					? args.presence_penalty
 					: undefined,
 				topP: args.top_p ? args.top_p : undefined,
-			}
-			const { instance, releaseInstance } =
-				await pool.requestCompletionInstance(completionReq, controller.signal)
+				logitBias: args.logit_bias ? args.logit_bias : undefined,
+				// additional non-spec params
+				repeatPenaltyNum: args.repeat_penalty_num
+					? args.repeat_penalty_num
+					: undefined,
+				minP: args.min_p ? args.min_p : undefined,
+				topK: args.top_k ? args.top_k : undefined,
+			})
+			const { instance, release } = await pool.requestLLM(
+				completionReq,
+				controller.signal,
+			)
 			const completion = instance.createChatCompletion(completionReq)
 
 			if (ssePing) {
@@ -117,7 +133,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					}
 				},
 			})
-			releaseInstance()
+			release()
 
 			if (args.stream) {
 				// beta chat completions pick up the meta data from the last chunk

@@ -1,4 +1,4 @@
-import { CompletionFinishReason } from '../../types/index.js'
+import { CompletionFinishReason } from '#lllms/types/index.js'
 
 export const finishReasons: Record<CompletionFinishReason, string> = {
 	maxTokens: 'length',

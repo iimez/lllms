@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net'
 import { format as formatURL } from 'node:url'
-import { serveLLMs, StandaloneServerOptions } from './server.js'
-import { LogLevels } from './util/log.js'
+import { serveLLMs, StandaloneServerOptions } from '#lllms/server.js'
+import { LogLevels } from '#lllms/lib/logger.js'
 
 const serverOptions: StandaloneServerOptions = {
 	listen: {
@@ -17,17 +17,20 @@ const serverOptions: StandaloneServerOptions = {
 			// engine: 'node-llama-cpp',
 			// minInstances: 1,
 			// maxInstances: 2,
-			templateFormat: 'phi',
-		},
-		'orca-3b': {
-			url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
-			maxInstances: 2,
-			engine: 'gpt4all',
-			templateFormat: 'alpaca',
+			// templateFormat: 'phi',
 		},
 		'llama3-8b': {
 			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+			minInstances: 1,
+			
 			engine: 'node-llama-cpp',
+			engineOptions: {
+				memLock: true,
+				gpu: true,
+				// gpuLayers: 4,
+				batchSize: 512,
+			},
+			
 			// url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 			// engine: 'gpt4all',
 		},
@@ -38,7 +41,7 @@ const serverOptions: StandaloneServerOptions = {
 		'starcoder-7b': {
 			url: 'https://gpt4all.io/models/gguf/starcoder-newbpe-q4_0.gguf',
 			engine: 'gpt4all',
-			minInstances: 1,
+			// minInstances: 1,
 		}
 	},
 }

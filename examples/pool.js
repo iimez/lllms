@@ -2,6 +2,8 @@ import os from 'node:os'
 import path from 'node:path'
 import chalk from 'chalk'
 import { LLMPool } from '../dist/index.js'
+import { elapsedMillis } from '../dist/util/elapsedMillis.js'
+import { createLogger } from '../dist/util/logger.js'
 
 // Complete multiple prompts concurrently using LLMPool.
 
@@ -13,7 +15,9 @@ async function onPrepareInstance(instance) {
 
 const pool = new LLMPool(
 	{
-		// global inference concurrency limit, across all models
+		// to see what's going on, set the log level to 'debug'
+		// logger: createLogger('debug'),
+		// global inference concurrency limit, across all instances of all models
 		concurrency: 2,
 		models: {
 			'phi3-mini-4k': {
@@ -23,8 +27,7 @@ const pool = new LLMPool(
 					'.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf',
 				),
 				engine: 'gpt4all',
-				// setting this to 1 will load the model on pool.init(), otherwise it will be loaded on-demand
-				minInstances: 1,
+				minInstances: 1, // setting this to something greater 0 will load the model on pool.init()
 				maxInstances: 2, // allow the pool to spawn additional instances of this model
 			},
 		},
@@ -35,29 +38,24 @@ const pool = new LLMPool(
 console.log('Initializing pool...')
 await pool.init()
 
-console.log('Pool ready')
-
 async function createCompletion(prompt) {
 	const req = {
 		model: 'phi3-mini-4k',
 		prompt,
 		temperature: 3,
-		maxTokens: 50,
+		maxTokens: 200,
 	}
-	const { instance, releaseInstance } = await pool.requestCompletionInstance(
-		req,
-	)
+	const { instance, release } = await pool.requestLLM(req)
 	const completion = instance.createCompletion(req)
-
-	const completionBegin = process.hrtime()
+	const completionBegin = process.hrtime.bigint()
 	const result = await completion.process()
-	const elapsed = process.hrtime(completionBegin)
-
-	releaseInstance()
+	release()
+	const elapsed = Math.max(elapsedMillis(completionBegin), 1000)
 	return {
 		text: result.text,
 		instance: instance.id,
-		speed: Math.round(req.maxTokens / (elapsed[0] + elapsed[1] / 1e9)),
+		device: instance.gpu ? 'GPU' : 'CPU',
+		speed: Math.round(result.completionTokens / (elapsed / 1000)),
 	}
 }
 
@@ -67,23 +65,19 @@ const printResult = (title) => (result) => {
 			' ' +
 			chalk.bold(result.instance) +
 			' ' +
-			chalk.dim(`generated ${result.speed} tokens/s`),
+			chalk.dim(`generated ${result.speed} tokens/s on ${result.device}`),
 	)
 	console.log(chalk.dim(prompt) + result.text)
 }
 
-console.log('Processing completions...')
-
+const completionCount = 20
 const prompt = 'Locality of '
+
 const res = await createCompletion(prompt)
-printResult('Solo completion')(res)
+printResult('Initial completion')(res)
 
-const count = 5
+console.log(`Processing ${completionCount} completions...`)
 
-for (let i = 1; i <= count; i++) {
+for (let i = 1; i <= completionCount; i++) {
 	createCompletion(prompt).then(printResult(`#${i}`))
 }
-process.nextTick(() => {
-	const { waiting, processing } = pool.getStatus()
-	console.log('Pool processing', { waiting, processing })
-})

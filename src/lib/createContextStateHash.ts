@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { ChatMessage } from '../types/index.js'
+import { ChatMessage } from '#lllms/types/index.js'
 
 interface ContextStateData {
 	messages?: ChatMessage[]

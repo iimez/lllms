@@ -5,13 +5,14 @@ import os from 'node:os'
 import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
-import { LLMPool } from './pool.js'
-import { LLMInstance } from './instance.js'
-import { ModelDownloader } from './downloader.js'
-import { LLMOptions, CompletionRequest, ChatCompletionRequest } from './types/index.js'
-import { createOpenAIRequestHandlers } from './api/openai/index.js'
-import { resolveModelConfig } from './util/resolveModelConfig.js'
-import { Logger, LogLevel, LogLevels, createLogger } from './util/log.js'
+import { LLMPool } from '#lllms/pool.js'
+import { LLMInstance } from '#lllms/instance.js'
+import { ModelDownloader } from '#lllms/downloader.js'
+import { LLMOptions, LLMRequest } from '#lllms/types/index.js'
+import { createOpenAIRequestHandlers } from '#lllms/api/openai/index.js'
+import { createAPIMiddleware } from '#lllms/api/v1/index.js'
+import { resolveModelConfig } from '#lllms/lib/resolveModelConfig.js'
+import { Logger, LogLevel, LogLevels, createLogger } from '#lllms/lib/logger.js'
 
 export interface LLMServerOptions {
 	concurrency?: number
@@ -46,8 +47,8 @@ export class LLMServer {
 		await this.pool.init()
 	}
 	
-	async requestCompletionInstance(req: CompletionRequest | ChatCompletionRequest) {
-		return this.pool.requestCompletionInstance(req)
+	async requestLLM(request: LLMRequest) {
+		return this.pool.requestLLM(request)
 	}
 
 	// gets called by the pool right before a new instance is created
@@ -90,9 +91,9 @@ export class LLMServer {
 	}
 }
 
-export async function startLLMs(opts: LLMServerOptions) {
+export function startLLMs(opts: LLMServerOptions) {
 	const server = new LLMServer(opts)
-	await server.start()
+	server.start()
 	return server
 }
 
@@ -111,6 +112,7 @@ export function createExpressMiddleware(llmServer: LLMServer) {
 		res.json(llmServer.getStatus())
 	})
 	router.use('/openai', createOpenAIMiddleware(llmServer))
+	router.use('/llama', createAPIMiddleware(llmServer))
 	return router
 }
 

@@ -2,7 +2,7 @@ import { IncomingMessage, ServerResponse } from 'node:http'
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { OpenAI } from 'openai'
-import { LLMPool } from '../../../pool.js'
+import { LLMPool } from '#lllms/pool.js'
 
 // https://platform.openai.com/docs/api-reference/models/list
 export function createListModelsHandler(pool: LLMPool) {

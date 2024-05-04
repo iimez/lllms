@@ -1,7 +1,9 @@
 import http from 'node:http'
 import { startLLMs } from '../dist/index.js'
+import { createLogger } from '../dist/util/logger.js'
 
 const llms = startLLMs({
+	logger: createLogger('info'),
 	concurrency: 2,
 	models: {
 		'phi3-mini-4k': {
@@ -10,7 +12,8 @@ const llms = startLLMs({
 			maxInstances: 2,
 		},
 	},
-}).then(() => {
+})
+llms.pool.on('ready', () => {
 	console.log('LLMs ready')
 })
 
@@ -22,11 +25,10 @@ const httpServer = http.createServer((req, res) => {
 		})
 		req.on('end', async () => {
 			const req = JSON.parse(body)
-			const { instance, releaseInstance } =
-				await llms.requestCompletionInstance(req)
+			const { instance, release } = await llms.requestLLM(req)
 			const completion = instance.createChatCompletion(req)
 			const result = await completion.process()
-			releaseInstance()
+			release()
 			res.writeHead(200, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify(result, null, 2))
 		})

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { LLMConfig, LLMOptions } from '../types/index.js'
+import { LLMConfig, LLMOptions } from '#lllms/types/index.js'
 
 export function resolveModelConfig(models: Record<string, LLMOptions>, modelsDir: string) {
 	const config: Record<string, LLMConfig> = {}
@@ -9,6 +9,8 @@ export function resolveModelConfig(models: Record<string, LLMOptions>, modelsDir
 		const file = resolveModelFile(modelOpts, modelsDir)
 		const modelConfig = {
 			minInstances: 0,
+			maxInstances: 1,
+			engineOptions: {},
 			...modelOpts,
 			file,
 			name: modelName,

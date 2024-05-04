@@ -1,16 +1,21 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import { LLMPool } from '../../../pool.js'
-import { parseJSONRequestBody } from '../parseJSONRequestBody.js'
+import { LLMPool } from '#lllms/pool.js'
+import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { finishReasons } from '../finishReasons.js'
+
+interface OpenAICompletionParams
+	extends Omit<OpenAI.CompletionCreateParamsStreaming, 'stream'> {
+	stream?: boolean
+	top_k?: number
+	min_p?: number
+}
 
 // v1/completions
 // https://platform.openai.com/docs/api-reference/completions/create
 export function createCompletionHandler(pool: LLMPool) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
-		let args:
-			| OpenAI.CompletionCreateParamsStreaming
-			| OpenAI.CompletionCreateParams
+		let args: OpenAICompletionParams
 
 		try {
 			const body = await parseJSONRequestBody(req)
@@ -73,11 +78,17 @@ export function createCompletionHandler(pool: LLMPool) {
 				presencePenalty: args.presence_penalty
 					? args.presence_penalty
 					: undefined,
+				tokenBias: args.logit_bias,
 				topP: args.top_p ? args.top_p : undefined,
+				// additional non-spec params
+				minP: args.min_p ? args.min_p : undefined,
+				topK: args.top_k ? args.top_k : undefined,
 			}
 
-			const { instance, releaseInstance } =
-				await pool.requestCompletionInstance(completionReq, controller.signal)
+			const { instance, release } = await pool.requestLLM(
+				completionReq,
+				controller.signal,
+			)
 			const completion = instance.createCompletion(completionReq)
 
 			const result = await completion.process({
@@ -100,7 +111,7 @@ export function createCompletionHandler(pool: LLMPool) {
 					}
 				},
 			})
-			releaseInstance()
+			release()
 
 			if (args.stream) {
 				res.write(

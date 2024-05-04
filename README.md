@@ -1,6 +1,6 @@
 ## lllms
 
-Local Large Language Models. Providing an LLM instance pool and tools to run and host multiple large language models on any machine. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all).
+Local Large Language Models. Providing an LLM instance pool and tools to run and host multiple models on any machine. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all).
 
 Note that this is a dev and learning tool and not meant for production use. It is not secure, not scalable, and (currently) not (enough) optimized for performance. It is meant to be used on a local machine or a small server for personal use or small scale experiments. Prioritizing ease of use and simple APIs. For larger scale hosting see [these other solutions](#related-solutions).
 
@@ -33,23 +33,36 @@ serveLLMs({
   listen: {
     port: 3000,
   },
-  // Limit how many completions can be processed concurrently.
-  // If its exceeded, requests will stall until a slot is free.
+  // Limit how many completions can be processed concurrently. If its exceeded, requests will stall until a slot is free.
+  // Only relevant for multiple cpu instances, only one gpu instance can run at a time.
   concurrency: 2,
   // Custom model directory, defaults to `~/.cache/lllms`
   // modelsDir: '/path/to/models',
   models: {
     // Model names can use a-zA-Z0-9_:\-
     'phi3-mini-4k': {
-      // Model weights may be specified only by url.
+      // Model weights may be specified by url only
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+      // .. or by file path:
       // file: 'Phi-3-mini-4k-instruct-q4.gguf', // resolves to /path/to/models/Phi-3-mini-4k-instruct-q4.gguf
       // file: '~/Phi-3-mini-4k-instruct-q4.gguf', // resolves to /home/user/Phi-3-mini-4k-instruct-q4.gguf
       // file: '/home/user/models/Phi-3-mini-4k-instruct-q4.gguf',
+      // Choose between node-llama-cpp or gpt4all.
       engine: 'node-llama-cpp',
+      engineOptions: {
+        // GPU will be enabled automatically, but models can be forced to always run on gpu by setting to true.
+        // Note that both engines currently do not support running multiple models on gpu at the same time.
+        // Requests will stall until a gpu slot is free and context cannot be reused if theres multiple sessions going on.
+        gpu: true,
+        batchSize: 512,
+        cpuThreads: 4,
+        memLock: true, // Only supported for node-llama-cpp.
+      },
+      // contextSize: 4096, // Maximum context size. Will be determined automatically if not set.
+      maxInstances: 2, // Set this to how many sessions you expect to run concurrently.
       // Per default download will begin only once the first request comes in.
-      maxInstances: 2,
-      // minInstances: 1, // Uncomment to download on startup and immediately load an instance.
+      minInstances: 1, // Uncomment to download on startup and immediately prepare an instance.
+      ttl: 300, // Time to live in seconds. Instances of this model will be disposed after this time of inactivity.
     },
   },
 })
@@ -103,25 +116,25 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 
 ### Progress
 
-#### OpenAI API
+#### OpenAI API Support
 
-| Endpoint            | gpt4all | node-llama-cpp |
+| Endpoints           | gpt4all | node-llama-cpp |
 | ------------------- | ------- | -------------- |
 | v1/chat/completions | ✅      | ✅             |
 | v1/completions      | ✅      | ✅             |
 | v1/embeddings       | ❌      | ❌             |
 | v1/models           | 🚧      |
 
-| Param               | gpt4all | node-llama-cpp |
+| Spec params         | gpt4all | node-llama-cpp |
 | ------------------- | ------- | -------------- |
 | stream              | ✅      | ✅             |
 | temperature         | ✅      | ✅             |
 | max_tokens          | ✅      | ✅             |
 | top_p               | ✅      | ✅             |
-| stop                | ✅      | 🚧             |
-| seed                | ❌      | 🚧             |
-| frequency_penalty   | ❌      | 🚧             |
-| presence_penalty    | ❌      | 🚧             |
+| stop                | ✅      | ✅             |
+| seed                | ❌      | ✅             |
+| frequency_penalty   | ❌      | ✅             |
+| presence_penalty    | ❌      | ✅             |
 | best_of             | ❌      | ❌             |
 | n                   | ❌      | ❌             |
 | logprobs            | ❌      | ❌             |
@@ -131,11 +144,24 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | tools               | ❌      | ❌             |
 | tool_choice         | ❌      | ❌             |
 | suffix              | ❌      | ❌             |
+| echo                | ❌      | ❌             |
 
-| Feature             | gpt4all | node-llama-cpp |
+| Additional params   | gpt4all | node-llama-cpp |
 | ------------------- | ------- | -------------- |
-| Context cache       | ✅      | ✅             |
-| System prompt       | ✅      | ✅             |
+| top_k               | ✅      | ✅             |
+| min_p               | ✅      | ✅             |
+| repeat_penalty_num  | ✅      | -              |
+| repeat_penalty      | ✅      | -              |
+
+#### Functionality
+
+| Feature               | gpt4all | node-llama-cpp |
+| --------------------- | ------- | -------------- |
+| Context cache         | ✅      | ✅             |
+| System prompt         | ✅      | ✅             |
+| GPU                   | ✅      | ✅             |
+| Content part messages | ❌      | ❌             |
+| Function Calling      | ❌      | ❌             |
 
 
 System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored.
@@ -154,10 +180,11 @@ Not in any particular order:
 - [x] Tests for context reuse and context leaking
 - [x] Logging Interface
 - [x] Better Examples
-- [ ] node-llama-cpp context reuse
+- [x] GPU support
+- [x] node-llama-cpp context reuse
+- [x] Instance TTL
 - [ ] Tests for longer conversations
 - [ ] Tests for request cancellation
-- [ ] GPU support
 - [ ] Better template configuration options
 - [ ] Expose more download configuration options
 - [ ] Allow configuring model hashes

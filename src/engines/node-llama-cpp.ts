@@ -10,67 +10,100 @@ import {
 	ChatWrapper,
 	ChatHistoryItem,
 	LlamaLogLevel,
+	Llama,
+	LlamaText,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector.js'
 import {
-	LLMConfig,
-	CompletionRequest,
-	ChatCompletionRequest,
 	EngineChatCompletionResult,
 	EngineCompletionResult,
 	EngineCompletionContext,
+	EngineChatCompletionContext,
 	EngineContext,
-} from '../types/index.js'
-import { LogLevels } from '../util/log.js'
-
-interface LlamaCppInstance {
-	model: LlamaModel
-	context: LlamaContext
-	session: LlamaChatSession | null
-}
+	EngineOptionsBase,
+} from '#lllms/types/index.js'
+import { LogLevels } from '#lllms/lib/logger.js'
+import { PhiChatWrapper} from './PhiChatWrapper.js'
 
 // https://github.com/withcatai/node-llama-cpp/pull/105
 // https://github.com/withcatai/node-llama-cpp/discussions/109
 
-export async function loadInstance(config: LLMConfig, ctx: EngineContext) {
-	ctx.logger(LogLevels.verbose, `Load Llama model from ${config.file}`, {
-		instance: ctx.instance,
+export interface LlamaCppOptions extends EngineOptionsBase {
+	memLock?: boolean
+}
+
+interface LlamaCppInstance {
+	model: LlamaModel
+	context: LlamaContext | null
+	session: LlamaChatSession | null
+}
+
+function pickChatWrapper(
+	templateFormat: string | undefined
+): ChatWrapper | undefined {
+	switch (templateFormat) {
+		case 'chatml':
+			return new ChatMLChatWrapper()
+		case 'llama3':
+			return new Llama3ChatWrapper()
+		case 'phi':
+			return new PhiChatWrapper()
+	}
+	return undefined
+}
+
+export async function loadInstance(
+	{ id, config, log }: EngineContext<LlamaCppOptions>,
+	signal?: AbortSignal,
+) {
+	log(LogLevels.debug, 'Load Llama model', {
+		instance: id,
+		...config.engineOptions,
 	})
-
-
+	
 	const llama = await getLlama({
-		gpu: config.gpu ? 'auto' : false, // "auto" | "metal" | "cuda" | "vulkan"
-		// logLevel: 'warn',
-		logLevel: LlamaLogLevel.info,
+		// may be "auto" | "metal" | "cuda" | "vulkan"
+		gpu: config.engineOptions?.gpu ? 'auto' : false,
+		// forwarding logger
+		logLevel: LlamaLogLevel.debug,
 		logger: (level, message) => {
 			if (level === LlamaLogLevel.warn) {
-				ctx.logger(LogLevels.warn, message, { instance: ctx.instance })
+				log(LogLevels.warn, message, { instance: id })
 			} else if (
 				level === LlamaLogLevel.error ||
 				level === LlamaLogLevel.fatal
 			) {
-				ctx.logger(LogLevels.error, message, { instance: ctx.instance })
-			} else if (level === LlamaLogLevel.info) {
-				ctx.logger(LogLevels.verbose, message, { instance: ctx.instance })
+				log(LogLevels.error, message, { instance: id })
+			} else if (
+				level === LlamaLogLevel.info ||
+				level === LlamaLogLevel.debug
+			) {
+				log(LogLevels.verbose, message, { instance: id })
 			}
 		},
 	})
 	const model = await llama.loadModel({
 		modelPath: config.file, // full model absolute path
-		loadSignal: ctx.signal,
-		// useMlock: false,
+		loadSignal: signal,
+		useMlock: config.engineOptions?.memLock ?? false,
+		gpuLayers: config.engineOptions?.gpuLayers,
 		// onLoadProgress: (percent) => {}
 	})
 
 	const context = await model.createContext({
 		sequences: 2,
-		// TODO
-		// seed: ,
-		// threads: 4, // 0 = max
-		// batchSize: 128,
-		createSignal: ctx.signal,
+		seed: createSeed(0, 1000000),
+		threads: config.engineOptions?.cpuThreads,
+		batchSize: config.engineOptions?.batchSize,
+		contextSize: config.contextSize,
+		// batching: {
+		// 	dispatchSchedule: 'nextTick',
+		// 	itemPrioritizationStrategy: 'maximumParallelism',
+		// 	itemPrioritizationStrategy: 'firstInFirstOut',
+		// },
+		createSignal: signal,
 	})
-
+	
 	return {
 		model,
 		context,
@@ -82,60 +115,73 @@ export async function disposeInstance(instance: LlamaCppInstance) {
 	instance.model.dispose()
 }
 
-function pickTemplateFormatter(
-	templateFormat: string | undefined,
-): ChatWrapper | undefined {
-	switch (templateFormat) {
-		case 'chatml':
-			return new ChatMLChatWrapper()
-		case 'llama3':
-			return new Llama3ChatWrapper()
-		case 'phi':
-			return new GeneralChatWrapper({
-				userMessageTitle: '<|user|>',
-				modelResponseTitle: '<|assistant|>',
-			})
-	}
-	return undefined
+function createSeed(min: number, max: number) {
+	min = Math.ceil(min)
+	max = Math.floor(max)
+	return Math.floor(Math.random() * (max - min)) + min
 }
 
 export async function processChatCompletion(
 	instance: LlamaCppInstance,
-	request: ChatCompletionRequest,
-	ctx: EngineCompletionContext,
+	{
+		config,
+		request,
+		resetContext,
+		log,
+		onChunk,
+	}: EngineChatCompletionContext<LlamaCppOptions>,
+	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
-	if (
-		ctx.resetContext ||
-		!instance.session ||
-		!instance.context.sequencesLeft
-	) {
+	if (resetContext || !instance.session || !instance.context?.sequencesLeft) {
 		// allow setting system prompt via initial message.
 		let systemPrompt = request.systemPrompt
 		if (!systemPrompt && request.messages[0].role === 'system') {
 			systemPrompt = request.messages[0].content
 		}
-		if (!instance.context.sequencesLeft) {
-			ctx.logger(LogLevels.warn, 'No sequences left, recreating context.')
-			instance.context.dispose()
+
+		if (!instance.context?.sequencesLeft) {
+			log(LogLevels.warn, 'No sequences left, recreating context.')
+			// TODO very unsure about this.
+			if (instance.context) {
+				await instance.context.dispose()
+			}
+			if (instance.session) {
+				await instance.session.dispose({ disposeSequence: true })
+				instance.session = null
+			}
 			instance.context = await instance.model.createContext({
-				createSignal: ctx.signal,
 				sequences: 2,
-				contextSize: 4096,
+				createSignal: signal,
+				seed: request.seed || createSeed(0, 1000000),
+				threads: config.engineOptions?.cpuThreads,
+				batchSize: config.engineOptions?.batchSize,
+				contextSize: config.contextSize,
 			})
 		}
-		if (instance.session) {
-			instance.session.dispose()
+		
+		if (!instance.session) {
+			instance.session = new LlamaChatSession({
+				chatWrapper: pickChatWrapper(config.templateFormat),
+				systemPrompt,
+				contextSequence: instance.context.getSequence(),
+				autoDisposeSequence: true,
+				// contextShift: {
+				// 	size: 50,
+				// 	strategy: "eraseFirstResponseAndKeepFirstSystem"
+				// },
+			})
 		}
-		instance.session = new LlamaChatSession({
-			chatWrapper: pickTemplateFormatter(request.templateFormat),
-			systemPrompt,
-			contextSequence: instance.context.getSequence(),
-			autoDisposeSequence: true,
-			// contextShift: {
-			// 	size: 50,
-			// 	strategy: "eraseFirstResponseAndKeepFirstSystem"
-			// },
-		})
+	}
+	
+	// TODO extend chatwrapper properly
+	if ('setStopGenerationTriggers' in instance.session.chatWrapper) {
+		if (request.stop?.length) {
+			// @ts-ignore
+			instance.session.chatWrapper.setStopGenerationTriggers(request.stop)
+		} else {
+			// @ts-ignore
+			instance.session.chatWrapper.setStopGenerationTriggers(null)
+		}
 	}
 
 	const nonSystemMessages = request.messages.filter((m) => m.role !== 'system')
@@ -148,7 +194,7 @@ export async function processChatCompletion(
 	const input = lastMessage.content
 
 	// if context got reset, we need to reingest the chat history
-	if (ctx.resetContext) {
+	if (resetContext) {
 		const historyItems: ChatHistoryItem[] = nonSystemMessages.map((m) => {
 			return {
 				type: m.role,
@@ -173,17 +219,18 @@ export async function processChatCompletion(
 		topK: request.topK,
 		minP: request.minP,
 		repeatPenalty: {
+			lastTokens: request.repeatPenaltyNum ?? 64,
 			frequencyPenalty: request.frequencyPenalty,
 			presencePenalty: request.presencePenalty,
 		},
 		// TODO integrate stopGenerationTriggers
 		// stopGenerationTriggers: stopTriggers.length ? [stopTriggers] : undefined,
-		signal: ctx.signal,
+		signal: signal,
 		onToken: (tokens) => {
 			generatedTokenCount++
 			const text = instance.model.detokenize(tokens)
-			if (ctx.onChunk) {
-				ctx.onChunk({
+			if (onChunk) {
+				onChunk({
 					tokens,
 					text,
 				})
@@ -205,15 +252,22 @@ export async function processChatCompletion(
 
 export async function processCompletion(
 	instance: LlamaCppInstance,
-	request: CompletionRequest,
-	ctx: EngineCompletionContext,
+	{ config, request, onChunk }: EngineCompletionContext<LlamaCppOptions>,
+	signal?: AbortSignal,
 ): Promise<EngineCompletionResult> {
 	if (!request.prompt) {
 		throw new Error('Prompt is required for completion.')
 	}
 
+	if (instance.context) {
+		await instance.context.dispose()
+	}
+
 	instance.context = await instance.model.createContext({
-		createSignal: ctx.signal,
+		createSignal: signal,
+		seed: request.seed || createSeed(0, 1000000),
+		threads: config.engineOptions?.cpuThreads,
+		batchSize: config.engineOptions?.batchSize,
 	})
 
 	const completion = new LlamaCompletion({
@@ -231,23 +285,27 @@ export async function processCompletion(
 		maxTokens: request.maxTokens,
 		temperature: request.temperature,
 		topP: request.topP,
+		topK: request.topK,
 		repeatPenalty: {
+			lastTokens: request.repeatPenaltyNum ?? 64,
 			frequencyPenalty: request.frequencyPenalty,
 			presencePenalty: request.presencePenalty,
 		},
-		signal: ctx.signal,
+		signal: signal,
 		stopGenerationTriggers: stopTriggers.length ? [stopTriggers] : undefined,
 		onToken: (tokens) => {
-			generatedTokenCount++
+			generatedTokenCount += tokens.length
 			const text = instance.model.detokenize(tokens)
-			if (ctx.onChunk) {
-				ctx.onChunk({
+			if (onChunk) {
+				onChunk({
 					tokens,
 					text,
 				})
 			}
 		},
 	})
+
+	completion.dispose()
 
 	return {
 		finishReason: result.metadata.stopReason,

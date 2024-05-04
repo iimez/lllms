@@ -19,9 +19,9 @@ Note that this is a dev and learning tool and not meant for production use. It i
 
 #### JavaScript APIs
 
-To integrate lllms directly with your application, you can use either the higher level `startLLMs` or the lower level `LLMPool`. For the latter check out [./examples/pool](./examples/pool.js).
+To integrate lllms directly with your application, you can use either the higher level `startLLMs` or the lower level `LLMPool`. For the latter check out [./examples/pool](./examples/pool.js) and [./examples/cli-chat](./examples/cli-chat.js)
 
-To attach lllms to your existing (express, or any other) web server see [./examples/express-openai](./examples/express-openai.js) and [./examples/node-server](./examples/node-server.js). See [./src/server.ts](./src/server.ts) for more ways to integrate with existing HTTP servers.
+To attach lllms to your existing (express, or any other) web server see [./examples/express-openai](./examples/express-openai.js) and [./examples/server-node](./examples/server-node.js). See [./src/server.ts](./src/server.ts) for more ways to integrate with existing HTTP servers.
 
 The highest level API, to spin up a standalone server:
 
@@ -30,39 +30,40 @@ import { serveLLMs } from 'lllms'
 
 // Starts a http server for up to two instances of phi3 and exposes them via openai API
 serveLLMs({
+  // Web server options. If you dont need a web server, use startLLMs or
+  // `new LLMServer()` instead. Apart from `listen` they take the same configuration.
   listen: {
     port: 3000,
   },
-  // Limit how many completions can be processed concurrently. If its exceeded, requests will stall until a slot is free.
-  // Only relevant for multiple cpu instances, only one gpu instance can run at a time.
+  // Limit how many completions can be processed concurrently. If its exceeded, requests
+  // will stall until a slot is free. Only relevant for multiple cpu instances, as only
+  // one gpu instance can run at a time.
   concurrency: 2,
   // Custom model directory, defaults to `~/.cache/lllms`
   // modelsDir: '/path/to/models',
   models: {
     // Model names can use a-zA-Z0-9_:\-
     'phi3-mini-4k': {
-      // Model weights may be specified by url only
+      // Model weights may be specified by file or url.
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-      // .. or by file path:
-      // file: 'Phi-3-mini-4k-instruct-q4.gguf', // resolves to /path/to/models/Phi-3-mini-4k-instruct-q4.gguf
-      // file: '~/Phi-3-mini-4k-instruct-q4.gguf', // resolves to /home/user/Phi-3-mini-4k-instruct-q4.gguf
-      // file: '/home/user/models/Phi-3-mini-4k-instruct-q4.gguf',
-      // Choose between node-llama-cpp or gpt4all.
+      file: 'Phi-3-mini-4k-instruct-q4.gguf',
+      // Choose between node-llama-cpp or gpt4all as bindings to llama.cpp.
       engine: 'node-llama-cpp',
       engineOptions: {
-        // GPU will be enabled automatically, but models can be forced to always run on gpu by setting to true.
-        // Note that both engines currently do not support running multiple models on gpu at the same time.
-        // Requests will stall until a gpu slot is free and context cannot be reused if theres multiple sessions going on.
+        // GPU will be enabled automatically, but models can be forced to always run on gpu by
+        // setting to true. Note that both engines currently do not support running multiple
+        // models on gpu at the same time. Requests will stall until a gpu slot is free and
+        // context cannot be reused if theres multiple sessions going on.
         gpu: true,
         batchSize: 512,
         cpuThreads: 4,
         memLock: true, // Only supported for node-llama-cpp.
       },
-      // contextSize: 4096, // Maximum context size. Will be determined automatically if not set.
+      // Maximum context size. Will be determined automatically if not set.
+      contextSize: 4096,
       maxInstances: 2, // Set this to how many sessions you expect to run concurrently.
-      // Per default download will begin only once the first request comes in.
-      minInstances: 1, // Uncomment to download on startup and immediately prepare an instance.
-      ttl: 300, // Time to live in seconds. Instances of this model will be disposed after this time of inactivity.
+      minInstances: 1, // To download on startup and immediately prepare an instance.
+      ttl: 300, // Model instance time to live in seconds.
     },
   },
 })

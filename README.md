@@ -21,7 +21,7 @@ Note that this is a dev and learning tool and not meant for production use. It i
 
 To integrate lllms directly with your application, you can use either the higher level `startLLMs` or the lower level `LLMPool`. For the latter check out [./examples/pool](./examples/pool.js) and [./examples/cli-chat](./examples/cli-chat.js)
 
-To attach lllms to your existing (express, or any other) web server see [./examples/express-openai](./examples/express-openai.js) and [./examples/server-node](./examples/server-node.js). See [./src/server.ts](./src/server.ts) for more ways to integrate with existing HTTP servers.
+To attach lllms to your existing (express, or any other) web server see [./examples/express-openai](./examples/express-openai.js) and [./examples/server-node](./examples/server-node.js). See [./src/http.ts](./src/http.ts) for more ways to integrate with existing HTTP servers.
 
 The highest level API, to spin up a standalone server:
 
@@ -38,19 +38,25 @@ serveLLMs({
   // Limit how many completions can be processed concurrently. If its exceeded, requests
   // will stall until a slot is free. Only relevant for multiple cpu instances, as only
   // one gpu instance can run at a time.
-  concurrency: 2,
+  inferenceConcurrency: 2,
+  downloadConcurrency: 2, // how many models may be downloaded concurrently
   // Custom model directory, defaults to `~/.cache/lllms`
-  // modelsDir: '/path/to/models',
+  // modelsPath: '/path/to/models',
   models: {
     // Model names can use a-zA-Z0-9_:\-
     'phi3-mini-4k': {
-      // Model weights may be specified by file or url.
+      // Model weights may be specified by file and/or url.
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+      // Absolute or relative to modelsPath. If it does not exist and a url is configured
+      // it will be downloaded to the given location.
       file: 'Phi-3-mini-4k-instruct-q4.gguf',
+      // Files will be verified before being loaded/used if a checksum is provided.
+      // md5: 'cb68b653b24dc432b78b02df76921a54',
+      sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
       // Choose between node-llama-cpp or gpt4all as bindings to llama.cpp.
       engine: 'node-llama-cpp',
       engineOptions: {
-        // GPU will be enabled automatically, but models can be forced to always run on gpu by
+        // GPU will be used automatically, but models can be forced to always run on gpu by
         // setting to true. Note that both engines currently do not support running multiple
         // models on gpu at the same time. Requests will stall until a gpu slot is free and
         // context cannot be reused if theres multiple sessions going on.
@@ -61,7 +67,7 @@ serveLLMs({
       },
       // Maximum context size. Will be determined automatically if not set.
       contextSize: 4096,
-      maxInstances: 2, // Set this to how many sessions you expect to run concurrently.
+      maxInstances: 2, // Set this to how many sessions you expect to be alive concurrently.
       minInstances: 1, // To download on startup and immediately prepare an instance.
       ttl: 300, // Model instance time to live in seconds.
     },
@@ -113,7 +119,7 @@ $ curl http://localhost:3000/openai/v1/chat/completions \
 
 On the packaged server there is only one additional HTTP endpoint that is not part of the OpenAI API at `/openai/v1`.
 
-- `GET /` - Prints the pool status and download stats.
+- `GET /` - Prints info about spawned instances, available models download status.
 
 ### Progress
 
@@ -140,7 +146,7 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | n                   | ❌      | ❌             |
 | logprobs            | ❌      | ❌             |
 | top_logprobs        | ❌      | ❌             |
-| logit_bias          | ❌      | ❌             |
+| logit_bias          | ❌      | ✅             |
 | response_format     | ❌      | ❌             |
 | tools               | ❌      | ❌             |
 | tool_choice         | ❌      | ❌             |
@@ -151,7 +157,7 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | ------------------- | ------- | -------------- |
 | top_k               | ✅      | ✅             |
 | min_p               | ✅      | ✅             |
-| repeat_penalty_num  | ✅      | -              |
+| repeat_penalty_num  | ✅      | ✅             |
 | repeat_penalty      | ✅      | -              |
 
 #### Functionality
@@ -184,18 +190,20 @@ Not in any particular order:
 - [x] GPU support
 - [x] node-llama-cpp context reuse
 - [x] Instance TTL
-- [ ] Tests for longer conversations
+- [x] Allow configuring model hashes / verification
+- [x] Improve template code / stop trigger support
+- [~] Logit bias / Token bias support
+- [~] Tests for longer conversations / context window shifting
+- [x] Support configuring a timeout on completion processing
 - [ ] Tests for request cancellation
-- [ ] Better template configuration options
-- [ ] Expose more download configuration options
-- [ ] Allow configuring model hashes
+- [ ] Allow user to customize engine implementations
+- [ ] A mock engine implementing for testing and examples
+- [ ] Embeddings APIs
+- [ ] Logprobs support
+- [ ] Replace express with tinyhttp?
 - [ ] Support preloading session contexts, like a long system message or few shot examples
-- [ ] Allow configuration to limit RAM usage
-- [ ] Support configuring a timeout on completion processing
-- [ ] CLI to spin up a server given a config file or a model name
-- [ ] API to add custom engines
-- [ ] A mock engine for testing and implementing old-school chatbots
-- [ ] Support Embeddings API
+- [ ] Script to generate a minimal dummy/testing GGUF https://github.com/ggerganov/llama.cpp/discussions/5038#discussioncomment-8181056
+- [ ] ~Allow configuring total RAM/VRAM usage~ See https://github.com/ggerganov/llama.cpp/issues/4315
 
 ### Contributing
 
@@ -204,8 +212,8 @@ If you know how to fill in any of the above checkboxes or have additional ideas 
 #### Possible Future Goals
 
 - Create a separate HTTP API thats independent of the OpenAI spec.
-- Add a clientside library (React hook?) for use of this independent API.
-- Provide a CLI. (Launch a server via `lllms serve config.json|js`?)
+- Add a clientside library (React hooks?) for use of this independent API.
+- Provide a CLI. (Launch a server via `lllms serve config.json|js`? Something to manage models on disk?)
 - Provide a Docker image. And maybe a Prometheus endpoint.
 
 #### Currently not the Goals

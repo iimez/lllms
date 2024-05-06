@@ -9,8 +9,7 @@ import { LLMPool } from '../dist/index.js'
 
 const pool = new LLMPool(
 	{
-		// default concurrency=1, which is okay for this example.
-		// concurrency: 2,
+		log: 'debug',
 		models: {
 			'phi3-mini-4k': {
 				// note that this file needs to be downloaded manually when using the pool directly.

@@ -4,7 +4,9 @@ import { ChatCompletionRequest, CompletionRequest } from '#lllms/types/index.js'
 const testDefaults = {
 	model: 'test',
 	temperature: 0,
+	maxTokens: 64,
 }
+const testTimeout = 30000
 
 export async function createChatCompletion(
 	server: LLMServer,
@@ -16,9 +18,9 @@ export async function createChatCompletion(
 	}
 	const lock = await server.pool.requestLLM(mergedArgs)
 	const handle = lock.instance.createChatCompletion(mergedArgs)
-	const result = await handle.process()
+	const result = await handle.process({ timeout: testTimeout })
 	const device = lock.instance.gpu ? 'gpu' : 'cpu'
-	lock.release()
+	await lock.release()
 	return { handle, result, device }
 }
 
@@ -32,9 +34,9 @@ export async function createCompletion(
 	}
 	const lock = await server.pool.requestLLM(mergedArgs)
 	const handle = lock.instance.createCompletion(mergedArgs)
-	const result = await handle.process()
+	const result = await handle.process({ timeout: testTimeout })
 	const device = lock.instance.gpu ? 'gpu' : 'cpu'
-	lock.release()
+	await lock.release()
 	return { handle, result, device }
 }
 

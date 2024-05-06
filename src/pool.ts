@@ -6,19 +6,15 @@ import {
 	CompletionRequest,
 	ChatCompletionRequest,
 	LLMConfig,
-	LLMRequest as IncomingLLMRequest,
+	IncomingLLMRequest,
+	LLMRequest,
 } from '#lllms/types/index.js'
-import { Logger, LogLevels, createLogger } from '#lllms/lib/logger.js'
+import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
 
 interface CompletionTask {
 	instance: LLMInstance
 	request: CompletionRequest | ChatCompletionRequest
 }
-
-interface LLMRequestMeta {
-	sequence: number
-}
-type LLMRequest = LLMRequestMeta & IncomingLLMRequest
 
 type PrepareInstanceCallback = (
 	instance: LLMInstance,
@@ -26,15 +22,15 @@ type PrepareInstanceCallback = (
 ) => Promise<void>
 
 interface LLMPoolConfig {
-	concurrency: number
+	inferenceConcurrency: number
 	models: Record<string, LLMConfig>
 }
 
 export interface LLMPoolOptions {
-	concurrency?: number
+	inferenceConcurrency?: number
 	releaseTimeout?: number
 	models: Record<string, LLMConfig>
-	logger?: Logger
+	log?: Logger | LogLevel
 }
 
 type LLMPoolEvent = 'ready' | 'spawn' | 'release'
@@ -45,29 +41,33 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	instances: Record<string, LLMInstance>
 	private evictionInterval?: NodeJS.Timeout
 	private logger: Logger
-	private requestSequence: number = 1
+	private requestSequence: number = 0
 	private waitingRequests: number = 0 // TODO should keep requests around so connections can be canceled on dispose?
-	private gpuLock: boolean = false
+	private gpuLock: boolean = false // TODO could derive this from "is there any instance that has gpu=true"
 	private prepareInstance?: PrepareInstanceCallback
 
 	constructor(opts: LLMPoolOptions, prepareInstance?: PrepareInstanceCallback) {
 		super()
-		this.logger = opts.logger ?? createLogger(LogLevels.warn)
+		if (opts.log) {
+			this.logger = typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
+		} else {
+			this.logger = createLogger(LogLevels.warn)
+		}
 		const models: Record<string, LLMConfig> = {}
-		for (const modelName in opts.models) {
-			const modelConfig = opts.models[modelName]
-			models[modelName] = {
+		for (const id in opts.models) {
+			const modelConfig = opts.models[id]
+			models[id] = {
 				...modelConfig,
-				name: modelConfig.name ?? modelName,
+				id: modelConfig.id ?? id,
 			}
 		}
 		const config: LLMPoolConfig = {
-			concurrency: 1,
+			inferenceConcurrency: 1,
 			...opts,
 			models,
 		}
 		this.queue = new PQueue({
-			concurrency: config.concurrency,
+			concurrency: config.inferenceConcurrency,
 		})
 		this.config = config
 		this.instances = {}
@@ -76,33 +76,62 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 
 	// start up pool, creating instances and loading models
 	async init() {
-		const loadingPromises = []
+		const initPromises = []
 		const modelConfigs = this.config.models
-		for (const modelName in modelConfigs) {
-			// make sure name is set.
-			const modelConfig = modelConfigs[modelName]
-			if (!modelConfig.name) {
-				modelConfig.name = modelName
-			}
-			// create the initial, minimum number of instances for each model
-			const instanceCount = modelConfig.minInstances ?? 0
-			for (let i = 0; i < instanceCount; i++) {
-				if (this.canSpawnInstance(modelName)) {
-					const loadPromise = this.spawnInstance(modelName)
-					loadingPromises.push(loadPromise)
-				} else {
-					this.logger(LogLevels.warn, 'Max instances reached', {
-						model: modelName,
-					})
-				}
+
+		// making sure id is set.
+		for (const modelId in modelConfigs) {
+			const modelConfig = modelConfigs[modelId]
+			if (!modelConfig.id) {
+				modelConfig.id = modelId
 			}
 		}
+
+		// prioritize initializing the first model defined that has gpu=true
+		// so lock cant be acquired first by another model that has gpu=auto/undefined
+		const firstGpuModel = Object.entries(modelConfigs).find(
+			([id, config]) => config.engineOptions?.gpu === true,
+		)
+		if (firstGpuModel) {
+			const modelConfig = modelConfigs[firstGpuModel[0]]
+			const spawnPromises = this.ensureModelInstances(modelConfig)
+			initPromises.push(...spawnPromises)
+		}
+
+		// then handle other models in the order they were defined
+		for (const modelId in modelConfigs) {
+			if (firstGpuModel && modelId === firstGpuModel[0]) {
+				continue
+			}
+			const modelConfig = modelConfigs[modelId]
+			const spawnPromises = this.ensureModelInstances(modelConfig)
+			initPromises.push(...spawnPromises)
+		}
+
 		// resolve when all initial instances are loaded
-		await Promise.all(loadingPromises)
+		await Promise.allSettled(initPromises)
 		this.emit('ready')
 		this.evictionInterval = setInterval(() => {
 			this.evictOutdated()
 		}, 1000 * 60) // every minute
+	}
+
+	// see if the minInstances for a models are spawned. if not, spawn them.
+	ensureModelInstances(model: LLMConfig) {
+		const spawnPromises = []
+		const instanceCount = model.minInstances ?? 0
+		for (let i = 0; i < instanceCount; i++) {
+			if (this.canSpawnInstance(model.id)) {
+				const spawnPromise = this.spawnInstance(model.id)
+				spawnPromises.push(spawnPromise)
+			} else {
+				this.logger(LogLevels.warn, 'Failed to spawn min instances for', {
+					model: model.id,
+				})
+				break
+			}
+		}
+		return spawnPromises
 	}
 
 	async dispose() {
@@ -114,9 +143,9 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		await Promise.all(disposePromises)
 	}
 
-	evictOutdated() {
+	// disposes instances that have been idle for longer than their ttl
+	private evictOutdated() {
 		const now = new Date().getTime()
-
 		for (const key in this.instances) {
 			const instance = this.instances[key]
 			const instanceAge = (now - instance.lastUsed) / 1000
@@ -124,7 +153,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				this.logger(LogLevels.info, 'Auto disposing instance', {
 					instance: instance.id,
 				})
-				instance.dispose().then(() => {
+				this.disposeInstance(instance).then(() => {
 					delete this.instances[key]
 				})
 			}
@@ -148,6 +177,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 							url: instance.config.url,
 							file: instance.config.file,
 							engine: instance.config.engine,
+							device: instance.gpu ? 'gpu' : 'cpu',
 							context: instance.getContextState(),
 							lastUsed: new Date(instance.lastUsed).toISOString(),
 						},
@@ -157,20 +187,38 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		}
 	}
 
-	canSpawnInstance(modelName: string) {
-		const modelConfig = this.config.models[modelName]
+	// checks if another instance can be spawned for given model
+	canSpawnInstance(modelId: string) {
+		const modelConfig = this.config.models[modelId]
 		// if the model is configured with gpu=true, interpret that as "it MUST run on gpu"
 		// and prevent spawning more instances if the gpu is already locked.
 		const requiresGpu = modelConfig.engineOptions?.gpu === true
 		if (requiresGpu && this.gpuLock) {
+			this.logger(
+				LogLevels.debug,
+				'Denied spawning instance because of GPU lock',
+				{
+					model: modelId,
+				},
+			)
 			return false
 		}
 		// see if we're within maxInstances limit
 		const maxInstances = modelConfig.maxInstances ?? 1
 		const currentInstances = Object.values(this.instances).filter(
-			(instance) => instance.model === modelName,
+			(instance) => instance.model === modelId,
 		)
-		return currentInstances.length < maxInstances
+		if (currentInstances.length >= maxInstances) {
+			this.logger(
+				LogLevels.debug,
+				'Denied spawning instance because of maxInstances',
+				{
+					model: modelId,
+				},
+			)
+			return false
+		}
+		return true
 	}
 
 	private async disposeInstance(instance: LLMInstance) {
@@ -178,37 +226,34 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			instance: instance.id,
 		})
 		await instance.dispose()
-		delete this.instances[instance.id]
 		if (instance.gpu) {
 			this.gpuLock = false
 		}
+		delete this.instances[instance.id]
 	}
 
+	// spawns a new instance for the given model, without checking whether it's allowed
 	private async spawnInstance(
-		modelName: string,
-		opts: { signal?: AbortSignal; emit?: boolean } = {},
+		modelId: string,
+		options: { signal?: AbortSignal; emit?: boolean } = {},
 	) {
-		const modelConfig = this.config.models[modelName]
+		const model = this.config.models[modelId]
 
+		// if the model is configured with gpu=auto (or unset), we can use the gpu if its not locked
 		const autoGpu =
-			modelConfig.engineOptions?.gpu === undefined ||
-			modelConfig.engineOptions?.gpu === 'auto'
+			model.engineOptions?.gpu === undefined ||
+			model.engineOptions?.gpu === 'auto'
 		let useGpu = autoGpu ? !this.gpuLock : false
 
-		if (modelConfig.engineOptions?.gpu === true) {
+		if (model.engineOptions?.gpu === true) {
 			useGpu = true
 		}
 
-		const engineMethods = engines[modelConfig.engine]
+		const engineMethods = engines[model.engine]
 		const instance = new LLMInstance(engineMethods, {
-			...modelConfig,
+			...model,
 			gpu: useGpu,
 			logger: this.logger,
-		})
-		this.logger(LogLevels.info, 'Spawning instance for', {
-			model: modelName,
-			instance: instance.id,
-			gpu: useGpu,
 		})
 		this.instances[instance.id] = instance
 
@@ -216,34 +261,46 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			this.gpuLock = true
 		}
 		if (this.prepareInstance) {
-			await this.prepareInstance(instance, opts?.signal)
+			this.logger(LogLevels.debug, 'Preparing instance', {
+				instance: instance.id,
+			})
+			try {
+				await this.prepareInstance(instance, options?.signal)
+			} catch (error) {
+				this.logger(LogLevels.error, 'Error preparing instance', {
+					model: modelId,
+					instance: instance.id,
+					error,
+				})
+				instance.status = 'error'
+				return instance
+			}
 		}
-		await instance.load(opts?.signal)
-		if (opts.emit !== false) {
+		await instance.load(options?.signal)
+		if (options.emit !== false) {
 			this.emit('spawn', instance)
 		}
 		return instance
 	}
 
-	modelExists(modelName: string) {
-		return this.config.models[modelName] !== undefined
-	}
-
+	// wait to acquire a gpu instance for the given request
 	private acquireGpuInstance(
 		request: LLMRequest,
 		signal?: AbortSignal,
 	): Promise<LLMInstance> {
 		return new Promise(async (resolve, reject) => {
+			// if we have an idle gpu instance and the model matches we can lock and return immediately
 			const gpuInstance = Object.values(this.instances).find(
 				(instance) => instance.gpu === true,
 			)!
 			if (gpuInstance.status === 'idle') {
 				if (gpuInstance.model === request.model) {
-					gpuInstance.lock()
+					gpuInstance.lock(request)
 					resolve(gpuInstance)
 					return
 				} else {
 					await this.disposeInstance(gpuInstance)
+
 					const newInstance = await this.spawnInstance(request.model, {
 						emit: false,
 					})
@@ -252,6 +309,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				}
 			}
 
+			// otherwise attach the listener and wait until gpu slot becomes available
 			const listener = async (instance: LLMInstance) => {
 				if (
 					instance.matchesRequirements(request) &&
@@ -259,27 +317,17 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					instance.gpu === true
 				) {
 					this.off('release', listener)
-					try {
-						// instance.lock()
-						await this.disposeInstance(instance)
-						const newInstance = await this.spawnInstance(request.model, {
-							emit: false,
-						})
-						resolve(newInstance)
-					} catch (err: any) {
-						this.logger(LogLevels.error, 'Error acquiring gpu instance', {
-							error: err.message,
-						})
-						reject(err)
-					}
+					await this.disposeInstance(instance)
+					const newInstance = await this.spawnInstance(request.model, {
+						emit: false,
+					})
+					resolve(newInstance)
 				}
 			}
-			// this.on('spawn', listener)
 			this.on('release', listener)
 			if (signal) {
 				signal.addEventListener('abort', () => {
 					this.off('release', listener)
-					// this.off('spawn', listener)
 					reject(signal.reason)
 				})
 			}
@@ -300,13 +348,13 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					this.off('release', listener)
 					this.off('spawn', listener)
 					try {
-						instance.lock()
+						instance.lock(request)
 						resolve(instance)
-					} catch (err: any) {
+					} catch (error: any) {
 						this.logger(LogLevels.error, 'Error acquiring idle instance', {
-							error: err.message,
+							error,
 						})
-						reject(err)
+						reject(error)
 					}
 				}
 			}
@@ -322,6 +370,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		})
 	}
 
+	// acquire an instance for the given request
 	private async acquireInstance(request: LLMRequest, signal?: AbortSignal) {
 		if ('messages' in request) {
 			// for chat completions first search for an instance that has the messages already ingested and the context ready
@@ -336,13 +385,13 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 						instance: instance.id,
 						sequence: request.sequence,
 					})
-					instance.lock()
+					instance.lock(request)
 					return instance
 				}
 			}
 			this.logger(
 				LogLevels.debug,
-				'Cache miss - acquiring fresh model instance',
+				'Cache miss - continue acquiring model instance',
 				{ sequence: request.sequence },
 			)
 		}
@@ -359,7 +408,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					instance: instance.id,
 					sequence: request.sequence,
 				})
-				instance.lock()
+				instance.lock(request)
 				return instance
 			}
 		}
@@ -377,8 +426,8 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				instance: lruInstance.id,
 				sequence: request.sequence,
 			})
-			lruInstance.lock()
-			lruInstance.resetContext() // make sure we reset its cache.
+			lruInstance.lock(request)
+			lruInstance.reset() // make sure we reset its cache.
 			return lruInstance
 		}
 
@@ -391,7 +440,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				instance: instance.id,
 				sequence: request.sequence,
 			})
-			instance.lock()
+			instance.lock(request)
 			return instance
 		}
 
@@ -403,6 +452,10 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			)!
 
 			if (gpuInstance.model !== request.model) {
+				this.logger(LogLevels.debug, 'Awaiting GPU instance for', {
+					model: request.model,
+					sequence: request.sequence,
+				})
 				const instance = await this.acquireGpuInstance(request, signal)
 				this.logger(LogLevels.debug, 'GPU instance acquired', {
 					instance: instance.id,
@@ -416,8 +469,17 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				}
 			}
 		}
+		
+		// before starting to wait, make sure sure we're not stuck with an error'd instance (and wait forever)
+		// currently instances only enter error state if prepareInstance throws an error
+		const errorInstance = Object.values(this.instances).find(
+			(instance) => instance.model === request.model && instance.status === 'error',
+		)
+		if (errorInstance) {
+			throw new Error('Instance is in error state')
+		}
 
-		// otherwise wait until an instance of our model is released or spawned
+		// wait until an instance of our model is released or spawned
 		this.logger(LogLevels.debug, 'Awaiting idle instance for', {
 			model: request.model,
 			sequence: request.sequence,
@@ -435,12 +497,20 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			return instance
 		}
 	}
+	
+	private getRequestSequence() {
+		if (this.requestSequence > 999999) {
+			this.requestSequence = 0
+		}
+		return ++this.requestSequence
+	}
 
 	// requests an instance from the pool to handle a chat completion request
 	async requestLLM(incomingRequest: IncomingLLMRequest, signal?: AbortSignal) {
+		const requestSequence = this.getRequestSequence()
 		const request = {
 			...incomingRequest,
-			sequence: this.requestSequence++,
+			sequence: requestSequence,
 		}
 		if (!this.config.models[request.model]) {
 			this.logger(LogLevels.error, `Model not found: ${request.model}`)
@@ -456,9 +526,9 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		// TODO this slows down the response time for all requests until maxInstances is reached.
 		// should do it after the request is completed. only spawn a new instance during completion
 		// processing if theres actually another request.
-		if (this.canSpawnInstance(request.model)) {
-			this.spawnInstance(request.model)
-		}
+		// if (this.canSpawnInstance(request.model)) {
+		// 	this.spawnInstance(request.model)
+		// }
 
 		this.waitingRequests++
 		const instance = await this.acquireInstance(request, signal)
@@ -477,7 +547,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			.then((task) => {
 				if (task?.instance) {
 					const instance = task.instance
-					this.logger(LogLevels.info, 'Task completed, releasing instance', {
+					this.logger(LogLevels.info, 'Task completed, releasing', {
 						instance: instance.id,
 						sequence: request.sequence,
 					})
@@ -488,8 +558,14 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 
 		// TODO what if user never calls release? automatically resolve or reject after a timeout?
 		const releaseInstance = () => {
-			resolveQueueTask({ instance, request })
+			return new Promise<void>((resolve, reject) => {
+				process.nextTick(() => {
+					resolveQueueTask({ instance, request })
+					resolve()
+				})
+			})
 		}
+		
 		return {
 			instance,
 			release: releaseInstance,

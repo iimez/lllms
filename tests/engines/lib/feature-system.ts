@@ -1,8 +1,8 @@
 import { expect } from 'vitest'
 import { LLMServer } from '#lllms/server.js'
-import { createChatCompletion, parseInstanceId } from '../../util.js'
+import { createChatCompletion } from '../../util.js'
 
-export async function runSystemPromptTest(llms: LLMServer) {
+export async function runSystemMessageTest(llms: LLMServer) {
 	const chat = await createChatCompletion(llms, {
 		messages: [
 			{
@@ -16,5 +16,8 @@ export async function runSystemPromptTest(llms: LLMServer) {
 			},
 		],
 	})
-	expect(chat.result.message.content).toMatch(/Gotham|Batman/)
+	// console.debug({
+	// 	response: chat.result.message.content,
+	// })
+	expect(chat.result.message.content).toMatch(/Gotham|Joker|Riddler/)
 }

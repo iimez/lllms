@@ -2,12 +2,12 @@ import { expect } from 'vitest'
 import { LLMServer } from '#lllms/server.js'
 import { createChatCompletion, createCompletion } from '../../util.js'
 
-export async function runStopParamTest(llms: LLMServer) {
+export async function runStopTriggerTest(llms: LLMServer) {
 	const chat = await createChatCompletion(llms, {
 		messages: [
 			{
 				role: 'user',
-				content: "Just answer with 'OK'.",
+				content: "This is a test. Please only answer with 'OK'.",
 			},
 		],
 		stop: ['OK'],

@@ -1,7 +1,9 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
 import { LLMPool } from '#lllms/pool.js'
+import { CompletionRequest } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
+import { omitEmptyValues } from '#lllms/lib/util.js'
 import { finishReasons } from '../finishReasons.js'
 
 interface OpenAICompletionParams
@@ -26,10 +28,16 @@ export function createCompletionHandler(pool: LLMPool) {
 			res.end(JSON.stringify({ error: 'Invalid request' }))
 			return
 		}
-
+		
+		// TODO ajv schema validation?
 		if (!args.model || !args.prompt) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid request' }))
+			return
+		}
+		if (!pool.config.models[args.model]) {
+			res.writeHead(400, { 'Content-Type': 'application/json' })
+			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
 		}
 
@@ -64,7 +72,7 @@ export function createCompletionHandler(pool: LLMPool) {
 				stop = [stop]
 			}
 
-			const completionReq = {
+			const completionReq = omitEmptyValues<CompletionRequest>({
 				model: args.model,
 				prompt: args.prompt as string,
 				temperature: args.temperature ? args.temperature : undefined,
@@ -78,12 +86,12 @@ export function createCompletionHandler(pool: LLMPool) {
 				presencePenalty: args.presence_penalty
 					? args.presence_penalty
 					: undefined,
-				tokenBias: args.logit_bias,
+				tokenBias: args.logit_bias ? args.logit_bias : undefined,
 				topP: args.top_p ? args.top_p : undefined,
 				// additional non-spec params
 				minP: args.min_p ? args.min_p : undefined,
 				topK: args.top_k ? args.top_k : undefined,
-			}
+			})
 
 			const { instance, release } = await pool.requestLLM(
 				completionReq,

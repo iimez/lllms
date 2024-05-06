@@ -4,8 +4,8 @@ import { LLMOptions } from '#lllms/types/index.js'
 import {
 	runContextLeakTest,
 	runContextReuseTest,
-	runStopParamTest,
-	runSystemPromptTest,
+	runStopTriggerTest,
+	runSystemMessageTest,
 } from './lib/index.js'
 
 const models: Record<string, LLMOptions> = {
@@ -18,7 +18,10 @@ const models: Record<string, LLMOptions> = {
 }
 
 suite('Features', () => {
-	const llms = new LLMServer({ models })
+	const llms = new LLMServer({
+		log: 'debug',
+		models,
+	})
 
 	beforeAll(async () => {
 		await llms.start()
@@ -28,11 +31,11 @@ suite('Features', () => {
 	})
 
 	test('stop generation trigger', async () => {
-		await runStopParamTest(llms)
+		await runStopTriggerTest(llms)
 	})
 
 	test('system message', async () => {
-		await runSystemPromptTest(llms)
+		await runSystemMessageTest(llms)
 	})
 })
 

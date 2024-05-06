@@ -15,8 +15,11 @@ export type CompletionFinishReason =
 	| 'functionCall'
 	| 'eogToken'
 	| 'stopGenerationTrigger'
+	| 'cancelled'
+	| 'timeout'
 
 export interface CompletionProcessingOptions {
+	timeout?: number
 	signal?: AbortSignal
 	onChunk?: (chunk: CompletionChunk) => void
 }
@@ -42,7 +45,7 @@ export interface CompletionRequestBase {
 	topP?: number
 	minP?: number
 	topK?: number
-	logitBias?: Record<string, number>
+	tokenBias?: Record<string, number>
 }
 
 export interface CompletionRequest extends CompletionRequestBase {
@@ -54,8 +57,12 @@ export interface ChatCompletionRequest extends CompletionRequestBase {
 	messages: ChatMessage[]
 }
 
-export type LLMRequest = CompletionRequest | ChatCompletionRequest
-
+export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest
+// export type LLMRequest = CompletionRequest | ChatCompletionRequest
+export interface LLMRequestMeta {
+	sequence: number
+}
+export type LLMRequest = LLMRequestMeta & IncomingLLMRequest
 
 
 export interface ChatCompletionResult extends EngineChatCompletionResult {
@@ -71,11 +78,13 @@ export interface LLMOptionsBase {
 	minInstances?: number
 	maxInstances?: number
 	templateFormat?: ChatTemplateFormat
+	md5?: string
+	sha256?: string
 }
 
 export interface LLMConfig<T extends EngineOptionsBase = EngineOptionsBase>
 	extends LLMOptionsBase {
-	name: string
+	id: string
 	file: string
 	ttl?: number
 	engine: EngineType
@@ -116,7 +125,6 @@ export interface EngineChatCompletionContext<T extends EngineOptionsBase>
 export interface EngineContext<
 	T extends EngineOptionsBase = EngineOptionsBase,
 > {
-	id: string
 	config: LLMConfig<T>
 	log: Logger
 }

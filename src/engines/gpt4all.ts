@@ -21,12 +21,10 @@ import { LogLevels } from '#lllms/lib/logger.js'
 export interface GPT4AllOptions extends EngineOptionsBase {}
 
 export async function loadInstance(
-	{ id, config, log }: EngineContext<GPT4AllOptions>,
+	{ config, log }: EngineContext<GPT4AllOptions>,
 	signal?: AbortSignal,
 ) {
-	log(LogLevels.info, `Load GPT4All model ${config.file}`, {
-		instance: id,
-	})
+	log(LogLevels.info, `Load GPT4All model ${config.file}`)
 
 	const loadOpts: LoadModelOptions = {
 		modelPath: path.dirname(config.file),
@@ -55,7 +53,7 @@ export async function disposeInstance(instance: InferenceModel) {
 
 export async function processCompletion(
 	instance: InferenceModel,
-	{ config, request, onChunk }: EngineCompletionContext<GPT4AllOptions>,
+	{ request, config, onChunk }: EngineCompletionContext<GPT4AllOptions>,
 	signal?: AbortSignal,
 ): Promise<EngineCompletionResult> {
 	if (!request.prompt) {
@@ -98,7 +96,7 @@ export async function processCompletion(
 	if (result.tokensGenerated === request.maxTokens) {
 		finishReason = 'maxTokens'
 	}
-	
+
 	let responseText = result.text
 	if (removeTailingToken) {
 		responseText = responseText.slice(0, -removeTailingToken.length)
@@ -138,7 +136,12 @@ function addSystemPromptTemplate(
 
 export async function processChatCompletion(
 	instance: InferenceModel,
-	{ config, request, resetContext, onChunk }: EngineChatCompletionContext<GPT4AllOptions>,
+	{
+		request,
+		config,
+		resetContext,
+		onChunk,
+	}: EngineChatCompletionContext<GPT4AllOptions>,
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
 	let session = instance.activeChatSession
@@ -212,7 +215,7 @@ export async function processChatCompletion(
 	if (result.usage.completion_tokens === request.maxTokens) {
 		finishReason = 'maxTokens'
 	}
-	
+
 	let response = result.choices[0].message.content
 	if (removeTailingToken) {
 		response = response.slice(0, -removeTailingToken.length)

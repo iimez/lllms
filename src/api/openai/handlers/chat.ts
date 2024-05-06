@@ -3,7 +3,7 @@ import type { OpenAI } from 'openai'
 import { LLMPool } from '#lllms/pool.js'
 import { ChatCompletionRequest, ChatMessage } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
-import { removeEmptyValues } from '#lllms/lib/removeEmptyValues.js'
+import { omitEmptyValues } from '#lllms/lib/util.js'
 import { finishReasons } from '../finishReasons.js'
 
 interface OpenAIChatCompletionParams
@@ -12,6 +12,10 @@ interface OpenAIChatCompletionParams
 	top_k?: number
 	min_p?: number
 	repeat_penalty_num?: number
+}
+
+interface OpenAIChatCompletionChunk extends OpenAI.ChatCompletionChunk {
+	usage?: OpenAI.CompletionUsage
 }
 
 // v1/chat/completions
@@ -37,7 +41,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			return
 		}
 
-		if (!pool.modelExists(args.model)) {
+		if (!pool.config.models[args.model]) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
@@ -50,6 +54,14 @@ export function createChatCompletionHandler(pool: LLMPool) {
 		})
 		req.on('end', () => {
 			console.debug('Client ended connection')
+			controller.abort()
+		})
+		req.on('aborted', () => {
+			console.debug('Client aborted connection')
+			controller.abort()
+		})
+		req.on('error', () => {
+			console.debug('Client error')
 			controller.abort()
 		})
 
@@ -72,9 +84,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 				stop = [stop]
 			}
 
-			// args.logit_bias
-
-			const completionReq = removeEmptyValues<ChatCompletionRequest>({
+			const completionReq = omitEmptyValues<ChatCompletionRequest>({
 				model: args.model,
 				// TODO support multimodal image content array
 				messages: args.messages.filter((m) => {
@@ -92,7 +102,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					? args.presence_penalty
 					: undefined,
 				topP: args.top_p ? args.top_p : undefined,
-				logitBias: args.logit_bias ? args.logit_bias : undefined,
+				tokenBias: args.logit_bias ? args.logit_bias : undefined,
 				// additional non-spec params
 				repeatPenaltyNum: args.repeat_penalty_num
 					? args.repeat_penalty_num
@@ -114,9 +124,11 @@ export function createChatCompletionHandler(pool: LLMPool) {
 				onChunk: (chunk) => {
 					// console.debug('onChunk', chunk)
 					if (args.stream) {
-						const chunkData = {
+						const chunkData: OpenAIChatCompletionChunk = {
 							id: completion.id,
 							object: 'chat.completion.chunk',
+							model: completion.model,
+							created: Math.floor(completion.createdAt.getTime() / 1000),
 							choices: [
 								{
 									index: 0,
@@ -137,34 +149,35 @@ export function createChatCompletionHandler(pool: LLMPool) {
 
 			if (args.stream) {
 				// beta chat completions pick up the meta data from the last chunk
-				res.write(
-					`data: ${JSON.stringify({
-						id: completion.id,
-						model: completion.model,
-						object: 'chat.completion.chunk',
-						created: Math.floor(completion.createdAt.getTime() / 1000),
-						system_fingerprint: instance.fingerprint,
-						choices: [
-							{
-								index: 0,
-								delta: {},
-								logprobs: null,
-								finish_reason: result.finishReason
-									? finishReasons[result.finishReason]
-									: '',
-							},
-						],
-						usage: {
-							prompt_tokens: result.promptTokens,
-							completion_tokens: result.completionTokens,
-							total_tokens: result.totalTokens,
+				const finalChunk: OpenAIChatCompletionChunk = {
+					id: completion.id,
+					object: 'chat.completion.chunk',
+					model: completion.model,
+					created: Math.floor(completion.createdAt.getTime() / 1000),
+					system_fingerprint: instance.fingerprint,
+					choices: [
+						{
+							index: 0,
+							delta: {},
+							logprobs: null,
+							finish_reason: result.finishReason
+								? finishReasons[result.finishReason]
+								: 'stop',
 						},
-					})}\n\n`,
+					],
+					usage: {
+						prompt_tokens: result.promptTokens,
+						completion_tokens: result.completionTokens,
+						total_tokens: result.totalTokens,
+					},
+				}
+				res.write(
+					`data: ${JSON.stringify(finalChunk)}\n\n`,
 				)
 				res.write('data: [DONE]')
 				res.end()
 			} else {
-				const response = {
+				const response: OpenAI.ChatCompletion = {
 					id: completion.id,
 					model: completion.model,
 					object: 'chat.completion',
@@ -173,7 +186,10 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					choices: [
 						{
 							index: 0,
-							message: result.message,
+							message: {
+								role: 'assistant',
+								content: result.message.content,
+							},
 							logprobs: null,
 							finish_reason: result.finishReason
 								? finishReasons[result.finishReason]

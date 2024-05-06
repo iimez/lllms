@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import request from 'supertest'
 import express, { Express } from 'express'
-import { createExpressMiddleware, LLMServerOptions, LLMServer } from '../src/server.js'
+import { LLMServerOptions, LLMServer } from '#lllms/server.js'
+import { createExpressMiddleware } from '#lllms/http.js'
 
 const testModel = 'phi3-mini-4k'
 
 const testConfig: LLMServerOptions = {
-	concurrency: 1,
+	inferenceConcurrency: 1,
 	models: {
 		[testModel]: {
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
@@ -23,21 +24,18 @@ describe('Express App', () => {
 	beforeAll(async () => {
 		llmServer = new LLMServer(testConfig)
 		app = express()
-		app.use(
-			express.json(),
-			createExpressMiddleware(llmServer),
-		)
+		app.use(express.json(), createExpressMiddleware(llmServer))
 	})
-	
+
 	it('Responds to requests before starting', async () => {
 		const res = await request(app).get('/')
 		expect(res.status).toBe(200)
 		expect(res.body).toMatchObject({
 			downloads: { queue: 0, pending: 0, tasks: [] },
-			pool: { processing: 0, waiting: 0, instances: {} }
+			pool: { processing: 0, waiting: 0, instances: {} },
 		})
 	})
-	
+
 	it('Starts up without errors', async () => {
 		await llmServer.start()
 		// TODO anything useful to assert here?

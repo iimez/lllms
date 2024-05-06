@@ -1,27 +1,33 @@
 import chalk from 'chalk'
 
-export const LogLevels ={
-	error: "error",
-	warn: "warn",
-	info: "info",
-	debug: "debug",
-	verbose: "verbose"
+export const LogLevels = {
+	error: 'error',
+	warn: 'warn',
+	info: 'info',
+	debug: 'debug',
+	verbose: 'verbose',
 } as const
 
 export type LogLevel = keyof typeof LogLevels
 export type Logger = (level: LogLevel, message: string, meta?: any) => void
 
+export function withLogMeta(logger: Logger, meta: any) {
+	return (level: LogLevel, message: string, extraMeta: any = {}) => {
+		logger(level, message, { ...meta, ...extraMeta })
+	}
+}
+
 export function createLogger(minLevel: LogLevel) {
 	const levels = Object.keys(LogLevels).reverse()
 	const minLevelIndex = levels.indexOf(minLevel)
-	
+
 	return function (level: LogLevel, message: string, meta?: any) {
 		const levelIndex = levels.indexOf(level)
 		if (levelIndex >= minLevelIndex) {
 			const formattedMessage = formatMessage(level, message, meta)
 			switch (level) {
 				case LogLevels.error:
-					console.error(formattedMessage)
+					console.error(formattedMessage, meta?.error)
 					break
 				case LogLevels.warn:
 					console.warn(formattedMessage)
@@ -36,13 +42,12 @@ export function createLogger(minLevel: LogLevel) {
 			}
 		}
 	}
-	
 }
 
 function formatMessage(level: LogLevel, message: string, meta: any = {}) {
 	const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 22)
 	let messageStr = `[${timestamp}]`
-	
+
 	switch (level) {
 		case LogLevels.error:
 			messageStr += chalk.red(`[erro]`)
@@ -60,27 +65,35 @@ function formatMessage(level: LogLevel, message: string, meta: any = {}) {
 			messageStr += chalk.gray(`[verb]`)
 			break
 	}
-	
+
 	if (meta?.sequence) {
 		messageStr += ' ' + chalk.cyan(meta.sequence)
 	}
-	
+
 	if (meta?.instance) {
 		messageStr += ' ' + chalk.magenta(meta.instance)
 	}
 
 	messageStr += ' ' + message
-	
+
 	if (meta) {
-		const { instance, sequence, model, elapsed, ...otherData } = meta
+		const { instance, sequence, model, elapsed, error, ...otherData } = meta
 		if (model) {
 			messageStr += ' ' + chalk.green(meta.model)
 		}
 		if (elapsed) {
-			messageStr += ' ' + chalk.magenta(`+${elapsed.toFixed(2)}ms`)
+			if (elapsed < 1000) {
+				messageStr += ' ' + chalk.magenta(`+${elapsed.toFixed(2)}ms`)
+			} else {
+				messageStr += ' ' + chalk.magenta(`+${(elapsed / 1000).toFixed(2)}s`)
+			}
 		}
 		if (Object.keys(otherData).length > 0) {
-			messageStr += ' ' + JSON.stringify(otherData, null, 2).replace(/\n/g, ' ').replace(/\s+/g, ' ')
+			messageStr +=
+				' ' +
+				JSON.stringify(otherData, null, 2)
+					.replace(/\n/g, ' ')
+					.replace(/\s+/g, ' ')
 		}
 	}
 	return messageStr

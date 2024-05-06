@@ -1,7 +1,6 @@
 import crypto from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { customAlphabet } from 'nanoid'
-import { EngineInstance } from './engines/index.js'
 import {
 	CompletionRequest,
 	ChatCompletionRequest,
@@ -10,9 +9,10 @@ import {
 	LLMRequest,
 	CompletionProcessingOptions,
 } from '#lllms/types/index.js'
+import type { EngineInstance } from '#lllms/engines/index.js'
 import { createContextStateHash } from '#lllms/lib/createContextStateHash.js'
-import { LogLevels, Logger, createLogger } from '#lllms/lib/logger.js'
-import { elapsedMillis } from '#lllms/lib/elapsedMillis.js'
+import { LogLevels, Logger, createLogger, withLogMeta } from '#lllms/lib/logger.js'
+import { elapsedMillis, mergeAbortSignals } from '#lllms/lib/util.js'
 
 const idAlphabet =
 	'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -40,25 +40,31 @@ export class LLMInstance {
 	private engine: LLMEngine
 	private contextStateHash?: string
 	private needsContextReset: boolean = false
-	private llm: EngineInstance | null
+	private llm: EngineInstance | null = null
+	private currentRequest: LLMRequest | null = null
 
 	constructor(engine: LLMEngine, { logger, gpu, ...opts }: LLMInstanceOptions) {
-		this.id = opts.name + ':' + generateId(8)
+		this.id = opts.id + ':' + generateId(8)
 		this.engine = engine
 		this.config = opts
-		this.model = opts.name
-		this.llm = null
+		this.model = opts.id
 		this.gpu = gpu
 		this.ttl = opts.ttl ?? 300
 		this.status = 'preparing'
 		this.createdAt = new Date()
-		this.logger = logger ?? createLogger(LogLevels.warn)
+		this.logger = withLogMeta(logger ?? createLogger(LogLevels.warn), {
+			instance: this.id,
+		})
 
 		// TODO to implement this properly we should only include what changes the "behavior" of the model
 		this.fingerprint = crypto
 			.createHash('sha1')
 			.update(JSON.stringify(opts))
 			.digest('hex')
+		this.logger(LogLevels.info, 'Initializing new instance for', {
+			model: this.model,
+			gpu: this.gpu,
+		})
 	}
 
 	async load(signal?: AbortSignal) {
@@ -73,8 +79,9 @@ export class LLMInstance {
 		const loadBegin = process.hrtime.bigint()
 		this.llm = await this.engine.loadInstance(
 			{
-				id: this.id,
-				log: this.logger,
+				log: withLogMeta(this.logger, {
+					instance: this.id,
+				}),
 				config: {
 					...this.config,
 					engineOptions: {
@@ -87,7 +94,6 @@ export class LLMInstance {
 		)
 		this.status = 'idle'
 		this.logger(LogLevels.debug, 'Instance loaded', {
-			instance: this.id,
 			elapsed: elapsedMillis(loadBegin),
 		})
 	}
@@ -99,18 +105,20 @@ export class LLMInstance {
 		}
 	}
 
-	lock() {
+	lock(request: LLMRequest) {
 		if (this.status !== 'idle') {
 			throw new Error(`Cannot lock: Instance ${this.id} is not idle`)
 		}
+		this.currentRequest = request
 		this.status = 'busy'
 	}
 
 	unlock() {
 		this.status = 'idle'
+		this.currentRequest = null
 	}
 
-	resetContext() {
+	reset() {
 		this.needsContextReset = true
 	}
 
@@ -143,34 +151,68 @@ export class LLMInstance {
 		}
 		const id = this.id + '-' + generateId(8)
 		this.lastUsed = Date.now()
-		this.logger(LogLevels.verbose, 'Creating chat completion', {
+		const completionLogger = withLogMeta(this.logger, {
+			sequence: this.currentRequest!.sequence,
 			completion: id,
 		})
+		completionLogger(LogLevels.verbose, 'Creating chat completion')
+		const cancelController = new AbortController()
+		const cancel = () => {
+			cancelController.abort()
+		}
+
 		return {
 			id,
 			model: this.model,
 			createdAt: new Date(),
+			cancel,
 			process: async (opts?: CompletionProcessingOptions) => {
+				// setting up signals
+				const abortSignals = [
+					cancelController.signal,
+				]
+				const timeoutController = new AbortController()
+				let timeout: NodeJS.Timeout | undefined
+				if (opts?.timeout) {
+					timeout = setTimeout(() => {
+						timeoutController.abort()
+					}, opts?.timeout)
+					abortSignals.push(timeoutController.signal)
+				}
+				if (opts?.signal) {
+					abortSignals.push(opts?.signal)
+				}
+				// checking if this instance has been flagged for reset
 				let resetContext = false
 				if (this.needsContextReset) {
 					this.contextStateHash = undefined
 					this.needsContextReset = false
 					resetContext = true
 				}
-				const processBegin = process.hrtime.bigint()
+				completionLogger(LogLevels.info, 'Processing chat completion', {
+					resetContext,
+				})
+				const processingBegin = process.hrtime.bigint()
 				const result = await this.engine.processChatCompletion(
 					this.llm,
 					{
 						request,
-						config: this.config,
-						id: this.id,
-						log: this.logger,
 						resetContext,
+						config: this.config,
+						log: completionLogger,
 						onChunk: opts?.onChunk,
 					},
-					opts?.signal,
+					mergeAbortSignals(abortSignals),
 				)
-				const processElapsed = elapsedMillis(processBegin)
+				const processingElapsed = elapsedMillis(processingBegin)
+
+				if (timeout) {
+					clearTimeout(timeout)
+					if (timeoutController.signal.aborted) {
+						completionLogger(LogLevels.warn, 'Chat completion timed out')
+						result.finishReason = 'timeout'
+					}
+				}
 				const newMessages = [...request.messages]
 				newMessages.push(result.message)
 
@@ -179,9 +221,8 @@ export class LLMInstance {
 					messages: newMessages,
 				})
 
-				this.logger(LogLevels.info, 'Chat completion done', {
-					completion: id,
-					elapsed: processElapsed,
+				completionLogger(LogLevels.info, 'Chat completion done', {
+					elapsed: processingElapsed,
 				})
 
 				return result
@@ -189,8 +230,8 @@ export class LLMInstance {
 		}
 	}
 
-	createCompletion(req: CompletionRequest) {
-		if (!req.prompt) {
+	createCompletion(request: CompletionRequest) {
+		if (!request.prompt) {
 			throw new Error('Prompt is required for completions.')
 		}
 		this.lastUsed = Date.now()
@@ -206,10 +247,15 @@ export class LLMInstance {
 				const result = await this.engine.processCompletion(
 					this.llm,
 					{
+						request,
 						config: this.config,
-						log: this.logger,
-						id: this.id,
-						request: req,
+						log: (level, message, meta = {}) => {
+							this.logger(level, message, {
+								...meta,
+								instance: this.id,
+								completion: id,
+							})
+						},
 						onChunk: opts?.onChunk,
 					},
 					opts?.signal,

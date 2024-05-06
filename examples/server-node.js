@@ -1,10 +1,9 @@
 import http from 'node:http'
 import { startLLMs } from '../dist/index.js'
-import { createLogger } from '../dist/util/logger.js'
 
 const llms = startLLMs({
-	logger: createLogger('info'),
-	concurrency: 2,
+	log: 'info',
+	inferenceConcurrency: 2,
 	models: {
 		'phi3-mini-4k': {
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',

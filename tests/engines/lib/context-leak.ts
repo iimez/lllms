@@ -1,6 +1,6 @@
-import { suite, it, expect, beforeAll, afterAll } from 'vitest'
+import { expect } from 'vitest'
 import { LLMServer } from '#lllms/server.js'
-import { ChatMessage, ChatCompletionRequest } from '#lllms/types/index.js'
+import { ChatMessage } from '#lllms/types/index.js'
 import { createChatCompletion, parseInstanceId } from '../../util.js'
 
 // conversation that tests whether reused instances leak their context
@@ -12,18 +12,18 @@ export async function runContextLeakTest(
 		{
 			role: 'user',
 			content:
-				"Please remember this fact for later: Axolotls can regenerate lost limbs. Don't forget! Just answer with 'OK'.",
+				"Please remember this fact for later: Platypuses have venomous spurs on their hind legs. Don't forget! Just answer with 'OK'.",
 		},
 	]
 	const responseA1 = await createChatCompletion(llms, {
 		model,
 		temperature: 0,
 		messages: messagesA,
-		maxTokens: 64,
+		maxTokens: 10,
 		stop: ['OK'],
 	})
 	const instanceIdA1 = parseInstanceId(responseA1.handle.id)
-	console.debug({ responseA1: responseA1.result.message.content })
+	// console.debug({ responseA1: responseA1.result.message.content })
 	const responseB1 = await createChatCompletion(llms, {
 		stop: ['\n'],
 		maxTokens: 100,
@@ -36,7 +36,7 @@ export async function runContextLeakTest(
 	// assert the unrelated request B1 is handled by the idle instance
 	expect(instanceIdA1).not.toBe(instanceIdB1)
 	// assert request B1 did not have the correct context
-	expect(responseB1.result.message.content).not.toMatch(/axolotl/i)
+	expect(responseB1.result.message.content).not.toMatch(/platypus/i)
 
 	messagesA.push(responseA1.result.message, {
 		role: 'user',
@@ -51,5 +51,5 @@ export async function runContextLeakTest(
 	// assert follow up turn is handled by the same instance
 	expect(instanceIdA1).toBe(instanceIdA2)
 	// assert request A2 does not have the correct context
-	expect(responseA2.result.message.content).toMatch(/axolotl/i)
+	expect(responseA2.result.message.content).toMatch(/platypus/i)
 }

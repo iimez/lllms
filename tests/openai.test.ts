@@ -1,7 +1,7 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import { Server } from 'node:http'
 import OpenAI from 'openai'
-import { serveLLMs } from '../src/server.js'
+import { serveLLMs } from '#lllms/http.js'
 
 const testModel = 'phi3-mini-4k'
 
@@ -101,7 +101,7 @@ suite('OpenAI API (node-llama-cpp)', () => {
 	beforeAll(async () => {
 		server = await serveLLMs({
 			listen: { port: 3000 },
-			concurrency: 2,
+			inferenceConcurrency: 2,
 			models: {
 				[testModel]: {
 					url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
@@ -131,7 +131,7 @@ suite('OpenAI API (gpt4all)', () => {
 	beforeAll(async () => {
 		server = await serveLLMs({
 			listen: { port: 3001 },
-			concurrency: 2,
+			inferenceConcurrency: 2,
 			models: {
 				[testModel]: {
 					url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',

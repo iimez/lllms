@@ -1,7 +1,7 @@
 import { suite, it, expect, beforeAll, afterAll } from 'vitest'
 import { LLMServer } from '#lllms/server.js'
 import { LLMOptions } from '#lllms/types/index.js'
-import { createChatCompletion, parseInstanceId } from './util.js'
+import { createChatCompletion } from './util.js'
 
 const models: Record<string, LLMOptions> = {
 	'gpt4all': {

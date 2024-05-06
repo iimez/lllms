@@ -2,8 +2,8 @@ import os from 'node:os'
 import path from 'node:path'
 import chalk from 'chalk'
 import { LLMPool } from '../dist/index.js'
-import { elapsedMillis } from '../dist/util/elapsedMillis.js'
-import { createLogger } from '../dist/util/logger.js'
+import { elapsedMillis } from '../dist/lib/util.js'
+import { createLogger } from '../dist/lib/logger.js'
 
 // Complete multiple prompts concurrently using LLMPool.
 
@@ -11,17 +11,18 @@ async function onPrepareInstance(instance) {
 	// can be used to set up the instance before it's used.
 	// the model will not be loaded until this promise resolves.
 	// console.log('Instance about to load:', instance)
+	// throwing here will put the instance in an error state
 }
 
 const pool = new LLMPool(
 	{
 		// to see what's going on, set the log level to 'debug'
-		// logger: createLogger('debug'),
+		log: 'debug',
 		// global inference concurrency limit, across all instances of all models
-		concurrency: 2,
+		inferenceConcurrency: 2,
 		models: {
 			'phi3-mini-4k': {
-				// note that this file needs to be downloaded manually when using the pool directly.
+				// note that this path needs to be absolute and the file needs to be downloaded beforehand.
 				file: path.resolve(
 					os.homedir(),
 					'.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf',

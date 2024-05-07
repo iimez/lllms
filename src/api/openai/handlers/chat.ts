@@ -103,6 +103,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					: undefined,
 				topP: args.top_p ? args.top_p : undefined,
 				tokenBias: args.logit_bias ? args.logit_bias : undefined,
+				grammar: args.response_format?.type === 'json_object' ? 'json' : undefined,
 				// additional non-spec params
 				repeatPenaltyNum: args.repeat_penalty_num
 					? args.repeat_penalty_num
@@ -148,32 +149,34 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			release()
 
 			if (args.stream) {
-				// beta chat completions pick up the meta data from the last chunk
-				const finalChunk: OpenAIChatCompletionChunk = {
-					id: completion.id,
-					object: 'chat.completion.chunk',
-					model: completion.model,
-					created: Math.floor(completion.createdAt.getTime() / 1000),
-					system_fingerprint: instance.fingerprint,
-					choices: [
-						{
-							index: 0,
-							delta: {},
-							logprobs: null,
-							finish_reason: result.finishReason
-								? finishReasons[result.finishReason]
-								: 'stop',
+				if (args.stream_options?.include_usage) {
+					// beta chat completions pick up the meta data from the last chunk
+					const finalChunk: OpenAIChatCompletionChunk = {
+						id: completion.id,
+						object: 'chat.completion.chunk',
+						model: completion.model,
+						created: Math.floor(completion.createdAt.getTime() / 1000),
+						system_fingerprint: instance.fingerprint,
+						choices: [
+							{
+								index: 0,
+								delta: {},
+								logprobs: null,
+								finish_reason: result.finishReason
+									? finishReasons[result.finishReason]
+									: 'stop',
+							},
+						],
+						usage: {
+							prompt_tokens: result.promptTokens,
+							completion_tokens: result.completionTokens,
+							total_tokens: result.totalTokens,
 						},
-					],
-					usage: {
-						prompt_tokens: result.promptTokens,
-						completion_tokens: result.completionTokens,
-						total_tokens: result.totalTokens,
-					},
+					}
+					res.write(
+						`data: ${JSON.stringify(finalChunk)}\n\n`,
+					)
 				}
-				res.write(
-					`data: ${JSON.stringify(finalChunk)}\n\n`,
-				)
 				res.write('data: [DONE]')
 				res.end()
 			} else {

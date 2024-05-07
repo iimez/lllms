@@ -11,6 +11,11 @@ interface OpenAICompletionParams
 	stream?: boolean
 	top_k?: number
 	min_p?: number
+	repeat_penalty_num?: number
+}
+
+interface OpenAICompletionChunk extends OpenAI.Completions.Completion {
+	usage?: OpenAI.CompletionUsage
 }
 
 // v1/completions
@@ -89,6 +94,9 @@ export function createCompletionHandler(pool: LLMPool) {
 				tokenBias: args.logit_bias ? args.logit_bias : undefined,
 				topP: args.top_p ? args.top_p : undefined,
 				// additional non-spec params
+				repeatPenaltyNum: args.repeat_penalty_num
+					? args.repeat_penalty_num
+					: undefined,
 				minP: args.min_p ? args.min_p : undefined,
 				topK: args.top_k ? args.top_k : undefined,
 			})
@@ -103,14 +111,17 @@ export function createCompletionHandler(pool: LLMPool) {
 				signal: controller.signal,
 				onChunk: (chunk) => {
 					if (args.stream) {
-						const chunkData = {
+						const chunkData: OpenAICompletionChunk = {
 							id: completion.id,
-							object: 'text_completion.chunk',
+							model: completion.model,
+							object: 'text_completion',
+							created: Math.floor(completion.createdAt.getTime() / 1000),
 							choices: [
 								{
 									index: 0,
 									text: chunk.text,
 									logprobs: null,
+									// @ts-ignore official api returns null here in the same case
 									finish_reason: null,
 								},
 							],
@@ -122,26 +133,30 @@ export function createCompletionHandler(pool: LLMPool) {
 			release()
 
 			if (args.stream) {
-				res.write(
-					`data: ${JSON.stringify({
+				if (args.stream_options?.include_usage) {
+					const finalChunk: OpenAICompletionChunk = {
 						id: completion.id,
-						object: 'text_completion.chunk',
+						model: completion.model,
+						object: 'text_completion',
+						created: Math.floor(completion.createdAt.getTime() / 1000),
 						choices: [
 							{
 								index: 0,
 								text: '',
 								logprobs: null,
-								finish_reason: result.finishReason
-									? finishReasons[result.finishReason]
-									: '',
+								// @ts-ignore
+								finish_reason: finishReasons[result.finishReason],
 							},
 						],
-					})}\n\n`,
-				)
+					}
+					res.write(
+						`data: ${JSON.stringify(finalChunk)}\n\n`,
+					)
+				}
 				res.write('data: [DONE]')
 				res.end()
 			} else {
-				const response = {
+				const response: OpenAI.Completions.Completion = {
 					id: completion.id,
 					model: completion.model,
 					object: 'text_completion',
@@ -152,6 +167,7 @@ export function createCompletionHandler(pool: LLMPool) {
 							index: 0,
 							text: result.text,
 							logprobs: null,
+							// @ts-ignore
 							finish_reason: result.finishReason
 								? finishReasons[result.finishReason]
 								: 'stop',

@@ -15,6 +15,7 @@ export interface GGUFMeta {
 			tokens?: string[]
 			scores?: number[]
 			token_type?: number[]
+			merges?: string[]
 		}
 	}
 }

@@ -60,6 +60,7 @@ export class LLMStore {
 				id: modelId,
 				minInstances: 0,
 				maxInstances: 1,
+				engine: 'node-llama-cpp',
 				engineOptions: {},
 				...modelOptions,
 				file: this.resolveModelLocation({
@@ -157,6 +158,7 @@ export class LLMStore {
 		
 		const gguf = ggufMeta
 		if (gguf.tokenizer?.ggml) {
+			delete gguf.tokenizer.ggml.merges
 			delete gguf.tokenizer.ggml.tokens
 			delete gguf.tokenizer.ggml.scores
 			delete gguf.tokenizer.ggml.token_type
@@ -250,7 +252,7 @@ export class LLMStore {
 				if (!org || !repo || !branch) {
 					throw new Error(`Unexpected huggingface URL: ${options.url}`)
 				}
-				autoSubPath = 'huggingface/' + org + '/' + repo + '/' + branch
+				autoSubPath = 'huggingface/' + org + '/' + repo + '-' + branch
 			} else {
 				autoSubPath = url.hostname
 			}

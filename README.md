@@ -11,9 +11,9 @@ Note that this is a dev and learning tool and not meant for production use. It i
 - Run multiple large language models concurrently, until your CPU or RAM runs out.
 - Automatically download and cache GGUF's to `~/.cache/lllms`.
 - OpenAI spec API endpoints. See [#progress](#progress) for compatibility.
-- Cache loaded models and their contexts/sessions across requests.
+- Cache loaded models and their contexts/sessions across stateless API requests.
 - BYO web server or use the provided express server and middleware.
-- Use the LLM instance pool on its own within your application.
+- Or use the LLM instance pool directly within your application.
 
 ### Usage
 
@@ -23,54 +23,74 @@ To integrate lllms directly with your application, you can use either the higher
 
 To attach lllms to your existing (express, or any other) web server see [./examples/express-openai](./examples/express-openai.js) and [./examples/server-node](./examples/server-node.js). See [./src/http.ts](./src/http.ts) for more ways to integrate with existing HTTP servers.
 
-The highest level API, to spin up a standalone server:
 
 ```js lllms.js
 import { serveLLMs } from 'lllms'
 
 // Starts a http server for up to two instances of phi3 and exposes them via openai API
 serveLLMs({
-  // Web server options. If you dont need a web server, use startLLMs or
-  // `new LLMServer()` instead. Apart from `listen` they take the same configuration.
-  listen: {
-    port: 3000,
-  },
   // Limit how many completions can be processed concurrently. If its exceeded, requests
-  // will stall until a slot is free. Only relevant for multiple cpu instances, as only
-  // one gpu instance can run at a time.
+  // will stall until a slot is free. Defaults to 1.
   inferenceConcurrency: 2,
-  downloadConcurrency: 2, // how many models may be downloaded concurrently
-  // Custom model directory, defaults to `~/.cache/lllms`
+  downloadConcurrency: 2, // How many models may be downloaded concurrently
+  // Where to write models to, defaults to `~/.cache/lllms`
   // modelsPath: '/path/to/models',
   models: {
-    // Model names can use a-zA-Z0-9_:\-
+    // Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-
+    // Only URL is required. Per default models will only be downloaded on demand.
     'phi3-mini-4k': {
       // Model weights may be specified by file and/or url.
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
       // Absolute or relative to modelsPath. If it does not exist and a url is configured
       // it will be downloaded to the given location.
       file: 'Phi-3-mini-4k-instruct-q4.gguf',
-      // Files will be verified before being loaded/used if a checksum is provided.
+      // Checksums are optional and will be verified before loading the model if set.
       // md5: 'cb68b653b24dc432b78b02df76921a54',
-      sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
+      // sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
+      // Use these to control how much memory your LLMs may use.
+      contextSize: 4096, // Maximum context size. Will be determined automatically if not set.
+      maxInstances: 2, // How many active sessions you wanna be able to cache at the same time.
+      minInstances: 1, // To always keep at least one instance ready.
+      ttl: 300, // Idle sessions will be disposed after this many seconds.
+      // Set defaults for completions. These can be overridden per request.
+      // If unset, default values depend on the engine.
+      systemPrompt: 'You are a helpful assistant.',
+      completionDefaults: {
+        temperature: 1,
+      //   maxTokens: 100,
+      //   seed: 1234,
+      //   stop: ['\n'],
+      //   repeatPenalty: 0.6,
+      //   repeatPenaltyNum: 64,
+      //   frequencyPenalty: 0,
+      //   presencePenalty: 0,
+      //   topP: 1,
+      //   minP: 0,
+      //   topK: 0,
+      //   grammar: 'json',
+      //   tokenBias: {
+      //     'no': 100,
+      //     'yes': -100,
+      //   },
+      },
       // Choose between node-llama-cpp or gpt4all as bindings to llama.cpp.
       engine: 'node-llama-cpp',
       engineOptions: {
         // GPU will be used automatically, but models can be forced to always run on gpu by
         // setting to true. Note that both engines currently do not support running multiple
         // models on gpu at the same time. Requests will stall until a gpu slot is free and
-        // context cannot be reused if theres multiple sessions going on.
-        gpu: true,
-        batchSize: 512,
+        // context cannot be reused if there are multiple sessions going on.
+        // gpu: true,
+        // batchSize: 512,
         cpuThreads: 4,
-        memLock: true, // Only supported for node-llama-cpp.
+        // memLock: true, // Only supported for node-llama-cpp.
       },
-      // Maximum context size. Will be determined automatically if not set.
-      contextSize: 4096,
-      maxInstances: 2, // Set this to how many sessions you expect to be alive concurrently.
-      minInstances: 1, // To download on startup and immediately prepare an instance.
-      ttl: 300, // Model instance time to live in seconds.
     },
+  },
+  // HTTP listen options. If you don't need a web server, use startLLMs or `new LLMServer()`
+  // directly instead of `serveLLMs`. Apart from `listen` they take the same configuration.
+  listen: {
+    port: 3000,
   },
 })
 // During download completion requests will stall to get processed once the model is ready.
@@ -119,7 +139,7 @@ $ curl http://localhost:3000/openai/v1/chat/completions \
 
 On the packaged server there is only one additional HTTP endpoint that is not part of the OpenAI API at `/openai/v1`.
 
-- `GET /` - Prints info about spawned instances, available models download status.
+- `GET /` - Prints info about spawned instances, available models and ongoing downloads.
 
 ### Progress
 
@@ -147,7 +167,7 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | logprobs            | ❌      | ❌             |
 | top_logprobs        | ❌      | ❌             |
 | logit_bias          | ❌      | ✅             |
-| response_format     | ❌      | ❌             |
+| response_format     | ❌      | ✅             |
 | tools               | ❌      | ❌             |
 | tool_choice         | ❌      | ❌             |
 | suffix              | ❌      | ❌             |
@@ -173,7 +193,7 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 
 System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored.
 
-Note that the current context-reuse implementation only works if (apart from the final user message) the same messages are resent in the same order. This is because the messages will be hashed to be compared during follow up turns. If no hash matches, a fresh context will be used and passed messages will be reingested.
+Note that the current context cache implementation for the OpenAI API only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches, everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
 
 #### TODO / Roadmap
 

@@ -236,34 +236,38 @@ export class LLMInstance {
 		}
 		this.lastUsed = Date.now()
 		const id = this.id + '-' + generateId(8)
-		this.logger(LogLevels.verbose, 'Creating completion', { completion: id })
-
+		const completionLogger = withLogMeta(this.logger, {
+			sequence: this.currentRequest!.sequence,
+			completion: id,
+		})
+		completionLogger(LogLevels.verbose, 'Creating chat completion')
+		const cancelController = new AbortController()
+		const cancel = () => {
+			cancelController.abort()
+		}
 		return {
 			id,
 			model: this.model,
 			createdAt: new Date(),
+			cancel,
 			process: async (opts?: CompletionProcessingOptions) => {
-				const processBegin = process.hrtime.bigint()
+				const processingBegin = process.hrtime.bigint()
 				const result = await this.engine.processCompletion(
 					this.llm,
 					{
 						request,
 						config: this.config,
-						log: (level, message, meta = {}) => {
-							this.logger(level, message, {
-								...meta,
-								instance: this.id,
-								completion: id,
-							})
-						},
+						log: completionLogger,
 						onChunk: opts?.onChunk,
 					},
 					opts?.signal,
 				)
-				
-				this.logger(LogLevels.verbose, 'Completion done', {
-					completion: id,
-					elapsed: elapsedMillis(processBegin),
+				const processingElapsed = elapsedMillis(processingBegin)
+				this.contextStateHash = createContextStateHash({
+					prompt: request.prompt,
+				})
+				completionLogger(LogLevels.verbose, 'Completion done', {
+					elapsed: processingElapsed,
 				})
 				return result
 			},

@@ -12,7 +12,7 @@ import {
 	EngineChatCompletionResult,
 	EngineCompletionResult,
 	CompletionFinishReason,
-	ChatTemplateFormat,
+	// ChatTemplateFormat,
 	EngineContext,
 	EngineOptionsBase,
 } from '#lllms/types/index.js'
@@ -63,22 +63,24 @@ export async function processCompletion(
 	let finishReason: CompletionFinishReason = 'eogToken'
 	let removeTailingToken: string | undefined
 
+	const defaults = config.completionDefaults ?? {}
+	const stopTriggers = request.stop ?? defaults.stop ?? []
 	const result = await instance.generate(request.prompt, {
 		// @ts-ignore
 		special: true, // allows passing in raw prompt (including <|start|> etc.)
 		promptTemplate: '%1',
-		temperature: request.temperature,
-		nPredict: request.maxTokens,
-		topP: request.topP,
-		topK: request.topK,
-		minP: request.minP,
+		temperature: request.temperature ?? defaults.temperature,
+		nPredict: request.maxTokens ?? defaults.maxTokens,
+		topP: request.topP ?? defaults.topP,
+		topK: request.topK ?? defaults.topK,
+		minP: request.minP ?? defaults.minP,
 		nBatch: config.engineOptions?.batchSize,
 		// TODO not sure if repeatPenalty interacts with repeatLastN and how it differs from frequency/presencePenalty.
-		repeatLastN: request.repeatPenaltyNum ?? 64,
-		repeatPenalty: request.repeatPenalty ?? 1.18,
+		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
+		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // https://github.com/nomic-ai/gpt4all/issues/1952
 		onResponseToken: (tokenId, token) => {
-			if (request.stop && request.stop.includes(token)) {
+			if (stopTriggers.includes(token)) {
 				finishReason = 'stopGenerationTrigger'
 				removeTailingToken = token
 				return false
@@ -89,7 +91,7 @@ export async function processCompletion(
 					tokens: [tokenId],
 				})
 			}
-			return signal?.aborted
+			return !signal?.aborted
 		},
 	})
 
@@ -111,28 +113,28 @@ export async function processCompletion(
 	}
 }
 
-function addSystemPromptTemplate(
-	systemPrompt: string,
-	templateFormat: ChatTemplateFormat,
-) {
-	if (templateFormat === 'chatml') {
-		return `<|im_start|>system\n${systemPrompt}<|im_end|>\n`
-	}
-	if (templateFormat === 'llama3') {
-		return `<|start_header_id|>system<|end_header_id|>\n\n${systemPrompt}<|eot_id|>`
-	}
-	if (templateFormat === 'alpaca') {
-		return `### System:\n${systemPrompt}\n\n`
-	}
-	if (templateFormat === 'phi') {
-		return `<|system|>\n${systemPrompt}<|end|>\n`
-	}
-	if (templateFormat === 'llama2') {
-		// return `[INST]${systemPrompt}[/INST]\n`
-		return `<s>[INST] <<SYS>>\n${systemPrompt}\n<</SYS>>[/INST]</s>\n\n`
-	}
-	return systemPrompt
-}
+// function addSystemPromptTemplate(
+// 	systemPrompt: string,
+// 	templateFormat: ChatTemplateFormat,
+// ) {
+// 	if (templateFormat === 'chatml') {
+// 		return `<|im_start|>system\n${systemPrompt}<|im_end|>\n`
+// 	}
+// 	if (templateFormat === 'llama3') {
+// 		return `<|start_header_id|>system<|end_header_id|>\n\n${systemPrompt}<|eot_id|>`
+// 	}
+// 	if (templateFormat === 'alpaca') {
+// 		return `### System:\n${systemPrompt}\n\n`
+// 	}
+// 	if (templateFormat === 'phi') {
+// 		return `<|system|>\n${systemPrompt}<|end|>\n`
+// 	}
+// 	if (templateFormat === 'llama2') {
+// 		// return `[INST]${systemPrompt}[/INST]\n`
+// 		return `<s>[INST] <<SYS>>\n${systemPrompt}\n<</SYS>>[/INST]</s>\n\n`
+// 	}
+// 	return systemPrompt
+// }
 
 export async function processChatCompletion(
 	instance: InferenceModel,
@@ -146,19 +148,11 @@ export async function processChatCompletion(
 ): Promise<EngineChatCompletionResult> {
 	let session = instance.activeChatSession
 	if (!session || resetContext) {
-		let systemPrompt = request.systemPrompt
-
-		// allow setting system prompt via initial message.
-		if (!systemPrompt && request.messages[0].role === 'system') {
+		let systemPrompt = request.systemPrompt ?? config.systemPrompt
+		// allow overriding system prompt via initial message.
+		if (request.messages[0].role === 'system') {
 			systemPrompt = request.messages[0].content
-			if (config.templateFormat) {
-				systemPrompt = addSystemPromptTemplate(
-					systemPrompt,
-					config.templateFormat,
-				)
-			}
 		}
-		// console.debug('using system prompt', systemPrompt)
 		session = await instance.createChatSession({
 			systemPrompt,
 		})
@@ -184,19 +178,21 @@ export async function processChatCompletion(
 	let finishReason: CompletionFinishReason = 'eogToken'
 	let removeTailingToken: string | undefined
 
+	const defaults = config.completionDefaults ?? {}
+	const stopTriggers = request.stop ?? defaults.stop ?? []
 	const result = await createCompletion(session, input, {
-		temperature: request.temperature,
-		nPredict: request.maxTokens,
-		topP: request.topP,
-		topK: request.topK,
-		minP: request.minP,
-		nBatch: config.engineOptions?.batchSize ?? 8,
-		repeatLastN: request.repeatPenaltyNum ?? 64,
+		temperature: request.temperature ?? defaults.temperature,
+		nPredict: request.maxTokens ?? defaults.maxTokens,
+		topP: request.topP ?? defaults.topP,
+		topK: request.topK ?? defaults.topK,
+		minP: request.minP ?? defaults.minP,
+		nBatch: config.engineOptions?.batchSize,
+		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 		// TODO not sure if repeatPenalty interacts with repeatLastN and how it differs from frequency/presencePenalty.
-		repeatPenalty: request.repeatPenalty ?? 1.18,
+		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // see https://github.com/nomic-ai/gpt4all/issues/1952
 		onResponseToken: (tokenId, token) => {
-			if (request.stop && request.stop.includes(token)) {
+			if (stopTriggers.includes(token)) {
 				finishReason = 'stopGenerationTrigger'
 				removeTailingToken = token
 				return false

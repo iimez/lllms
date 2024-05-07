@@ -29,12 +29,8 @@ export interface ChatMessage {
 	content: string
 }
 
-export type ChatTemplateFormat = 'chatml' | 'llama3' | 'alpaca' | 'phi'
-
-export interface CompletionRequestBase {
-	model: string
+export interface CompletionParams {
 	temperature?: number
-	stream?: boolean
 	maxTokens?: number
 	seed?: number
 	stop?: string[]
@@ -46,6 +42,12 @@ export interface CompletionRequestBase {
 	minP?: number
 	topK?: number
 	tokenBias?: Record<string, number>
+	grammar?: 'json'
+}
+
+export interface CompletionRequestBase extends CompletionParams {
+	model: string
+	stream?: boolean
 }
 
 export interface CompletionRequest extends CompletionRequestBase {
@@ -58,7 +60,6 @@ export interface ChatCompletionRequest extends CompletionRequestBase {
 }
 
 export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest
-// export type LLMRequest = CompletionRequest | ChatCompletionRequest
 export interface LLMRequestMeta {
 	sequence: number
 }
@@ -73,11 +74,12 @@ export interface ChatCompletionResult extends EngineChatCompletionResult {
 export interface LLMOptionsBase {
 	url?: string
 	file?: string
-	engine: EngineType
+	engine?: EngineType
 	contextSize?: number
 	minInstances?: number
 	maxInstances?: number
-	templateFormat?: ChatTemplateFormat
+	systemPrompt?: string
+	completionDefaults?: CompletionParams
 	md5?: string
 	sha256?: string
 }
@@ -162,4 +164,8 @@ interface GPT4AllLLMOptions extends LLMOptionsBase {
 	engineOptions?: GPT4AllOptions
 }
 
-export type LLMOptions = NodeLlamaCppLLMOptions | GPT4AllLLMOptions
+interface DefaultEngineLLMOptions extends LLMOptionsBase {
+	engineOptions?: LlamaCppOptions
+}
+
+export type LLMOptions = NodeLlamaCppLLMOptions | GPT4AllLLMOptions | DefaultEngineLLMOptions

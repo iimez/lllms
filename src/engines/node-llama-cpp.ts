@@ -11,6 +11,9 @@ import {
 	resolveChatWrapper,
 	TokenBias,
 	Token,
+	LlamaContextSequence,
+	Llama,
+	LlamaGrammar,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector.js'
 import {
@@ -35,6 +38,7 @@ interface LlamaCppInstance {
 	model: LlamaModel
 	context: LlamaContext
 	session: LlamaChatSession
+	grammars: Record<string, LlamaGrammar>
 }
 
 export async function loadInstance(
@@ -64,6 +68,15 @@ export async function loadInstance(
 			}
 		},
 	})
+	
+	const grammars = {
+		json: await LlamaGrammar.getFor(llama, 'json'),
+	}
+	
+	// const grammar = new LlamaGrammar({
+	// 	llama,
+	// 	grammar: '',
+	// })
 	const model = await llama.loadModel({
 		modelPath: config.file, // full model absolute path
 		loadSignal: signal,
@@ -89,6 +102,7 @@ export async function loadInstance(
 	return {
 		model,
 		context,
+		grammars,
 		session: null,
 	}
 }
@@ -136,6 +150,7 @@ export async function processChatCompletion(
 	instance: LlamaCppInstance,
 	{
 		request,
+		config,
 		resetContext,
 		log,
 		onChunk,
@@ -162,7 +177,7 @@ export async function processChatCompletion(
 			fileInfo: model.fileInfo,
 			tokenizer: model.tokenizer,
 		})
-		let systemPrompt = request.systemPrompt
+		let systemPrompt = request.systemPrompt ?? config.systemPrompt
 		if (!systemPrompt && request.messages[0].role === 'system') {
 			systemPrompt = request.messages[0].content
 		}
@@ -191,11 +206,12 @@ export async function processChatCompletion(
 		}
 		instance.session.setChatHistory(conversationMessages)
 	}
-
+	
 	// set additional stop generation triggers for this completion
-	if (request.stop?.length) {
+	const stopTrigger = request.stop ?? config.completionDefaults?.stop
+	if (stopTrigger?.length) {
 		// @ts-ignore
-		instance.session.chatWrapper.setExtraStopGenerationTriggers(request.stop)
+		instance.session.chatWrapper.setExtraStopGenerationTriggers(stopTrigger)
 	} else {
 		// @ts-ignore
 		instance.session.chatWrapper.setExtraStopGenerationTriggers(null)
@@ -203,10 +219,11 @@ export async function processChatCompletion(
 
 	// setting up logit/token bias.
 	let tokenBias: TokenBias | undefined
-	if (request.tokenBias) {
+	const completionTokenBias = request.tokenBias ?? config.completionDefaults?.tokenBias
+	if (completionTokenBias) {
 		tokenBias = new TokenBias(instance.model)
-		for (const key in request.tokenBias) {
-			const bias = request.tokenBias[key] / 10
+		for (const key in completionTokenBias) {
+			const bias = completionTokenBias[key] / 10
 			const tokenId = parseInt(key) as Token
 			if (!isNaN(tokenId)) {
 				tokenBias.set(tokenId, bias)
@@ -227,18 +244,26 @@ export async function processChatCompletion(
 	let completionResult: EngineChatCompletionResult
 	let partialResponse = ''
 
+	const defaults = config.completionDefaults ?? {}
+	
+	let grammar: LlamaGrammar | undefined
+	if (request.grammar === 'json') {
+		grammar = instance.grammars.json
+	}
+
 	try {
 		const result = await instance.session.promptWithMeta(input, {
-			maxTokens: request.maxTokens,
-			temperature: request.temperature,
-			topP: request.topP,
-			topK: request.topK,
-			minP: request.minP,
+			maxTokens: request.maxTokens ?? defaults.maxTokens,
+			temperature: request.temperature ?? defaults.temperature,
+			topP: request.topP ?? defaults.topP,
+			topK: request.topK ?? defaults.topK,
+			minP: request.minP ?? defaults.minP,
 			tokenBias,
+			grammar,
 			repeatPenalty: {
-				lastTokens: request.repeatPenaltyNum ?? 64,
-				frequencyPenalty: request.frequencyPenalty,
-				presencePenalty: request.presencePenalty,
+				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
+				frequencyPenalty: request.frequencyPenalty ?? defaults.frequencyPenalty,
+				presencePenalty: request.presencePenalty ?? defaults.presencePenalty,
 			},
 			signal,
 			onToken: (tokens) => {
@@ -282,15 +307,15 @@ export async function processChatCompletion(
 		}
 	}
 
-	const ingestedMessages =
-		instance.session.getLastEvaluationContextWindow() ?? []
-	console.debug('State after completion', {
-		stateSize: formatBytes(instance.context.stateSize),
-		sequencesLeft: instance.context.sequencesLeft,
-		tokenCount: instance.session.sequence.contextTokens.length,
-		incomingMessageCount: request.messages.length,
-		ingestedMessageCount: ingestedMessages.length,
-	})
+	// const ingestedMessages =
+	// 	instance.session.getLastEvaluationContextWindow() ?? []
+	// console.debug('State after completion', {
+	// 	stateSize: formatBytes(instance.context.stateSize),
+	// 	sequencesLeft: instance.context.sequencesLeft,
+	// 	tokenCount: instance.session.sequence.contextTokens.length,
+	// 	incomingMessageCount: request.messages.length,
+	// 	ingestedMessageCount: ingestedMessages.length,
+	// })
 
 	return completionResult
 }
@@ -303,46 +328,52 @@ export async function processCompletion(
 	if (!request.prompt) {
 		throw new Error('Prompt is required for completion.')
 	}
-
+	
+	let contextSequence: LlamaContextSequence
 	if (instance.context.sequencesLeft) {
 		log(LogLevels.debug, 'Clearing history', {
 			sequencesLeft: instance.context.sequencesLeft,
 		})
-		await instance.context.getSequence().clearHistory()
+		contextSequence = instance.context.getSequence()
+		await contextSequence.clearHistory()
 	} else {
 		log(LogLevels.debug, 'No sequencesLeft, recreating context')
 		await instance.context.dispose()
 		instance.context = await instance.model.createContext({
 			createSignal: signal,
-			seed: request.seed, // || createSeed(0, 1000000),
+			seed: request.seed ?? config.completionDefaults?.seed, // || createSeed(0, 1000000),
 			threads: config.engineOptions?.cpuThreads,
 			batchSize: config.engineOptions?.batchSize,
 		})
+		contextSequence = instance.context.getSequence()
 	}
 
 	const completion = new LlamaCompletion({
-		contextSequence: instance.context.getSequence(),
+		contextSequence: contextSequence,
 	})
 
-	const stopTriggers: StopGenerationTrigger = []
-	if (request.stop) {
-		stopTriggers.push(...request.stop)
+	const stopGenerationTrigger: StopGenerationTrigger = []
+	const stopTrigger = request.stop ?? config.completionDefaults?.stop
+	if (stopTrigger) {
+		stopGenerationTrigger.push(...stopTrigger)
 	}
 
 	const tokens = instance.model.tokenize(request.prompt)
+	const defaults = config.completionDefaults ?? {}
 	let generatedTokenCount = 0
 	const result = await completion.generateCompletionWithMeta(tokens, {
-		maxTokens: request.maxTokens,
-		temperature: request.temperature,
-		topP: request.topP,
-		topK: request.topK,
+		maxTokens: request.maxTokens ?? defaults.maxTokens,
+		temperature: request.temperature ?? defaults.temperature,
+		topP: request.topP ?? defaults.topP,
+		topK: request.topK ?? defaults.topK,
+		minP: request.minP ?? defaults.minP,
 		repeatPenalty: {
-			lastTokens: request.repeatPenaltyNum ?? 64,
-			frequencyPenalty: request.frequencyPenalty,
-			presencePenalty: request.presencePenalty,
+			lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
+			frequencyPenalty: request.frequencyPenalty ?? defaults.frequencyPenalty,
+			presencePenalty: request.presencePenalty ?? defaults.presencePenalty,
 		},
 		signal: signal,
-		stopGenerationTriggers: stopTriggers.length ? [stopTriggers] : undefined,
+		stopGenerationTriggers: stopGenerationTrigger.length ? [stopGenerationTrigger] : undefined,
 		onToken: (tokens) => {
 			generatedTokenCount += tokens.length
 			const text = instance.model.detokenize(tokens)

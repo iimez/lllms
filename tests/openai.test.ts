@@ -3,7 +3,7 @@ import { Server } from 'node:http'
 import OpenAI from 'openai'
 import { serveLLMs } from '#lllms/http.js'
 
-const testModel = 'phi3-mini-4k'
+const testModel = 'test'
 
 function runOpenAITests(client: OpenAI) {
 
@@ -38,6 +38,7 @@ function runOpenAITests(client: OpenAI) {
 
 	test('beta.chat.completions.create stream=true', async () => {
 		const completion = await client.beta.chat.completions.stream({
+			stream_options: { include_usage: true },
 			model: testModel,
 			temperature: 0,
 			messages: [
@@ -74,6 +75,7 @@ function runOpenAITests(client: OpenAI) {
 			temperature: 0,
 			stream: true,
 			stop: ['."', '.'],
+			max_tokens: 100,
 			prompt: '"All animals are equal,',
 		})
 		const tokens: string[] = []
@@ -89,6 +91,21 @@ function runOpenAITests(client: OpenAI) {
 		)
 		expect(finishReason).toBe('stop')
 	})
+	
+	test('response_format json_object / json grammar', async () => {
+		const completion = await client.chat.completions.create({
+			model: testModel,
+			temperature: 0,
+			response_format: { type: 'json_object' },
+			messages: [
+				{ role: 'user', content: 'This is a test. Just answer with "Test", but in JSON. And add an array of cats to it.' },
+			],
+		})
+		expect(completion.choices[0].message.content).toBeTruthy()
+		const response = JSON.parse(completion.choices[0].message.content!)
+		expect(response.result).toContain('Test')
+		expect(response.cats).toBeInstanceOf(Array)
+	})
 }
 
 suite('OpenAI API (node-llama-cpp)', () => {
@@ -100,14 +117,14 @@ suite('OpenAI API (node-llama-cpp)', () => {
 	
 	beforeAll(async () => {
 		server = await serveLLMs({
+			log: 'debug',
 			listen: { port: 3000 },
 			inferenceConcurrency: 2,
 			models: {
 				[testModel]: {
-					url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+					url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 					engine: 'node-llama-cpp',
 					minInstances: 2,
-					templateFormat: 'phi',
 				}
 			},
 		})
@@ -118,7 +135,6 @@ suite('OpenAI API (node-llama-cpp)', () => {
 	})
 	
 	runOpenAITests(openai)
-	
 })
 
 suite('OpenAI API (gpt4all)', () => {
@@ -130,11 +146,12 @@ suite('OpenAI API (gpt4all)', () => {
 
 	beforeAll(async () => {
 		server = await serveLLMs({
+			log: 'debug',
 			listen: { port: 3001 },
 			inferenceConcurrency: 2,
 			models: {
 				[testModel]: {
-					url: 'https://gpt4all.io/models/gguf/orca-mini-3b-gguf2-q4_0.gguf',
+					url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 					minInstances: 2,
 					engine: 'gpt4all',
 				}

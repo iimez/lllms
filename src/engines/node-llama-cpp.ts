@@ -1,3 +1,4 @@
+import { promises as fs } from 'node:fs'
 import {
 	getLlama,
 	LlamaChatSession,
@@ -14,6 +15,7 @@ import {
 	LlamaContextSequence,
 	Llama,
 	LlamaGrammar,
+	ChatSessionModelFunctions,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector.js'
 import {
@@ -23,6 +25,7 @@ import {
 	EngineChatCompletionContext,
 	EngineContext,
 	EngineOptionsBase,
+	// CompletionGrammarOptions,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { formatBytes, mergeAbortSignals } from '#lllms/lib/util.js'
@@ -39,6 +42,19 @@ interface LlamaCppInstance {
 	context: LlamaContext
 	session: LlamaChatSession
 	grammars: Record<string, LlamaGrammar>
+}
+
+function prepareGrammars(llama: Llama, grammarConfig: Record<string, string>) {
+	const grammars: Record<string, LlamaGrammar> = {}
+	for (const key in grammarConfig) {
+		const grammar = new LlamaGrammar({
+			llama,
+			grammar: grammarConfig[key],
+			// printGrammar: true,
+		})
+		grammars[key] = grammar
+	}
+	return grammars
 }
 
 export async function loadInstance(
@@ -69,14 +85,11 @@ export async function loadInstance(
 		},
 	})
 	
-	const grammars = {
-		json: await LlamaGrammar.getFor(llama, 'json'),
+	let grammars: Record<string, LlamaGrammar> = {}
+	if (config.grammars) {
+		grammars = prepareGrammars(llama, config.grammars)
 	}
-	
-	// const grammar = new LlamaGrammar({
-	// 	llama,
-	// 	grammar: '',
-	// })
+
 	const model = await llama.loadModel({
 		modelPath: config.file, // full model absolute path
 		loadSignal: signal,
@@ -247,10 +260,13 @@ export async function processChatCompletion(
 	const defaults = config.completionDefaults ?? {}
 	
 	let grammar: LlamaGrammar | undefined
-	if (request.grammar === 'json') {
-		grammar = instance.grammars.json
+	if (request.grammar) {
+		if (!instance.grammars[request.grammar]) {
+			throw new Error(`Grammar "${request.grammar}" not found.`)
+		}
+		grammar = instance.grammars[request.grammar]
 	}
-
+	
 	try {
 		const result = await instance.session.promptWithMeta(input, {
 			maxTokens: request.maxTokens ?? defaults.maxTokens,

@@ -1,28 +1,15 @@
-import path from 'node:path'
 import { promises as fs, existsSync, statSync } from 'node:fs'
 import PQueue from 'p-queue'
 import { downloadFile, DownloadEngineNodejs } from 'ipull'
-import { LLMConfig, LLMOptions } from '#lllms/types/index.js'
+import { LLMConfig } from '#lllms/types/index.js'
 import { GGUFMeta, readGGUFMetaFromFile } from '#lllms/lib/gguf.js'
 import { calcFileChecksums } from '#lllms/lib/calcFileChecksums.js'
-
-const modelIdPattern = /^[a-zA-Z0-9_:\-]+$/
-function validateModelId(id: string) {
-	if (!modelIdPattern.test(id)) {
-		throw new Error(
-			`Model ID must match pattern: ${modelIdPattern} (got "${id}")`,
-		)
-	}
-}
+import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
 
 interface DownloadTask {
 	status: 'pending' | 'processing' | 'completed' | 'error'
 	model: string
 	handle: DownloadEngineNodejs
-}
-
-export interface LLMMStoreOptions {
-	downloadConcurrency?: number
 }
 
 interface LLMMeta {
@@ -34,42 +21,33 @@ export interface LLMStoreModelConfig extends LLMConfig {
 	meta?: LLMMeta
 }
 
+export interface LLMMStoreOptions {
+	downloadConcurrency?: number
+	modelsPath: string,
+	models: Record<string, LLMConfig>,
+	log?: Logger | LogLevel
+}
+
 export class LLMStore {
 	downloadQueue: PQueue
 	downloadTasks: DownloadTask[] = []
 	modelsPath: string
 	models: Record<string, LLMStoreModelConfig> = {}
+	private logger: Logger
 
 	constructor(
-		modelsPath: string,
-		models: Record<string, LLMOptions>,
-		options?: LLMMStoreOptions,
+		options: LLMMStoreOptions,
 	) {
-		this.downloadQueue = new PQueue({
-			concurrency: options?.downloadConcurrency ?? 1,
-		})
-		this.modelsPath = modelsPath
-		const storeModels: Record<string, LLMStoreModelConfig> = {}
-		for (const modelId in models) {
-			validateModelId(modelId)
-			const modelOptions = models[modelId]
-			if (!modelOptions.file && !modelOptions.url) {
-				throw new Error(`Model ${modelId} must have either file or url`)
-			}
-			storeModels[modelId] = {
-				id: modelId,
-				minInstances: 0,
-				maxInstances: 1,
-				engine: 'node-llama-cpp',
-				engineOptions: {},
-				...modelOptions,
-				file: this.resolveModelLocation({
-					file: modelOptions.file,
-					url: modelOptions.url,
-				}),
-			}
+		if (options.log) {
+			this.logger = typeof options.log === 'string' ? createLogger(options.log) : options.log
+		} else {
+			this.logger = createLogger(LogLevels.warn)
 		}
-		this.models = storeModels
+		this.downloadQueue = new PQueue({
+			concurrency: options.downloadConcurrency ?? 1,
+		})
+		this.modelsPath = options.modelsPath
+		this.models = options.models
 	}
 
 	async init() {
@@ -200,6 +178,7 @@ export class LLMStore {
 			})
 		}
 
+		this.logger(LogLevels.info, `Downloading model ${modelId} from ${model.url}`)
 		// otherwise, start a new download
 		const task: DownloadTask = {
 			model: modelId,
@@ -210,6 +189,10 @@ export class LLMStore {
 				// parallelStreams: 3 // Number of parallel connections (default: 3)
 			}),
 		}
+		
+		const logInterval = setInterval(() => {
+			this.logger(LogLevels.info, `Downloading ${modelId}: ${task.handle.status.percentage}%`)
+		})
 
 		if (signal) {
 			signal.addEventListener('abort', () => {
@@ -225,54 +208,7 @@ export class LLMStore {
 			task.status = 'completed'
 		} finally {
 			this.downloadTasks = this.downloadTasks.filter((t) => t !== task)
+			clearInterval(logInterval)
 		}
-	}
-
-	private resolveModelLocation(options: { file?: string; url?: string }) {
-		if (!options.file && !options.url) {
-			throw new Error(`Must have either file or url`)
-		}
-
-		let autoSubPath = ''
-
-		// make sure we create sub directories so models from different sources don't clash
-		if (options.url) {
-			const url = new URL(options.url)
-			if (url.hostname === 'huggingface.co') {
-				// TODO could consider accepting other url variants
-				// Expecting URLs like
-				// https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf
-				const parts = url.pathname.split('/')
-				if (parts.length < 6) {
-					throw new Error(`Unexpected huggingface URL: ${options.url}`)
-				}
-				const org = parts[1]
-				const repo = parts[2]
-				const branch = parts[4]
-				if (!org || !repo || !branch) {
-					throw new Error(`Unexpected huggingface URL: ${options.url}`)
-				}
-				autoSubPath = 'huggingface/' + org + '/' + repo + '-' + branch
-			} else {
-				autoSubPath = url.hostname
-			}
-		}
-
-		// resolve absolute path to file
-		let absFilePath = ''
-		if (options.file) {
-			// if user explicitly provided a file path, use it
-			if (path.isAbsolute(options.file)) {
-				absFilePath = options.file
-			} else {
-				absFilePath = path.join(this.modelsPath, options.file)
-			}
-		} else if (options.url) {
-			// otherwise create the default file location based on URL info
-			const fileName = path.basename(new URL(options.url).pathname)
-			absFilePath = path.join(this.modelsPath, autoSubPath, fileName)
-		}
-
-		return absFilePath
 	}
 }

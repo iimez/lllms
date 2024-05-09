@@ -83,6 +83,13 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			if (typeof stop === 'string') {
 				stop = [stop]
 			}
+			
+			let completionGrammar: 'json' | undefined
+			if (args.response_format) {
+				if (args.response_format.type === 'json_object') {
+					completionGrammar = 'json'
+				}
+			}
 
 			const completionReq = omitEmptyValues<ChatCompletionRequest>({
 				model: args.model,
@@ -103,7 +110,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					: undefined,
 				topP: args.top_p ? args.top_p : undefined,
 				tokenBias: args.logit_bias ? args.logit_bias : undefined,
-				grammar: args.response_format?.type === 'json_object' ? 'json' : undefined,
+				grammar: completionGrammar,
 				// additional non-spec params
 				repeatPenaltyNum: args.repeat_penalty_num
 					? args.repeat_penalty_num

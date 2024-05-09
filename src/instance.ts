@@ -43,13 +43,13 @@ export class LLMInstance {
 	private llm: EngineInstance | null = null
 	private currentRequest: LLMRequest | null = null
 
-	constructor(engine: LLMEngine, { logger, gpu, ...opts }: LLMInstanceOptions) {
-		this.id = opts.id + ':' + generateId(8)
+	constructor(engine: LLMEngine, { logger, gpu, ...options }: LLMInstanceOptions) {
+		this.id = options.id + ':' + generateId(8)
 		this.engine = engine
-		this.config = opts
-		this.model = opts.id
+		this.config = options
+		this.model = options.id
 		this.gpu = gpu
-		this.ttl = opts.ttl ?? 300
+		this.ttl = options.ttl ?? 300
 		this.status = 'preparing'
 		this.createdAt = new Date()
 		this.logger = withLogMeta(logger ?? createLogger(LogLevels.warn), {
@@ -59,7 +59,7 @@ export class LLMInstance {
 		// TODO to implement this properly we should only include what changes the "behavior" of the model
 		this.fingerprint = crypto
 			.createHash('sha1')
-			.update(JSON.stringify(opts))
+			.update(JSON.stringify(options))
 			.digest('hex')
 		this.logger(LogLevels.info, 'Initializing new instance for', {
 			model: this.model,

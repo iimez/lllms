@@ -42,7 +42,7 @@ export interface CompletionParams {
 	minP?: number
 	topK?: number
 	tokenBias?: Record<string, number>
-	grammar?: 'json'
+	grammar?: string
 }
 
 export interface CompletionRequestBase extends CompletionParams {
@@ -78,6 +78,7 @@ export interface LLMOptionsBase {
 	contextSize?: number
 	minInstances?: number
 	maxInstances?: number
+	grammars?: Record<string, string>
 	systemPrompt?: string
 	completionDefaults?: CompletionParams
 	md5?: string
@@ -91,6 +92,7 @@ export interface LLMConfig<T extends EngineOptionsBase = EngineOptionsBase>
 	ttl?: number
 	engine: EngineType
 	engineOptions?: T
+	grammars: Record<string, string>
 }
 
 export interface LLMEngine<T extends EngineOptionsBase = EngineOptionsBase> {

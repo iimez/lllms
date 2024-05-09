@@ -2,8 +2,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { LLMPool } from '#lllms/pool.js'
 import { LLMInstance } from '#lllms/instance.js'
-import { LLMOptions, LLMRequest } from '#lllms/types/index.js'
+import { LLMOptions, LLMConfig, LLMRequest } from '#lllms/types/index.js'
 import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
+import { validateModelId, resolveModelLocation } from '#lllms/lib/models.js'
+import { loadGBNFGrammars } from '#lllms/lib/grammar.js'
 import { LLMStore } from '#lllms/store.js'
 
 export interface LLMServerOptions {
@@ -33,14 +35,43 @@ export class LLMServer {
 		}
 		const modelsPath =
 			opts?.modelsPath || path.resolve(os.homedir(), '.cache/lllms')
-		this.store = new LLMStore(modelsPath, opts.models, {
+		
+		const dirname = path.dirname(new URL(import.meta.url).pathname)
+		const defaultGrammars = loadGBNFGrammars(path.join(dirname, './grammars'))
+		
+		const modelsWithDefaults: Record<string, LLMConfig> = {}
+		for (const modelId in opts.models) {
+			validateModelId(modelId)
+			const modelOptions = opts.models[modelId]
+			if (!modelOptions.file && !modelOptions.url) {
+				throw new Error(`Model ${modelId} must have either file or url`)
+			}
+			modelsWithDefaults[modelId] = {
+				id: modelId,
+				minInstances: 0,
+				maxInstances: 1,
+				engine: 'node-llama-cpp',
+				engineOptions: {},
+				grammars: defaultGrammars,
+				...modelOptions,
+				file: resolveModelLocation(modelsPath, {
+					file: modelOptions.file,
+					url: modelOptions.url,
+				}),
+			}
+		}
+		
+		this.store = new LLMStore({
 			downloadConcurrency: opts.downloadConcurrency ?? 1,
+			log: this.logger,
+			modelsPath,
+			models: modelsWithDefaults,
 		})
 		this.pool = new LLMPool(
 			{
 				inferenceConcurrency: opts.inferenceConcurrency ?? 1,
 				log: this.logger,
-				models: this.store.models,
+				models: modelsWithDefaults,
 			},
 			this.prepareInstance.bind(this),
 		)

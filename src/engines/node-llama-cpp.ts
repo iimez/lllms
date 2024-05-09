@@ -1,4 +1,3 @@
-import { promises as fs } from 'node:fs'
 import {
 	getLlama,
 	LlamaChatSession,
@@ -84,7 +83,7 @@ export async function loadInstance(
 			}
 		},
 	})
-	
+
 	let grammars: Record<string, LlamaGrammar> = {}
 	if (config.grammars) {
 		grammars = prepareGrammars(llama, config.grammars)
@@ -219,7 +218,7 @@ export async function processChatCompletion(
 		}
 		instance.session.setChatHistory(conversationMessages)
 	}
-	
+
 	// set additional stop generation triggers for this completion
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
 	if (stopTrigger?.length) {
@@ -232,7 +231,8 @@ export async function processChatCompletion(
 
 	// setting up logit/token bias.
 	let tokenBias: TokenBias | undefined
-	const completionTokenBias = request.tokenBias ?? config.completionDefaults?.tokenBias
+	const completionTokenBias =
+		request.tokenBias ?? config.completionDefaults?.tokenBias
 	if (completionTokenBias) {
 		tokenBias = new TokenBias(instance.model)
 		for (const key in completionTokenBias) {
@@ -258,15 +258,46 @@ export async function processChatCompletion(
 	let partialResponse = ''
 
 	const defaults = config.completionDefaults ?? {}
-	
+
 	let grammar: LlamaGrammar | undefined
+	
+	
+	// let functionsArgs: any
+	// let functions: ChatSessionModelFunctions | undefined
+
 	if (request.grammar) {
 		if (!instance.grammars[request.grammar]) {
 			throw new Error(`Grammar "${request.grammar}" not found.`)
 		}
 		grammar = instance.grammars[request.grammar]
+	} else if (request.functions) {
+		// functionCalls = {}
+		// // functionCalls.documentFunctionParams = true
+		// functionCalls.functions = {
+		// 	getCurrentLocation: {
+		// 		description: 'Get the current location',
+		// 		handler: (foo: any) => {
+		// 			console.log('Providing fake location', foo)
+		// 			return 'New York, New York, United States'
+		// 		},
+		// 	},
+		// }
+		
+	// 	functionsArgs = {
+	// 		functions: {},
+	// 	}
+	// 	for (const functionName in request.functions) {
+	// 		const functionCall = request.functions[functionName]
+	// 		functionsArgs.functions[functionName] = {
+	// 			description: functionCall.description,
+	// 			params: functionCall.parameters,
+	// 			// handler: async (params: any) => {
+	// 			// 	return functionCall.result
+	// 			// },
+	// 		}
+	// 	}
 	}
-	
+
 	try {
 		const result = await instance.session.promptWithMeta(input, {
 			maxTokens: request.maxTokens ?? defaults.maxTokens,
@@ -276,6 +307,7 @@ export async function processChatCompletion(
 			minP: request.minP ?? defaults.minP,
 			tokenBias,
 			grammar,
+			// ...functionsArgs,
 			repeatPenalty: {
 				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 				frequencyPenalty: request.frequencyPenalty ?? defaults.frequencyPenalty,
@@ -344,7 +376,7 @@ export async function processCompletion(
 	if (!request.prompt) {
 		throw new Error('Prompt is required for completion.')
 	}
-	
+
 	let contextSequence: LlamaContextSequence
 	if (instance.context.sequencesLeft) {
 		log(LogLevels.debug, 'Clearing history', {
@@ -368,10 +400,10 @@ export async function processCompletion(
 		contextSequence: contextSequence,
 	})
 
-	const stopGenerationTrigger: StopGenerationTrigger = []
+	const stopGenerationTriggers: StopGenerationTrigger[] = []
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
 	if (stopTrigger) {
-		stopGenerationTrigger.push(...stopTrigger)
+		stopGenerationTriggers.push(...stopTrigger.map(t => [t]))
 	}
 
 	const tokens = instance.model.tokenize(request.prompt)
@@ -389,7 +421,9 @@ export async function processCompletion(
 			presencePenalty: request.presencePenalty ?? defaults.presencePenalty,
 		},
 		signal: signal,
-		stopGenerationTriggers: stopGenerationTrigger.length ? [stopGenerationTrigger] : undefined,
+		stopGenerationTriggers: stopGenerationTriggers.length
+			? stopGenerationTriggers
+			: undefined,
 		onToken: (tokens) => {
 			generatedTokenCount += tokens.length
 			const text = instance.model.detokenize(tokens)

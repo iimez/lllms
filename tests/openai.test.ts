@@ -71,10 +71,11 @@ function runOpenAITests(client: OpenAI) {
 
 	test('completions.create stream=true', async () => {
 		const completion = await client.completions.create({
+			stream_options: { include_usage: true },
 			model: testModel,
 			temperature: 0,
 			stream: true,
-			stop: ['."', '.'],
+			stop: ['.'],
 			max_tokens: 100,
 			prompt: '"All animals are equal,',
 		})
@@ -86,6 +87,7 @@ function runOpenAITests(client: OpenAI) {
 			}
 			finishReason = chunk.choices[0].finish_reason
 		}
+		console.debug({ response: tokens.join('|'), finishReason })
 		expect(tokens.join('')).toContain(
 			'but some animals are more equal than others',
 		)

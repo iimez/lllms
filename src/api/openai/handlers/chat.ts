@@ -1,10 +1,11 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
 import { LLMPool } from '#lllms/pool.js'
-import { ChatCompletionRequest, ChatMessage } from '#lllms/types/index.js'
+import { ChatCompletionRequest, ChatCompletionFunction, ChatMessage } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
 import { finishReasons } from '../finishReasons.js'
+import { GbnfJsonObjectSchema } from 'node-llama-cpp'
 
 interface OpenAIChatCompletionParams
 	extends Omit<OpenAI.ChatCompletionCreateParamsStreaming, 'stream'> {
@@ -90,7 +91,29 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					completionGrammar = 'json'
 				}
 			}
-
+			
+			let completionFunctions: ChatCompletionFunction[] | undefined
+			
+			// if (args.tools) {
+			// 	completionFunctions = args.tools.filter(tool => tool.type === 'function').map((tool) => {
+			// 		return {
+			// 			name: tool.function.name,
+			// 			description: tool.function.description,
+			// 			parameters: tool.function.parameters as GbnfJsonObjectSchema,
+			// 		}
+			// 	})
+			// }
+			
+			// completionFunctions = [
+			// 	{
+			// 		name: 'getCurrentLocation',
+			// 		description: 'Get the current location',
+			// 		// handler: async (params: any) => {
+			// 		// 	return functionCall.result
+			// 		// },
+			// 	},
+			// ]
+			
 			const completionReq = omitEmptyValues<ChatCompletionRequest>({
 				model: args.model,
 				// TODO support multimodal image content array
@@ -111,6 +134,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 				topP: args.top_p ? args.top_p : undefined,
 				tokenBias: args.logit_bias ? args.logit_bias : undefined,
 				grammar: completionGrammar,
+				functions: completionFunctions,
 				// additional non-spec params
 				repeatPenaltyNum: args.repeat_penalty_num
 					? args.repeat_penalty_num

@@ -5,6 +5,7 @@ import type {
 	GPT4AllOptions,
 } from '#lllms/engines/index.js'
 import type { Logger } from '#lllms/lib/logger.js'
+import { GbnfJsonObjectSchema } from 'node-llama-cpp'
 export interface CompletionChunk {
 	tokens: number[]
 	text: string
@@ -42,7 +43,6 @@ export interface CompletionParams {
 	minP?: number
 	topK?: number
 	tokenBias?: Record<string, number>
-	grammar?: string
 }
 
 export interface CompletionRequestBase extends CompletionParams {
@@ -54,9 +54,19 @@ export interface CompletionRequest extends CompletionRequestBase {
 	prompt?: string
 }
 
+export interface ChatCompletionFunction {
+	name: string
+	description?: string
+	parameters?: GbnfJsonObjectSchema
+}
+
+// export type ChatCompletionTool = ChatCompletionFunction
+
 export interface ChatCompletionRequest extends CompletionRequestBase {
 	systemPrompt?: string
 	messages: ChatMessage[]
+	grammar?: string
+	functions?: ChatCompletionFunction[]
 }
 
 export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest

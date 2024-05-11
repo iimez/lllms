@@ -413,6 +413,19 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			}
 		}
 
+		// still havent found any, see if we're allowed to spawn a new instance
+		if (this.canSpawnInstance(request.model)) {
+			const instance = await this.spawnInstance(request.model, {
+				emit: false,
+			})
+			this.logger(LogLevels.debug, 'Spawned instance acquired', {
+				instance: instance.id,
+				sequence: request.sequence,
+			})
+			instance.lock(request)
+			return instance
+		}
+
 		// if all instances have cached state, prefer the one that was used the longest time ago
 		const availableInstances = Object.values(this.instances).filter(
 			(instance) =>
@@ -429,19 +442,6 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			lruInstance.lock(request)
 			lruInstance.reset() // make sure we reset its cache.
 			return lruInstance
-		}
-
-		// still havent found any, see if we're allowed to spawn a new instance
-		if (this.canSpawnInstance(request.model)) {
-			const instance = await this.spawnInstance(request.model, {
-				emit: false,
-			})
-			this.logger(LogLevels.debug, 'Spawned instance acquired', {
-				instance: instance.id,
-				sequence: request.sequence,
-			})
-			instance.lock(request)
-			return instance
 		}
 
 		const requiresGpu =

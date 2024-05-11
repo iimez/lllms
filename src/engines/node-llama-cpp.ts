@@ -195,7 +195,7 @@ export async function processChatCompletion(
 		(m) => m.role !== 'system',
 	)
 
-	if (!instance.chat || !instance.chat.context.sequencesLeft) {
+	if (!instance.chat || !instance.chat.context.sequencesLeft || resetContext) {
 		if (instance.chat && !instance.chat?.context?.sequencesLeft) {
 			log(LogLevels.debug, 'No sequencesLeft, recreating LlamaChat')
 		}
@@ -242,7 +242,12 @@ export async function processChatCompletion(
 	}
 
 	// set additional stop generation triggers for this completion
+	// const stopTrigger = request.stop ?? config.completionDefaults?.stop
+	const stopGenerationTriggers: StopGenerationTrigger[] = []
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
+	if (stopTrigger) {
+		stopGenerationTriggers.push(...stopTrigger.map((t) => [t]))
+	}
 	// setting up logit/token bias.
 	let tokenBias: TokenBias | undefined
 	const completionTokenBias =
@@ -377,7 +382,7 @@ export async function processChatCompletion(
 			grammar,
 			// @ts-ignore
 			functions: inputFunctions,
-			customStopTriggers: stopTrigger,
+			customStopTriggers: stopGenerationTriggers,
 			repeatPenalty: {
 				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 				frequencyPenalty: request.frequencyPenalty ?? defaults.frequencyPenalty,
@@ -463,16 +468,13 @@ export async function processChatCompletion(
 		const responseText = lastMessage.response
 			.filter((item: any) => typeof item === 'string')
 			.join('')
-		if (metadata.stopReason === 'customStopTrigger') {
-			result = {
-				responseText,
-				stopReason: metadata.stopReason,
-			}
-		} else {
-			result = {
-				responseText,
-				stopReason: metadata.stopReason,
-			}
+		let stopReason = metadata.stopReason
+		if (stopReason === 'customStopTrigger') {
+			stopReason = 'stopGenerationTrigger'
+		}
+		result = {
+			responseText,
+			stopReason,
 		}
 		break
 	}
@@ -501,7 +503,7 @@ export async function processChatCompletion(
 		completionTokens: generatedTokenCount,
 		totalTokens: inputTokenCount + generatedTokenCount,
 	}
-
+	console.debug('final messages', instance.messages)
 	return completionResult
 }
 

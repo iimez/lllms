@@ -5,6 +5,7 @@ import {
 	InferenceModel,
 	LoadModelOptions,
 	CompletionInput,
+	ChatMessage,
 } from 'gpt4all'
 import {
 	EngineCompletionContext,
@@ -160,12 +161,12 @@ export async function processChatCompletion(
 
 	// if we have reset context, we need to reingest the chat history,
 	// or otherwise just append the last user message.
-	const nonSystemMessages = request.messages.filter((m) => m.role !== 'system')
+	const nonSystemMessages = request.messages.filter((m) => m.role !== 'system' && m.role !== 'function')
 	let input: CompletionInput
 
 	if (resetContext) {
 		// reingests all, then prompts automatically for last user message
-		input = nonSystemMessages
+		input = nonSystemMessages as ChatMessage[]
 	} else {
 		// append the last (user) message
 		const lastMessage = nonSystemMessages[nonSystemMessages.length - 1]
@@ -188,7 +189,6 @@ export async function processChatCompletion(
 		minP: request.minP ?? defaults.minP,
 		nBatch: config.engineOptions?.batchSize,
 		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
-		// TODO not sure if repeatPenalty interacts with repeatLastN and how it differs from frequency/presencePenalty.
 		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // see https://github.com/nomic-ai/gpt4all/issues/1952
 		onResponseToken: (tokenId, token) => {

@@ -92,17 +92,28 @@ export function createChatCompletionHandler(pool: LLMPool) {
 				}
 			}
 			
-			let completionFunctions: ChatCompletionFunction[] | undefined
+			let completionFunctions: Record<string, ChatCompletionFunction> | undefined = undefined
 			
-			// if (args.tools) {
-			// 	completionFunctions = args.tools.filter(tool => tool.type === 'function').map((tool) => {
-			// 		return {
-			// 			name: tool.function.name,
-			// 			description: tool.function.description,
-			// 			parameters: tool.function.parameters as GbnfJsonObjectSchema,
-			// 		}
-			// 	})
-			// }
+			if (args.tools) {
+				const functionTools = args.tools.filter(tool => tool.type === 'function').map((tool) => {
+					return {
+						name: tool.function.name,
+						description: tool.function.description,
+						parameters: tool.function.parameters as GbnfJsonObjectSchema,
+					}
+				})
+				if (functionTools.length) {
+					if (!completionFunctions) {
+						completionFunctions = {}
+					}
+					for (const tool of functionTools) {
+						completionFunctions[tool.name] = {
+							description: tool.description,
+							parameters: tool.parameters,
+						}
+					}
+				}
+			}
 			
 			// completionFunctions = [
 			// 	{
@@ -235,6 +246,18 @@ export function createChatCompletionHandler(pool: LLMPool) {
 						completion_tokens: result.completionTokens,
 						total_tokens: result.totalTokens,
 					},
+				}
+				if ('functionCalls' in result.message && result.message.functionCalls?.length) {
+					response.choices[0].message.tool_calls = result.message.functionCalls.map((call) => {
+						return {
+							id: call.id,
+							type: 'function',
+							function: {
+								name: call.name,
+								arguments: JSON.stringify(call.parameters),
+							},
+						}
+					})
 				}
 				res.writeHead(200, { 'Content-Type': 'application/json' })
 				res.end(JSON.stringify(response, null, 2))

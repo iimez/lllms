@@ -1,22 +1,20 @@
 import {
 	getLlama,
-	LlamaChatSession,
+	LlamaChat,
 	LlamaModel,
 	LlamaContext,
 	LlamaCompletion,
-	ChatWrapper,
-	ChatHistoryItem,
 	LlamaLogLevel,
-	LlamaText,
-	resolveChatWrapper,
 	TokenBias,
 	Token,
 	LlamaContextSequence,
 	Llama,
 	LlamaGrammar,
-	ChatSessionModelFunctions,
+	ChatHistoryItem,
+	LlamaChatResponse,
+	ChatModelResponse,
+	LlamaChatResponseFunctionCall,
 } from 'node-llama-cpp'
-import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector.js'
 import {
 	EngineChatCompletionResult,
 	EngineCompletionResult,
@@ -24,10 +22,14 @@ import {
 	EngineChatCompletionContext,
 	EngineContext,
 	EngineOptionsBase,
-	// CompletionGrammarOptions,
+	ChatCompletionFunction,
+	FunctionCallResultMessage,
+	AssistantMessage,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { formatBytes, mergeAbortSignals } from '#lllms/lib/util.js'
+import { nanoid } from 'nanoid'
+import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 
 // https://github.com/withcatai/node-llama-cpp/pull/105
 // https://github.com/withcatai/node-llama-cpp/discussions/109
@@ -39,8 +41,23 @@ export interface LlamaCppOptions extends EngineOptionsBase {
 interface LlamaCppInstance {
 	model: LlamaModel
 	context: LlamaContext
-	session: LlamaChatSession
+	chat: LlamaChat
+	messages: ChatHistoryItem[]
 	grammars: Record<string, LlamaGrammar>
+	pendingFunctionCalls: Record<string, any>
+	lastEvaluation?: LlamaChatResponse['lastEvaluation']
+}
+
+interface LlamaChatFunction {
+	description?: string
+	params?: any
+	handler?: (params: any) => any
+}
+
+interface LlamaChatResult {
+	responseText: string | null
+	functionCalls?: LlamaChatResponseFunctionCall<any>[]
+	stopReason: LlamaChatResponse['metadata']['stopReason']
 }
 
 function prepareGrammars(llama: Llama, grammarConfig: Record<string, string>) {
@@ -115,7 +132,8 @@ export async function loadInstance(
 		model,
 		context,
 		grammars,
-		session: null,
+		chat: null,
+		pendingFunctionCalls: {},
 	}
 }
 
@@ -129,33 +147,37 @@ function createSeed(min: number, max: number) {
 	return Math.floor(Math.random() * (max - min)) + min
 }
 
-interface ChatWrapperWithStopGenerationTrigger extends ChatWrapper {
-	stopGenerationTriggers: string[] | null
-	setExtraStopGenerationTriggers(triggers: string[] | null): void
-}
-
-// this extends whatever chatwrapper is passed in to support setting (and unsetting) stop generation triggers
-function withCustomStopGenerationTrigger(
-	chatWrapper: ChatWrapper,
-): ChatWrapperWithStopGenerationTrigger {
-	const customChatWrapper = chatWrapper as ChatWrapperWithStopGenerationTrigger
-	customChatWrapper.setExtraStopGenerationTriggers = (
-		triggers: string[] | null,
-	) => {
-		customChatWrapper.stopGenerationTriggers = triggers
-	}
-	customChatWrapper.stopGenerationTriggers = null
-	const generateContextText = chatWrapper.generateContextText.bind(chatWrapper)
-	customChatWrapper.generateContextText = (history, options) => {
-		const result = generateContextText(history, options)
-		if (customChatWrapper.stopGenerationTriggers) {
-			const extraStopGenerationTriggers =
-				customChatWrapper.stopGenerationTriggers.map((s) => LlamaText(s))
-			result.stopGenerationTriggers.push(...extraStopGenerationTriggers)
-		}
-		return result
-	}
-	return customChatWrapper
+function addFunctionCallToChatHistory({
+	chatHistory,
+	functionName,
+	functionDescription,
+	callParams,
+	callResult,
+	raw,
+}: any): ChatHistoryItem[] {
+	const newChatHistory = chatHistory.slice()
+	if (
+		newChatHistory.length === 0 ||
+		newChatHistory[newChatHistory.length - 1].type !== 'model'
+	)
+		newChatHistory.push({
+			type: 'model',
+			response: [],
+		})
+	const lastModelResponseItem = newChatHistory[newChatHistory.length - 1]
+	const newLastModelResponseItem = { ...lastModelResponseItem }
+	newChatHistory[newChatHistory.length - 1] = newLastModelResponseItem
+	const modelResponse = newLastModelResponseItem.response.slice()
+	newLastModelResponseItem.response = modelResponse
+	modelResponse.push({
+		type: 'functionCall',
+		name: functionName,
+		description: functionDescription,
+		params: callParams,
+		result: callResult,
+		raw,
+	})
+	return newChatHistory
 }
 
 export async function processChatCompletion(
@@ -169,33 +191,33 @@ export async function processChatCompletion(
 	}: EngineChatCompletionContext<LlamaCppOptions>,
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
-	const nonSystemMessages = request.messages.filter((m) => m.role !== 'system')
+	const conversationMessages = request.messages.filter(
+		(m) => m.role !== 'system',
+	)
 
-	if (!instance.session || !instance.session.context.sequencesLeft) {
-		if (instance.session && !instance.session?.context?.sequencesLeft) {
-			log(LogLevels.debug, 'No sequencesLeft, recreating LlamaChatSession')
+	if (!instance.chat || !instance.chat.context.sequencesLeft) {
+		if (instance.chat && !instance.chat?.context?.sequencesLeft) {
+			log(LogLevels.debug, 'No sequencesLeft, recreating LlamaChat')
 		}
-		if (!instance.session) {
-			log(LogLevels.debug, 'Creating LlamaChatSession')
+		if (!instance.chat) {
+			log(LogLevels.debug, 'Creating LlamaChat')
 		}
-		if (instance.session) {
-			await instance.session.dispose()
+		if (instance.chat) {
+			await instance.chat.dispose()
 		}
-		const model = instance.model
-		const chatWrapper = resolveChatWrapper({
-			type: 'auto',
-			bosString: model.tokens.bosString,
-			filename: model.filename,
-			fileInfo: model.fileInfo,
-			tokenizer: model.tokenizer,
-		})
 		let systemPrompt = request.systemPrompt ?? config.systemPrompt
 		if (!systemPrompt && request.messages[0].role === 'system') {
 			systemPrompt = request.messages[0].content
 		}
-		instance.session = new LlamaChatSession({
-			systemPrompt,
-			chatWrapper: withCustomStopGenerationTrigger(chatWrapper),
+		instance.messages = []
+		if (systemPrompt) {
+			instance.messages.push({
+				type: 'system',
+				text: systemPrompt,
+			})
+		}
+
+		instance.chat = new LlamaChat({
 			contextSequence: instance.context.getSequence(),
 			// contextShift: {
 			// 	size: 50,
@@ -205,30 +227,22 @@ export async function processChatCompletion(
 	}
 
 	if (resetContext) {
-		const conversationMessages: ChatHistoryItem[] = []
-		for (const message of nonSystemMessages) {
-			conversationMessages.push({
+		const newMessages: ChatHistoryItem[] = []
+		for (const message of conversationMessages) {
+			newMessages.push({
 				type: message.role,
 				text: message.content,
 			} as ChatHistoryItem)
 		}
 		// drop last user message, thats what we wanna prompt with.
-		if (conversationMessages[conversationMessages.length - 1].type === 'user') {
-			conversationMessages.pop()
+		if (newMessages[newMessages.length - 1].type === 'user') {
+			newMessages.pop()
 		}
-		instance.session.setChatHistory(conversationMessages)
+		instance.messages.push(...newMessages)
 	}
 
 	// set additional stop generation triggers for this completion
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
-	if (stopTrigger?.length) {
-		// @ts-ignore
-		instance.session.chatWrapper.setExtraStopGenerationTriggers(stopTrigger)
-	} else {
-		// @ts-ignore
-		instance.session.chatWrapper.setExtraStopGenerationTriggers(null)
-	}
-
 	// setting up logit/token bias.
 	let tokenBias: TokenBias | undefined
 	const completionTokenBias =
@@ -246,60 +260,114 @@ export async function processChatCompletion(
 		}
 	}
 
-	// what goes into promptWithMeta is the last user message.
-	const lastMessage = nonSystemMessages[nonSystemMessages.length - 1]
-	if (lastMessage.role !== 'user') {
-		throw new Error('Last message must be from user.')
-	}
-	const input = lastMessage.content
-	let inputTokens = instance.model.tokenize(input)
+	let inputTokenCount = 0
 	let generatedTokenCount = 0
 	let completionResult: EngineChatCompletionResult
-	let partialResponse = ''
 
-	const defaults = config.completionDefaults ?? {}
+	const functionDefinitions: Record<string, ChatCompletionFunction> = {
+		...config.functions,
+		...request.functions,
+	}
+	const resolvedFunctionCalls = []
+	const functionCallResultMessages = request.messages.filter(
+		(m) => m.role === 'function',
+	) as FunctionCallResultMessage[]
+	for (const message of functionCallResultMessages) {
+		if (instance.pendingFunctionCalls[message.callId]) {
+			const functionCall = instance.pendingFunctionCalls[message.callId]
+			const functionDef = functionDefinitions[functionCall.functionName]
+			resolvedFunctionCalls.push({
+				name: functionCall.functionName,
+				description: functionDef?.description,
+				params: functionCall.params,
+				result: message.content,
+				raw:
+					functionCall.raw +
+					instance.chat.chatWrapper.generateFunctionCallResult(
+						functionCall.functionName,
+						functionCall.params,
+						message.content,
+					),
+			})
+		} else {
+			log(LogLevels.warn, 'Pending function call not found', message)
+		}
+	}
+	if (resolvedFunctionCalls.length) {
+		instance.messages.push({
+			type: 'model',
+			response: resolvedFunctionCalls.map((call) => {
+				return {
+					type: 'functionCall',
+					...call,
+				}
+			}),
+		})
+	}
+
+	let newUserMessage: string | undefined
+	const lastMessage = conversationMessages[conversationMessages.length - 1]
+	if (lastMessage.role === 'user') {
+		newUserMessage = lastMessage.content
+	}
+
+	if (newUserMessage) {
+		inputTokenCount = instance.model.tokenize(newUserMessage).length
+		instance.messages.push({
+			type: 'user',
+			text: newUserMessage,
+		})
+	}
 
 	let grammar: LlamaGrammar | undefined
-	
-	
-	// let functionsArgs: any
-	// let functions: ChatSessionModelFunctions | undefined
+	let inputFunctions: Record<string, LlamaChatFunction> | undefined
 
 	if (request.grammar) {
 		if (!instance.grammars[request.grammar]) {
 			throw new Error(`Grammar "${request.grammar}" not found.`)
 		}
 		grammar = instance.grammars[request.grammar]
-	} else if (request.functions) {
-		// functionCalls = {}
-		// // functionCalls.documentFunctionParams = true
-		// functionCalls.functions = {
-		// 	getCurrentLocation: {
-		// 		description: 'Get the current location',
-		// 		handler: (foo: any) => {
-		// 			console.log('Providing fake location', foo)
-		// 			return 'New York, New York, United States'
-		// 		},
-		// 	},
-		// }
-		
-	// 	functionsArgs = {
-	// 		functions: {},
-	// 	}
-	// 	for (const functionName in request.functions) {
-	// 		const functionCall = request.functions[functionName]
-	// 		functionsArgs.functions[functionName] = {
-	// 			description: functionCall.description,
-	// 			params: functionCall.parameters,
-	// 			// handler: async (params: any) => {
-	// 			// 	return functionCall.result
-	// 			// },
-	// 		}
-	// 	}
+	} else if (Object.keys(functionDefinitions).length > 0) {
+		inputFunctions = {}
+		for (const functionName in functionDefinitions) {
+			const functionDef = functionDefinitions[functionName]
+			inputFunctions[functionName] = {
+				description: functionDef.description,
+				params: functionDef.parameters,
+				handler: functionDef.handler,
+			}
+		}
 	}
 
-	try {
-		const result = await instance.session.promptWithMeta(input, {
+	const defaults = config.completionDefaults ?? {}
+
+	let lastEvaluation: LlamaChatResponse['lastEvaluation'] | undefined =
+		instance.lastEvaluation
+	let newChatHistory = instance.messages.slice()
+	let newContextWindowChatHistory =
+		lastEvaluation?.contextWindow == null
+			? undefined
+			: instance.messages.slice()
+
+	newChatHistory.push({
+		type: 'model',
+		response: [],
+	})
+	if (newContextWindowChatHistory != null) {
+		newContextWindowChatHistory.push({
+			type: 'model',
+			response: [],
+		})
+	}
+
+	let result: LlamaChatResult
+
+	while (true) {
+		const {
+			functionCall,
+			lastEvaluation: currentLastEvaluation,
+			metadata,
+		} = await instance.chat.generateResponse(newChatHistory, {
 			maxTokens: request.maxTokens ?? defaults.maxTokens,
 			temperature: request.temperature ?? defaults.temperature,
 			topP: request.topP ?? defaults.topP,
@@ -307,7 +375,9 @@ export async function processChatCompletion(
 			minP: request.minP ?? defaults.minP,
 			tokenBias,
 			grammar,
-			// ...functionsArgs,
+			// @ts-ignore
+			functions: inputFunctions,
+			customStopTriggers: stopTrigger,
 			repeatPenalty: {
 				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 				frequencyPenalty: request.frequencyPenalty ?? defaults.frequencyPenalty,
@@ -317,7 +387,6 @@ export async function processChatCompletion(
 			onToken: (tokens) => {
 				generatedTokenCount += tokens.length
 				const text = instance.model.detokenize(tokens)
-				partialResponse += text
 				if (onChunk) {
 					onChunk({
 						tokens,
@@ -325,45 +394,113 @@ export async function processChatCompletion(
 					})
 				}
 			},
+			contextShift: {
+				lastEvaluationMetadata: lastEvaluation?.contextShiftMetadata,
+			},
+			lastEvaluationContextWindow: {
+				history: newContextWindowChatHistory,
+				minimumOverlapPercentageToPreventContextShift: 0.01,
+			},
 		})
 
-		completionResult = {
-			finishReason: result.stopReason,
-			message: {
-				role: 'assistant',
-				content: result.responseText,
-			},
-			promptTokens: inputTokens.length,
-			completionTokens: generatedTokenCount,
-			totalTokens: inputTokens.length + generatedTokenCount,
-		}
-	} catch (error: any) {
-		if (error.name !== 'AbortError') {
-			throw error
-		} else {
-			// if the completion was aborted, return the partial response
-			completionResult = {
-				finishReason: 'cancelled',
-				message: {
-					role: 'assistant',
-					content: partialResponse,
-				},
-				promptTokens: inputTokens.length,
-				completionTokens: generatedTokenCount,
-				totalTokens: inputTokens.length + generatedTokenCount,
+		lastEvaluation = currentLastEvaluation
+		newChatHistory = lastEvaluation.cleanHistory
+		if (functionCall) {
+			const functionDef = functionDefinitions[functionCall.functionName]
+			if (functionDef == null) {
+				throw new Error(
+					`The model tried to call function "${functionCall.functionName}" which is not defined`,
+				)
+			}
+			if (functionDef.handler) {
+				const functionCallResult = await functionDef.handler(
+					functionCall.params,
+				)
+				newChatHistory = addFunctionCallToChatHistory({
+					chatHistory: newChatHistory,
+					functionName: functionCall.functionName,
+					functionDescription: functionDef.description,
+					callParams: functionCall.params,
+					callResult: functionCallResult,
+					raw:
+						functionCall.raw +
+						instance.chat.chatWrapper.generateFunctionCallResult(
+							functionCall.functionName,
+							functionCall.params,
+							functionCallResult,
+						),
+				})
+				newContextWindowChatHistory = addFunctionCallToChatHistory({
+					chatHistory: lastEvaluation.contextWindow,
+					functionName: functionCall.functionName,
+					functionDescription: functionDef.description,
+					callParams: functionCall.params,
+					callResult: functionCallResult,
+					raw:
+						functionCall.raw +
+						instance.chat.chatWrapper.generateFunctionCallResult(
+							functionCall.functionName,
+							functionCall.params,
+							functionCallResult,
+						),
+				})
+				lastEvaluation.cleanHistory = newChatHistory
+				lastEvaluation.contextWindow = newContextWindowChatHistory
+				continue
+			} else {
+				result = {
+					responseText: null,
+					stopReason: 'functionCall',
+					functionCalls: [functionCall],
+				}
+				break
 			}
 		}
+		instance.messages = newChatHistory
+		const lastMessage = instance.messages[
+			instance.messages.length - 1
+		] as ChatModelResponse
+		const responseText = lastMessage.response
+			.filter((item: any) => typeof item === 'string')
+			.join('')
+		if (metadata.stopReason === 'customStopTrigger') {
+			result = {
+				responseText,
+				stopReason: metadata.stopReason,
+			}
+		} else {
+			result = {
+				responseText,
+				stopReason: metadata.stopReason,
+			}
+		}
+		break
 	}
 
-	// const ingestedMessages =
-	// 	instance.session.getLastEvaluationContextWindow() ?? []
-	// console.debug('State after completion', {
-	// 	stateSize: formatBytes(instance.context.stateSize),
-	// 	sequencesLeft: instance.context.sequencesLeft,
-	// 	tokenCount: instance.session.sequence.contextTokens.length,
-	// 	incomingMessageCount: request.messages.length,
-	// 	ingestedMessageCount: ingestedMessages.length,
-	// })
+	const assistantMessage: AssistantMessage = {
+		role: 'assistant',
+		content: result.responseText,
+	}
+
+	if (result.functionCalls?.length) {
+		assistantMessage.functionCalls = result.functionCalls.map((call) => {
+			const callId = nanoid()
+			instance.pendingFunctionCalls[callId] = call
+			return {
+				id: callId,
+				name: call.functionName,
+				parameters: call.params,
+			}
+		})
+	}
+
+	completionResult = {
+		finishReason: result.stopReason,
+		message: assistantMessage,
+		promptTokens: inputTokenCount,
+		completionTokens: generatedTokenCount,
+		totalTokens: inputTokenCount + generatedTokenCount,
+	}
 
 	return completionResult
 }
@@ -403,7 +540,7 @@ export async function processCompletion(
 	const stopGenerationTriggers: StopGenerationTrigger[] = []
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
 	if (stopTrigger) {
-		stopGenerationTriggers.push(...stopTrigger.map(t => [t]))
+		stopGenerationTriggers.push(...stopTrigger.map((t) => [t]))
 	}
 
 	const tokens = instance.model.tokenize(request.prompt)

@@ -188,7 +188,7 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | System prompt         | ✅      | ✅             |
 | GPU                   | ✅      | ✅             |
 | Content part messages | ❌      | ❌             |
-| Function Calling      | ❌      | ❌             |
+| Function Calling      | ❌      | 🚧             |
 
 
 System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored.

@@ -3,9 +3,11 @@ import OpenAI from 'openai'
 
 export const finishReasons: Record<CompletionFinishReason, OpenAI.ChatCompletion.Choice['finish_reason']> = {
 	maxTokens: 'length',
-	functionCall: 'function_call', // TODO tool_calls
+	functionCall: 'tool_calls',
 	eogToken: 'stop',
 	stopGenerationTrigger: 'stop',
+	customStopTrigger: 'stop',
 	timeout: 'stop',
-	cancelled: 'stop',
+	cancel: 'stop',
+	abort: 'stop',
 } as const

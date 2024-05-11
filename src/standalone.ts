@@ -21,8 +21,33 @@ const serverOptions: StandaloneServerOptions = {
 			// minInstances: 1,
 			// maxInstances: 2,
 		},
+		'functionary': {
+			url: 'https://huggingface.co/meetkai/functionary-small-v2.4-GGUF/resolve/main/functionary-small-v2.4.Q4_0.gguf',
+			minInstances: 1,
+			engineOptions: {
+				// memLock: true,
+				gpuLayers: 10,
+				gpu: true,
+			},
+			functions: {
+				getCurrentLocation: {
+					description: 'Get the current location',
+					handler: async () => {
+						return 'New York, New York, United States'
+					},
+				},
+			},
+		},
 		'llama3-8b': {
 			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+			functions: {
+				getCurrentLocation: {
+					description: 'Get the current location',
+					handler: async () => {
+						return 'New York, New York, United States'
+					},
+				},
+			},
 			// engine: 'node-llama-cpp',
 			// sha256: '19ded996fe6c60254dc7544d782276eff41046ed42aa5f2d0005dc457e5c0895',
 			// minInstances: 1,

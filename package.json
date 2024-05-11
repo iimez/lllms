@@ -1,6 +1,6 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-alpha.5",
+	"version": "1.0.0-alpha.6",
 	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
@@ -48,16 +48,17 @@
 		"#lllms/*": "./dist/*"
 	},
 	"dependencies": {
+		"ajv": "^8.13.0",
 		"chalk": "^5.3.0",
 		"cli-progress": "^3.12.0",
 		"cors": "^2.8.5",
 		"express": "^4.19.2",
 		"gpt4all": "^4.0.0",
 		"hyllama": "^0.2.2",
-		"ipull": "^3.2.1",
+		"ipull": "^3.2.2",
 		"is-unicode-supported": "^2.0.0",
 		"nanoid": "^5.0.7",
-		"node-llama-cpp": "^3.0.0-beta.17",
+		"node-llama-cpp": "^3.0.0-beta.18",
 		"ora": "^8.0.1",
 		"p-queue": "^8.0.1"
 	},
@@ -68,7 +69,7 @@
 		"@types/node": "^20.12.11",
 		"@types/supertest": "^6.0.2",
 		"cross-env": "^7.0.3",
-		"openai": "^4.43.0",
+		"openai": "^4.44.0",
 		"supertest": "^7.0.0",
 		"typescript": "^5.4.5",
 		"vite-tsconfig-paths": "^4.3.2",

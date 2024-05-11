@@ -191,8 +191,11 @@ export class LLMStore {
 		}
 		
 		const logInterval = setInterval(() => {
-			this.logger(LogLevels.info, `Downloading ${modelId}: ${task.handle.status.percentage}%`)
-		})
+			const percentage = task.handle.status.percentage.toFixed(2)
+			const speed = task.handle.status.formattedSpeed
+			const eta = task.handle.status.formatTimeLeft
+			this.logger(LogLevels.info, `Downloading ${modelId}: ${percentage}% at ${speed} - ETA: ${eta}`)
+		}, 60000)
 
 		if (signal) {
 			signal.addEventListener('abort', () => {

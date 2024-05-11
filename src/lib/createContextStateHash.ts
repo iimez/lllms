@@ -16,11 +16,13 @@ export function createContextStateHash(
 	}
 	const systemPromptData = state.systemPrompt || ''
 	const messagesData = messages
+		.filter((message) => message.role !== 'system' && message.role !== 'function' && message.content)
 		.map((message) => message.role + message.content)
 		.join('\n')
 	const promptData = state.prompt || ''
-	return crypto
+	const hash = crypto
 		.createHash('sha1')
 		.update(systemPromptData + messagesData + promptData)
 		.digest('hex')
+	return hash
 }

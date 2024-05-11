@@ -5,7 +5,8 @@ import type {
 	GPT4AllOptions,
 } from '#lllms/engines/index.js'
 import type { Logger } from '#lllms/lib/logger.js'
-import { GbnfJsonObjectSchema } from 'node-llama-cpp'
+import type { SchemaObject } from 'ajv'
+
 export interface CompletionChunk {
 	tokens: number[]
 	text: string
@@ -16,7 +17,9 @@ export type CompletionFinishReason =
 	| 'functionCall'
 	| 'eogToken'
 	| 'stopGenerationTrigger'
-	| 'cancelled'
+	| 'customStopTrigger'
+	| 'abort'
+	| 'cancel'
 	| 'timeout'
 
 export interface CompletionProcessingOptions {
@@ -25,9 +28,35 @@ export interface CompletionProcessingOptions {
 	onChunk?: (chunk: CompletionChunk) => void
 }
 
-export interface ChatMessage {
-	role: 'user' | 'assistant' | 'system'
+export interface FunctionCall {
+	id: string
+	name: string
+	parameters?: Record<string, any>
+}
+
+export type ChatMessage = UserMessage | SystemMessage | AssistantMessage | FunctionCallResultMessage
+
+export interface UserMessage {
+	role: 'user'
 	content: string
+}
+
+export interface SystemMessage {
+	role: 'system'
+	content: string
+}
+
+export interface AssistantMessage {
+	role: 'assistant'
+	content: string | null
+	functionCalls?: FunctionCall[]
+}
+
+export interface FunctionCallResultMessage {
+	role: 'function'
+	content: string
+	callId: string
+	name: string
 }
 
 export interface CompletionParams {
@@ -55,18 +84,16 @@ export interface CompletionRequest extends CompletionRequestBase {
 }
 
 export interface ChatCompletionFunction {
-	name: string
 	description?: string
-	parameters?: GbnfJsonObjectSchema
+	parameters?: SchemaObject
+	handler?: (params?: Record<string, any>) => Promise<any>
 }
-
-// export type ChatCompletionTool = ChatCompletionFunction
 
 export interface ChatCompletionRequest extends CompletionRequestBase {
 	systemPrompt?: string
 	messages: ChatMessage[]
 	grammar?: string
-	functions?: ChatCompletionFunction[]
+	functions?: Record<string, ChatCompletionFunction>
 }
 
 export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest
@@ -74,7 +101,6 @@ export interface LLMRequestMeta {
 	sequence: number
 }
 export type LLMRequest = LLMRequestMeta & IncomingLLMRequest
-
 
 export interface ChatCompletionResult extends EngineChatCompletionResult {
 	id: string
@@ -88,8 +114,9 @@ export interface LLMOptionsBase {
 	contextSize?: number
 	minInstances?: number
 	maxInstances?: number
-	grammars?: Record<string, string>
 	systemPrompt?: string
+	grammars?: Record<string, string>
+	functions?: Record<string, ChatCompletionFunction>
 	completionDefaults?: CompletionParams
 	md5?: string
 	sha256?: string
@@ -102,7 +129,6 @@ export interface LLMConfig<T extends EngineOptionsBase = EngineOptionsBase>
 	ttl?: number
 	engine: EngineType
 	engineOptions?: T
-	grammars: Record<string, string>
 }
 
 export interface LLMEngine<T extends EngineOptionsBase = EngineOptionsBase> {
@@ -144,7 +170,7 @@ export interface EngineContext<
 }
 
 export interface EngineChatCompletionResult {
-	message: ChatMessage
+	message: AssistantMessage
 	finishReason: CompletionFinishReason
 	promptTokens: number
 	completionTokens: number
@@ -180,4 +206,7 @@ interface DefaultEngineLLMOptions extends LLMOptionsBase {
 	engineOptions?: LlamaCppOptions
 }
 
-export type LLMOptions = NodeLlamaCppLLMOptions | GPT4AllLLMOptions | DefaultEngineLLMOptions
+export type LLMOptions =
+	| NodeLlamaCppLLMOptions
+	| GPT4AllLLMOptions
+	| DefaultEngineLLMOptions

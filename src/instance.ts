@@ -77,25 +77,33 @@ export class LLMInstance {
 		}
 		this.status = 'loading'
 		const loadBegin = process.hrtime.bigint()
-		this.llm = await this.engine.loadInstance(
-			{
-				log: withLogMeta(this.logger, {
-					instance: this.id,
-				}),
-				config: {
-					...this.config,
-					engineOptions: {
-						...this.config.engineOptions,
-						gpu: this.gpu,
+		try {
+			this.llm = await this.engine.loadInstance(
+				{
+					log: withLogMeta(this.logger, {
+						instance: this.id,
+					}),
+					config: {
+						...this.config,
+						engineOptions: {
+							...this.config.engineOptions,
+							gpu: this.gpu,
+						},
 					},
 				},
-			},
-			signal,
-		)
-		this.status = 'idle'
-		this.logger(LogLevels.debug, 'Instance loaded', {
-			elapsed: elapsedMillis(loadBegin),
-		})
+				signal,
+			)
+			this.status = 'idle'
+			this.logger(LogLevels.debug, 'Instance loaded', {
+				elapsed: elapsedMillis(loadBegin),
+			})
+		} catch (error: any) {
+			this.status = 'error'
+			this.logger(LogLevels.error, 'Failed to load instance', {
+				error: error.message,
+			})
+			throw error
+		}
 	}
 
 	async dispose() {

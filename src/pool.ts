@@ -546,12 +546,6 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			})
 			.then((task) => {
 				if (task?.instance) {
-					const instance = task.instance
-					this.logger(LogLevels.info, 'Task completed, releasing', {
-						instance: instance.id,
-						sequence: request.sequence,
-					})
-					instance.unlock()
 					this.emit('release', instance)
 				}
 			})
@@ -561,6 +555,11 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			return new Promise<void>((resolve, reject) => {
 				process.nextTick(() => {
 					resolveQueueTask({ instance, request })
+					this.logger(LogLevels.info, 'Task completed, releasing', {
+						instance: instance.id,
+						sequence: request.sequence,
+					})
+					instance.unlock()
 					resolve()
 				})
 			})

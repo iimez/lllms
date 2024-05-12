@@ -3,6 +3,15 @@ import { format as formatURL } from 'node:url'
 import { serveLLMs, StandaloneServerOptions } from '#lllms/http.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 
+const functions = {
+	getCurrentLocation: {
+		description: 'Get the current location',
+		handler: async () => {
+			return 'New York, New York, United States'
+		},
+	},
+}
+
 const serverOptions: StandaloneServerOptions = {
 	listen: {
 		port: 3000,
@@ -11,58 +20,33 @@ const serverOptions: StandaloneServerOptions = {
 	// inferenceConcurrency: 2,
 	// downloadConcurrency: 2,
 	models: {
-		'phi3-mini-4k': {
-			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
-			engine: 'gpt4all',
-			// url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-			// engine: 'node-llama-cpp',
-			// md5: 'cb68b653b24dc432b78b02df76921a54',
-			// sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
-			// minInstances: 1,
-			// maxInstances: 2,
-		},
-		'functionary': {
-			url: 'https://huggingface.co/meetkai/functionary-small-v2.4-GGUF/resolve/main/functionary-small-v2.4.Q4_0.gguf',
+		// 'phi3-mini-4k': {
+		// 	url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+		// 	engine: 'gpt4all',
+		// },
+		// 'functionary': {
+		// 	url: 'https://huggingface.co/meetkai/functionary-small-v2.4-GGUF/resolve/main/functionary-small-v2.4.Q4_0.gguf',
+		// 	engineOptions: {
+		// 		gpuLayers: 10,
+		// 		gpu: true,
+		// 	},
+		// 	functions,
+		// },
+		'hermes': {
+			url: 'https://huggingface.co/NousResearch/Hermes-2-Pro-Llama-3-8B-GGUF/resolve/main/Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf',
 			minInstances: 1,
-			engineOptions: {
-				// memLock: true,
-				gpuLayers: 10,
-				gpu: true,
-			},
-			functions: {
-				getCurrentLocation: {
-					description: 'Get the current location',
-					handler: async () => {
-						return 'New York, New York, United States'
-					},
-				},
-			},
 		},
-		'llama3-8b': {
-			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-			functions: {
-				getCurrentLocation: {
-					description: 'Get the current location',
-					handler: async () => {
-						return 'New York, New York, United States'
-					},
-				},
-			},
-			// engine: 'node-llama-cpp',
-			// sha256: '19ded996fe6c60254dc7544d782276eff41046ed42aa5f2d0005dc457e5c0895',
-			// minInstances: 1,
-			// systemPrompt: 'Only answer in json format',
-			// completionDefaults: {
-			// 	grammar: 'json_object',
-			// },
-			// engineOptions: {
-			// 	// memLock: true,
-			// 	gpu: true,
-			// },
-			// minInstances: 1,
-			// url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-			// engine: 'gpt4all',
-		},
+		// 'llama3-8b': {
+		// 	url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+		// 	systemPrompt: 'Only answer in json format',
+		// 	completionDefaults: {
+		// 		grammar: 'json_object',
+		// 	},
+		// 	engineOptions: {
+		// 		// memLock: true,
+		// 		gpu: true,
+		// 	},
+		// },
 		// 'llama3-70b': {
 		// 	url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-70B-Instruct-GGUF/resolve/main/Meta-Llama-3-70B-Instruct.Q4_0.gguf',
 		// 	engine: 'node-llama-cpp',

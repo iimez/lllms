@@ -178,7 +178,10 @@ export class LLMStore {
 			})
 		}
 
-		this.logger(LogLevels.info, `Downloading model ${modelId} from ${model.url}`)
+		this.logger(LogLevels.info, `Downloading ${modelId}`, {
+			url: model.url,
+			file: model.file,
+		})
 		// otherwise, start a new download
 		const task: DownloadTask = {
 			model: modelId,

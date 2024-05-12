@@ -28,7 +28,7 @@ export interface CompletionProcessingOptions {
 	onChunk?: (chunk: CompletionChunk) => void
 }
 
-export interface FunctionCall {
+export interface AssistantFunctionCall {
 	id: string
 	name: string
 	parameters?: Record<string, any>
@@ -49,7 +49,7 @@ export interface SystemMessage {
 export interface AssistantMessage {
 	role: 'assistant'
 	content: string | null
-	functionCalls?: FunctionCall[]
+	functionCalls?: AssistantFunctionCall[]
 }
 
 export interface FunctionCallResultMessage {
@@ -68,6 +68,7 @@ export interface CompletionParams {
 	repeatPenaltyNum?: number
 	frequencyPenalty?: number
 	presencePenalty?: number
+	grammar?: string
 	topP?: number
 	minP?: number
 	topK?: number
@@ -83,10 +84,10 @@ export interface CompletionRequest extends CompletionRequestBase {
 	prompt?: string
 }
 
-export interface ChatCompletionFunction {
+export interface ChatCompletionFunction<TParams = any> {
 	description?: string
 	parameters?: SchemaObject
-	handler?: (params?: Record<string, any>) => Promise<any>
+	handler?: (params: TParams) => Promise<string>
 }
 
 export interface ChatCompletionRequest extends CompletionRequestBase {

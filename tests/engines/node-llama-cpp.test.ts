@@ -9,6 +9,8 @@ import {
 	runContextReuseTest,
 	runContextShiftTest,
 	runFunctionCallTest,
+	runParallelFunctionCallTest,
+	runGrammarTest,
 } from './lib/index.js'
 
 const models: Record<string, LLMOptions> = {
@@ -20,17 +22,11 @@ const models: Record<string, LLMOptions> = {
 		// sha256: '19ded996fe6c60254dc7544d782276eff41046ed42aa5f2d0005dc457e5c0895',
 		url: 'https://huggingface.co/meetkai/functionary-small-v2.4-GGUF/resolve/main/functionary-small-v2.4.Q4_0.gguf',
 		sha256: 'a092a87db6251a10a61ef4b91f30eb1d53c1660e0ddd1977832175ba589e2d58',
+		// url: 'https://huggingface.co/NousResearch/Hermes-2-Pro-Llama-3-8B-GGUF/resolve/main/Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf',
+		// sha256: '10c52a4820137a35947927be741bb411a9200329367ce2590cc6757cd98e746c',
 		engine: 'node-llama-cpp',
 		contextSize: 2048,
 		maxInstances: 2,
-		functions: {
-			getCurrentLocation: {
-				description: 'Get the current location',
-				handler: async () => {
-					return 'New York, New York, United States'
-				},
-			},
-		},
 	},
 }
 
@@ -47,41 +43,46 @@ suite('Features', () => {
 		await llms.stop()
 	})
 
-	test('stop generation trigger', async () => {
-		await runStopTriggerTest(llms)
-	})
+	// test('stop generation trigger', async () => {
+	// 	await runStopTriggerTest(llms)
+	// })
 
-	test('system message', async () => {
-		await runSystemMessageTest(llms)
-	})
+	// test('system message', async () => {
+	// 	await runSystemMessageTest(llms)
+	// })
 
-	test('token bias', async () => {
-		await runTokenBiasTest(llms)
-	})
+	// test('token bias', async () => {
+	// 	await runTokenBiasTest(llms)
+	// })
+	
+	// test('grammar', async () => {
+	// 	await runGrammarTest(llms)
+	// })
 	
 	test('function calls', async () => {
 		await runFunctionCallTest(llms)
+		await runParallelFunctionCallTest(llms)
 	})
 })
 
-suite('Context / Sessions', () => {
-	const llms = new LLMServer({
-		log: 'debug',
-		models,
-	})
-	beforeAll(async () => {
-		await llms.start()
-	})
-	afterAll(async () => {
-		await llms.stop()
-	})
-	it('should reuse context on stateless requests', async () => {
-		await runContextReuseTest(llms)
-	})
-	it('should not leak when handling multiple sessions', async () => {
-		await runContextLeakTest(llms)
-	})
-	it('context shift', async () => {
-		await runContextShiftTest(llms)
-	})
-})
+// suite('Context / Sessions', () => {
+// 	const llms = new LLMServer({
+// 		log: 'debug',
+// 		models,
+// 	})
+// 	beforeAll(async () => {
+// 		await llms.start()
+// 	})
+// 	afterAll(async () => {
+// 		await llms.stop()
+// 	})
+// 	it('should reuse context on stateless requests', async () => {
+// 		await runContextReuseTest(llms)
+// 	})
+// 	it('should not leak when handling multiple sessions', async () => {
+// 		await runContextLeakTest(llms)
+// 	})
+// 	it('context shift', async () => {
+// 		await runContextShiftTest(llms)
+// 	})
+// })

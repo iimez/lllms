@@ -226,6 +226,7 @@ export async function processChatCompletion(
 		})
 	}
 
+	// if context has been reset we need to reingest the conversation history
 	if (resetContext) {
 		const newMessages: ChatHistoryItem[] = []
 		for (const message of conversationMessages) {
@@ -242,13 +243,12 @@ export async function processChatCompletion(
 	}
 
 	// set additional stop generation triggers for this completion
-	// const stopTrigger = request.stop ?? config.completionDefaults?.stop
 	const stopGenerationTriggers: StopGenerationTrigger[] = []
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
 	if (stopTrigger) {
 		stopGenerationTriggers.push(...stopTrigger.map((t) => [t]))
 	}
-	// setting up logit/token bias.
+	// setting up logit/token bias dictionary
 	let tokenBias: TokenBias | undefined
 	const completionTokenBias =
 		request.tokenBias ?? config.completionDefaults?.tokenBias
@@ -269,16 +269,20 @@ export async function processChatCompletion(
 	let generatedTokenCount = 0
 	let completionResult: EngineChatCompletionResult
 
+	// setting up available function definitions
 	const functionDefinitions: Record<string, ChatCompletionFunction> = {
 		...config.functions,
 		...request.functions,
 	}
+	
+	// see if the user submitted any function call results
 	const resolvedFunctionCalls = []
 	const functionCallResultMessages = request.messages.filter(
 		(m) => m.role === 'function',
 	) as FunctionCallResultMessage[]
 	for (const message of functionCallResultMessages) {
 		if (instance.pendingFunctionCalls[message.callId]) {
+			log(LogLevels.debug, 'Resolving pending function call', message)
 			const functionCall = instance.pendingFunctionCalls[message.callId]
 			const functionDef = functionDefinitions[functionCall.functionName]
 			resolvedFunctionCalls.push({
@@ -323,15 +327,18 @@ export async function processChatCompletion(
 			text: newUserMessage,
 		})
 	}
+	
+	// only grammar or functions can be used, not both.
+	// currently ignoring function definitions if grammar is provided
 
-	let grammar: LlamaGrammar | undefined
+	let inputGrammar: LlamaGrammar | undefined
 	let inputFunctions: Record<string, LlamaChatFunction> | undefined
 
 	if (request.grammar) {
 		if (!instance.grammars[request.grammar]) {
 			throw new Error(`Grammar "${request.grammar}" not found.`)
 		}
-		grammar = instance.grammars[request.grammar]
+		inputGrammar = instance.grammars[request.grammar]
 	} else if (Object.keys(functionDefinitions).length > 0) {
 		inputFunctions = {}
 		for (const functionName in functionDefinitions) {
@@ -346,8 +353,7 @@ export async function processChatCompletion(
 
 	const defaults = config.completionDefaults ?? {}
 
-	let lastEvaluation: LlamaChatResponse['lastEvaluation'] | undefined =
-		instance.lastEvaluation
+	let lastEvaluation: LlamaChatResponse['lastEvaluation'] | undefined
 	let newChatHistory = instance.messages.slice()
 	let newContextWindowChatHistory =
 		lastEvaluation?.contextWindow == null
@@ -379,9 +385,11 @@ export async function processChatCompletion(
 			topK: request.topK ?? defaults.topK,
 			minP: request.minP ?? defaults.minP,
 			tokenBias,
-			grammar,
-			// @ts-ignore
+			grammar: inputGrammar,
+			// @ts-ignore we have asserted that grammar and functions are mutually exclusive
 			functions: inputFunctions,
+			// @ts-ignore we have asserted that grammar and functions are mutually exclusive
+			documentFunctionParams: !!inputFunctions,
 			customStopTriggers: stopGenerationTriggers,
 			repeatPenalty: {
 				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
@@ -417,10 +425,20 @@ export async function processChatCompletion(
 					`The model tried to call function "${functionCall.functionName}" which is not defined`,
 				)
 			}
+			console.debug('function called', {
+				functionCall,
+				currentLastEvaluation,
+				metadata,
+			})
 			if (functionDef.handler) {
 				const functionCallResult = await functionDef.handler(
 					functionCall.params,
 				)
+				log(LogLevels.debug, 'Called function handler', {
+					name: functionCall.functionName,
+					params: functionCall.params,
+					result: functionCallResult,
+				})
 				newChatHistory = addFunctionCallToChatHistory({
 					chatHistory: newChatHistory,
 					functionName: functionCall.functionName,
@@ -453,6 +471,7 @@ export async function processChatCompletion(
 				lastEvaluation.contextWindow = newContextWindowChatHistory
 				continue
 			} else {
+				log(LogLevels.debug, 'Function without handler called', functionCall)
 				result = {
 					responseText: null,
 					stopReason: 'functionCall',
@@ -465,6 +484,7 @@ export async function processChatCompletion(
 		const lastMessage = instance.messages[
 			instance.messages.length - 1
 		] as ChatModelResponse
+		console.debug('lastMessage', JSON.stringify(lastMessage, null, 2))
 		const responseText = lastMessage.response
 			.filter((item: any) => typeof item === 'string')
 			.join('')
@@ -488,6 +508,7 @@ export async function processChatCompletion(
 		assistantMessage.functionCalls = result.functionCalls.map((call) => {
 			const callId = nanoid()
 			instance.pendingFunctionCalls[callId] = call
+			log(LogLevels.debug, 'Adding pending function call result', call)
 			return {
 				id: callId,
 				name: call.functionName,
@@ -503,7 +524,6 @@ export async function processChatCompletion(
 		completionTokens: generatedTokenCount,
 		totalTokens: inputTokenCount + generatedTokenCount,
 	}
-	console.debug('final messages', instance.messages)
 	return completionResult
 }
 

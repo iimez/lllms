@@ -63,8 +63,7 @@ interface LlamaChatResult {
 function prepareGrammars(llama: Llama, grammarConfig: Record<string, string>) {
 	const grammars: Record<string, LlamaGrammar> = {}
 	for (const key in grammarConfig) {
-		const grammar = new LlamaGrammar({
-			llama,
+		const grammar = new LlamaGrammar(llama, {
 			grammar: grammarConfig[key],
 			// printGrammar: true,
 		})

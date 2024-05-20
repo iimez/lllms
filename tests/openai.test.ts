@@ -6,7 +6,6 @@ import { serveLLMs } from '#lllms/http.js'
 const testModel = 'test'
 
 function runOpenAITests(client: OpenAI) {
-
 	test('chat.completions.create', async () => {
 		const completion = await client.chat.completions.create({
 			model: testModel,
@@ -93,20 +92,99 @@ function runOpenAITests(client: OpenAI) {
 		)
 		expect(finishReason).toBe('stop')
 	})
-	
+
 	test('response_format json_object / json grammar', async () => {
 		const completion = await client.chat.completions.create({
 			model: testModel,
 			temperature: 0,
 			response_format: { type: 'json_object' },
 			messages: [
-				{ role: 'user', content: 'This is a test. Just answer with "Test", but in JSON. And add an array of cats to it.' },
+				{
+					role: 'user',
+					content:
+						'Answer with a JSON object containing the key "test" with the value "test". And add an array of cats to it.',
+				},
 			],
 		})
 		expect(completion.choices[0].message.content).toBeTruthy()
 		const response = JSON.parse(completion.choices[0].message.content!)
-		expect(response.result).toContain('Test')
+		expect(response.test).toMatch(/test/)
 		expect(response.cats).toBeInstanceOf(Array)
+	})
+
+	test('function call', async () => {
+		const completion = await client.chat.completions.create({
+			model: testModel,
+			temperature: 0,
+			tools: [
+				{
+					type: 'function',
+					function: {
+						name: 'getRandomNumber',
+						description: 'Generate a random integer in given range',
+						parameters: {
+							type: 'object',
+							properties: {
+								min: { type: 'number' },
+								max: { type: 'number' },
+							},
+						},
+					},
+				},
+			],
+			messages: [{ role: 'user', content: "Let's roll the die." }],
+		})
+		expect(completion.choices[0].message.content).toBeNull()
+		expect(completion.choices[0].message.tool_calls).toBeInstanceOf(Array)
+		expect(completion.choices[0].message.tool_calls![0].type).toBe('function')
+		expect(completion.choices[0].message.tool_calls![0].function.name).toBe(
+			'getRandomNumber',
+		)
+		expect(
+			completion.choices[0].message.tool_calls![0].function.arguments,
+		).toBe('{"min":1,"max":6}')
+	})
+
+	test('function call with streaming', async () => {
+		const completion = await client.beta.chat.completions.stream({
+			stream_options: { include_usage: true },
+			model: testModel,
+			temperature: 0,
+			tools: [
+				{
+					type: 'function',
+					function: {
+						name: 'getRandomNumber',
+						description: 'Generate a random integer in given range',
+						parameters: {
+							type: 'object',
+							properties: {
+								min: { type: 'number' },
+								max: { type: 'number' },
+							},
+						},
+					},
+				},
+			],
+			messages: [{ role: 'user', content: "Let's roll the die." }],
+		})
+		let receivedToolCallChunk = false
+		for await (const chunk of completion) {
+			if (chunk.choices[0]?.delta?.tool_calls?.length) {
+				receivedToolCallChunk = true
+			}
+		}
+		expect(receivedToolCallChunk).toBe(true)
+		
+		const finalResult = await completion.finalChatCompletion()
+		// console.debug({ finalResult: JSON.stringify(finalResult) })
+		expect(finalResult.choices[0].message.tool_calls).toBeInstanceOf(Array)
+		expect(finalResult.choices[0].message.tool_calls![0].type).toBe('function')
+		expect(finalResult.choices[0].message.tool_calls![0].function.name).toBe('getRandomNumber')
+		expect(finalResult.choices[0].message.tool_calls![0].function.arguments).toBe('{"min":1,"max":6}')
+		expect(finalResult.model).toBe(testModel)
+		expect(finalResult.usage).toBeDefined()
+		// expect(finalResult.usage?.completion_tokens).toBeGreaterThan(0)
 	})
 }
 
@@ -116,10 +194,10 @@ suite('OpenAI API (node-llama-cpp)', () => {
 		baseURL: 'http://localhost:3000/openai/v1/',
 		apiKey: '123',
 	})
-	
+
 	beforeAll(async () => {
 		server = await serveLLMs({
-			log: 'debug',
+			// log: 'debug',
 			listen: { port: 3000 },
 			inferenceConcurrency: 2,
 			models: {
@@ -127,15 +205,15 @@ suite('OpenAI API (node-llama-cpp)', () => {
 					url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 					engine: 'node-llama-cpp',
 					minInstances: 2,
-				}
+				},
 			},
 		})
 	})
-	
+
 	afterAll(() => {
 		server.close()
 	})
-	
+
 	runOpenAITests(openai)
 })
 
@@ -148,7 +226,7 @@ suite('OpenAI API (gpt4all)', () => {
 
 	beforeAll(async () => {
 		server = await serveLLMs({
-			log: 'debug',
+			// log: 'debug',
 			listen: { port: 3001 },
 			inferenceConcurrency: 2,
 			models: {
@@ -164,6 +242,6 @@ suite('OpenAI API (gpt4all)', () => {
 	afterAll(() => {
 		server.close()
 	})
-	
+
 	runOpenAITests(openai)
 })

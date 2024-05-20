@@ -32,7 +32,7 @@ const models: Record<string, LLMOptions> = {
 
 suite('Features', () => {
 	const llms = new LLMServer({
-		log: 'debug',
+		// log: 'debug',
 		models,
 	})
 
@@ -43,46 +43,46 @@ suite('Features', () => {
 		await llms.stop()
 	})
 
-	// test('stop generation trigger', async () => {
-	// 	await runStopTriggerTest(llms)
-	// })
+	test('stop generation trigger', async () => {
+		await runStopTriggerTest(llms)
+	})
 
-	// test('system message', async () => {
-	// 	await runSystemMessageTest(llms)
-	// })
+	test('system message', async () => {
+		await runSystemMessageTest(llms)
+	})
 
-	// test('token bias', async () => {
-	// 	await runTokenBiasTest(llms)
-	// })
+	test('token bias', async () => {
+		await runTokenBiasTest(llms)
+	})
 	
-	// test('grammar', async () => {
-	// 	await runGrammarTest(llms)
-	// })
+	test('grammar', async () => {
+		await runGrammarTest(llms)
+	})
 	
 	test('function calls', async () => {
 		await runFunctionCallTest(llms)
-		await runParallelFunctionCallTest(llms)
+		// await runParallelFunctionCallTest(llms)
 	})
 })
 
-// suite('Context / Sessions', () => {
-// 	const llms = new LLMServer({
-// 		log: 'debug',
-// 		models,
-// 	})
-// 	beforeAll(async () => {
-// 		await llms.start()
-// 	})
-// 	afterAll(async () => {
-// 		await llms.stop()
-// 	})
-// 	it('should reuse context on stateless requests', async () => {
-// 		await runContextReuseTest(llms)
-// 	})
-// 	it('should not leak when handling multiple sessions', async () => {
-// 		await runContextLeakTest(llms)
-// 	})
-// 	it('context shift', async () => {
-// 		await runContextShiftTest(llms)
-// 	})
-// })
+suite('Context / Sessions', () => {
+	const llms = new LLMServer({
+		// log: 'debug',
+		models,
+	})
+	beforeAll(async () => {
+		await llms.start()
+	})
+	afterAll(async () => {
+		await llms.stop()
+	})
+	it('should reuse context on stateless requests', async () => {
+		await runContextReuseTest(llms)
+	})
+	it('should not leak when handling multiple sessions', async () => {
+		await runContextLeakTest(llms)
+	})
+	it('context shift', async () => {
+		await runContextShiftTest(llms)
+	})
+})

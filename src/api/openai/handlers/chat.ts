@@ -115,16 +115,6 @@ export function createChatCompletionHandler(pool: LLMPool) {
 				}
 			}
 			
-			// completionFunctions = [
-			// 	{
-			// 		name: 'getCurrentLocation',
-			// 		description: 'Get the current location',
-			// 		// handler: async (params: any) => {
-			// 		// 	return functionCall.result
-			// 		// },
-			// 	},
-			// ]
-			
 			const completionReq = omitEmptyValues<ChatCompletionRequest>({
 				model: args.model,
 				// TODO support multimodal image content array
@@ -165,7 +155,6 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			const result = await completion.process({
 				signal: controller.signal,
 				onChunk: (chunk) => {
-					// console.debug('onChunk', chunk)
 					if (args.stream) {
 						const chunkData: OpenAIChatCompletionChunk = {
 							id: completion.id,
@@ -191,8 +180,46 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			release()
 
 			if (args.stream) {
+				if (result.finishReason === 'functionCall') {
+					// currently not possible to stream function calls, so "faking" the stream here to make the openai client happy
+					const streamedToolCallChunk: OpenAIChatCompletionChunk = {
+						id: completion.id,
+						object: 'chat.completion.chunk',
+						model: completion.model,
+						created: Math.floor(completion.createdAt.getTime() / 1000),
+						choices: [
+							{
+								index: 0,
+								delta: {
+									role: 'assistant',
+									content: null,
+								},
+								logprobs: null,
+								finish_reason: result.finishReason
+									? finishReasons[result.finishReason]
+									: 'stop',
+							},
+						],
+					}
+					
+					if ('functionCalls' in result.message && result.message.functionCalls?.length) {
+						streamedToolCallChunk.choices[0].delta.tool_calls = result.message.functionCalls.map((call, index) => {
+							return {
+								index,
+								id: call.id,
+								type: 'function',
+								function: {
+									name: call.name,
+									arguments: JSON.stringify(call.parameters),
+								},
+							}
+						})
+					}
+					res.write(
+						`data: ${JSON.stringify(streamedToolCallChunk)}\n\n`,
+					)
+				}
 				if (args.stream_options?.include_usage) {
-					// beta chat completions pick up the meta data from the last chunk
 					const finalChunk: OpenAIChatCompletionChunk = {
 						id: completion.id,
 						object: 'chat.completion.chunk',

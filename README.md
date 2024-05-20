@@ -4,16 +4,16 @@ Local Large Language Models. Providing an LLM instance pool and tools to run and
 
 Note that this is a dev and learning tool and not meant for production use. It is not secure, not scalable, and (currently) not (enough) optimized for performance. It is meant to be used on a local machine or a small server for personal use or small scale experiments. Prioritizing ease of use and simple APIs. For larger scale hosting see [these other solutions](#related-solutions).
 
-⚠️ This package is currently a WIP and many things are subject to change or not yet implemented.
+⚠️ This package is currently in beta. Some APIs may change. Feel free to report any issues you encounter.
 
 ### Features
 
-- Run multiple large language models concurrently, until your CPU or RAM runs out.
-- Automatically download and cache GGUF's to `~/.cache/lllms`.
+- Run multiple large language models concurrently, adjust cache lifetimes and 
 - OpenAI spec API endpoints. See [#progress](#progress) for compatibility.
 - Cache loaded models and their contexts/sessions across stateless API requests.
 - BYO web server or use the provided express server and middleware.
 - Or use the LLM instance pool directly within your application.
+- Automatically downloads and caches GGUF's to `~/.cache/lllms`.
 
 ### Usage
 
@@ -168,7 +168,7 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | top_logprobs        | ❌      | ❌             |
 | logit_bias          | ❌      | ✅             |
 | response_format     | ❌      | ✅             |
-| tools               | ❌      | ❌             |
+| tools               | ❌      | ✅             |
 | tool_choice         | ❌      | ❌             |
 | suffix              | ❌      | ❌             |
 | echo                | ❌      | ❌             |
@@ -188,12 +188,19 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | System prompt         | ✅      | ✅             |
 | GPU                   | ✅      | ✅             |
 | Content part messages | ❌      | ❌             |
-| Function Calling      | ❌      | 🚧             |
+| Function Calling      | ❌      | ✅             |
 
 
+#### Limitations and Known Issues
+
+##### System Messages
 System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored.
 
-Note that the current context cache implementation for the OpenAI API only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches, everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
+##### Context Cache
+Note that the current context cache implementation for the OpenAI API only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
+
+##### Function Calling
+Parallel function calls are currently not possible. `tool_choice` will always be `auto`.
 
 #### TODO / Roadmap
 
@@ -212,18 +219,18 @@ Not in any particular order:
 - [x] Instance TTL
 - [x] Allow configuring model hashes / verification
 - [x] Improve template code / stop trigger support
-- [~] Logit bias / Token bias support
-- [~] Tests for longer conversations / context window shifting
 - [x] Support configuring a timeout on completion processing
+- [x] Logit bias / Token bias support
+- [ ] Improve node-llama-cpp token usage counts / TokenMeter
+- [ ] Support preloading instances with context, like a long system message or few shot examples
+- [ ] Improve tests for longer conversations / context window shifting
 - [ ] Tests for request cancellation
-- [ ] Allow user to customize engine implementations
-- [ ] A mock engine implementing for testing and examples
+- [ ] A mock engine implementing for testing and examples / Allow user to customize engine implementations
 - [ ] Embeddings APIs
 - [ ] Logprobs support
 - [ ] Replace express with tinyhttp?
-- [ ] Support preloading session contexts, like a long system message or few shot examples
 - [ ] Script to generate a minimal dummy/testing GGUF https://github.com/ggerganov/llama.cpp/discussions/5038#discussioncomment-8181056
-- [ ] ~Allow configuring total RAM/VRAM usage~ See https://github.com/ggerganov/llama.cpp/issues/4315
+- [ ] Allow configuring total RAM/VRAM usage (See https://github.com/ggerganov/llama.cpp/issues/4315 Check estimates?)
 
 ### Contributing
 

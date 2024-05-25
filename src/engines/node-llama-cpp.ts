@@ -14,6 +14,7 @@ import {
 	LlamaChatResponse,
 	ChatModelResponse,
 	LlamaChatResponseFunctionCall,
+	LlamaEmbeddingContext,
 } from 'node-llama-cpp'
 import {
 	EngineChatCompletionResult,
@@ -25,6 +26,8 @@ import {
 	ChatCompletionFunction,
 	FunctionCallResultMessage,
 	AssistantMessage,
+	EngineEmbeddingContext,
+	EngineEmbeddingResult,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { formatBytes, mergeAbortSignals } from '#lllms/lib/util.js'
@@ -46,6 +49,7 @@ interface LlamaCppInstance {
 	grammars: Record<string, LlamaGrammar>
 	pendingFunctionCalls: Record<string, any>
 	lastEvaluation?: LlamaChatResponse['lastEvaluation']
+	embeddingContext?: LlamaEmbeddingContext
 }
 
 interface LlamaChatFunction {
@@ -483,7 +487,7 @@ export async function processChatCompletion(
 		const lastMessage = instance.messages[
 			instance.messages.length - 1
 		] as ChatModelResponse
-		console.debug('lastMessage', JSON.stringify(lastMessage, null, 2))
+		// console.debug('lastMessage', JSON.stringify(lastMessage, null, 2))
 		const responseText = lastMessage.response
 			.filter((item: any) => typeof item === 'string')
 			.join('')
@@ -603,4 +607,44 @@ export async function processCompletion(
 		completionTokens: generatedTokenCount,
 		totalTokens: tokens.length + generatedTokenCount,
 	}
+}
+
+
+export async function processEmbedding(
+	instance: LlamaCppInstance,
+	{
+		request,
+		config,
+	}: EngineEmbeddingContext<LlamaCppOptions>,
+	signal?: AbortSignal,
+): Promise<EngineEmbeddingResult> {
+	
+	const texts: string[] = []
+	if (typeof request.input === 'string') {
+		texts.push(request.input)
+	} else {
+		const strInputs = request.input.filter((i) => typeof i === 'string') as string[]
+		texts.push(...strInputs)
+	}
+	
+	if (!instance.embeddingContext) {
+		// console.debug('creating embed context')
+		instance.embeddingContext = await instance.model.createEmbeddingContext();
+	}
+
+	const embeddings: Float32Array[] = []
+	let inputTokens = 0
+	
+	for (const text of texts) {
+		const tokenizedInput = instance.model.tokenize(text)
+		inputTokens += tokenizedInput.length
+		const embedding = await instance.embeddingContext.getEmbeddingFor(tokenizedInput);
+		embeddings.push(new Float32Array(embedding.vector))
+	}
+	
+	return {
+		embeddings,
+		inputTokens,
+	}
+	
 }

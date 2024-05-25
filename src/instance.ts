@@ -8,6 +8,7 @@ import {
 	LLMConfig,
 	LLMRequest,
 	CompletionProcessingOptions,
+	EmbeddingRequest,
 } from '#lllms/types/index.js'
 import type { EngineInstance } from '#lllms/engines/index.js'
 import { createContextStateHash } from '#lllms/lib/createContextStateHash.js'
@@ -140,6 +141,9 @@ export class LLMInstance {
 
 	matchesContextState(request: LLMRequest) {
 		if (!this.contextStateHash) {
+			return false
+		}
+		if (!('messages' in request)) {
 			return false
 		}
 		const incomingStateHash = createContextStateHash(request, true)
@@ -280,5 +284,34 @@ export class LLMInstance {
 				return result
 			},
 		}
+	}
+	
+	async createEmbedding(request: EmbeddingRequest) {
+		if (!request.input) {
+			throw new Error('Input is required for embeddings.')
+		}
+		this.lastUsed = Date.now()
+		const id = this.id + '-' + generateId(8)
+		const embeddingLogger = withLogMeta(this.logger, {
+			sequence: this.currentRequest!.sequence,
+			embedding: id,
+		})
+		embeddingLogger(LogLevels.verbose, 'Creating embedding')
+		
+		const processingBegin = process.hrtime.bigint()
+		const result = await this.engine.processEmbedding(
+			this.llm,
+			{
+				request,
+				config: this.config,
+				log: embeddingLogger,
+			},
+			// opts?.signal,
+		)
+		const processingElapsed = elapsedMillis(processingBegin)
+		embeddingLogger(LogLevels.verbose, 'Embedding done', {
+			elapsed: processingElapsed,
+		})
+		return result
 	}
 }

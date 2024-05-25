@@ -7,6 +7,9 @@ import type {
 import type { Logger } from '#lllms/lib/logger.js'
 import type { SchemaObject } from 'ajv'
 
+// export type LLMTaskType = 'completion' | 'chat' | 'embedding'
+export type LLMTaskType = 'inference' | 'embedding'
+
 export interface CompletionChunk {
 	tokens: number[]
 	text: string
@@ -81,6 +84,7 @@ export interface CompletionRequestBase extends CompletionParams {
 }
 
 export interface CompletionRequest extends CompletionRequestBase {
+	task: 'inference'
 	prompt?: string
 }
 
@@ -91,13 +95,21 @@ export interface ChatCompletionFunction<TParams = any> {
 }
 
 export interface ChatCompletionRequest extends CompletionRequestBase {
+	task: 'inference'
 	systemPrompt?: string
 	messages: ChatMessage[]
 	grammar?: string
 	functions?: Record<string, ChatCompletionFunction>
 }
 
-export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest
+export interface EmbeddingRequest {
+	task: 'embedding'
+	model: string
+	input: string | string[] | number[] | number[][];
+	dimensions?: number
+}
+
+export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest | EmbeddingRequest
 export interface LLMRequestMeta {
 	sequence: number
 }
@@ -111,7 +123,8 @@ export interface ChatCompletionResult extends EngineChatCompletionResult {
 export interface LLMOptionsBase {
 	url?: string
 	file?: string
-	engine?: EngineType
+	engine: EngineType
+	task: LLMTaskType
 	contextSize?: number
 	minInstances?: number
 	maxInstances?: number
@@ -128,6 +141,7 @@ export interface LLMConfig<T extends EngineOptionsBase = EngineOptionsBase>
 	id: string
 	file: string
 	ttl?: number
+	task: LLMTaskType
 	engine: EngineType
 	engineOptions?: T
 }
@@ -148,6 +162,11 @@ export interface LLMEngine<T extends EngineOptionsBase = EngineOptionsBase> {
 		ctx: EngineCompletionContext<T>,
 		signal?: AbortSignal,
 	) => Promise<EngineCompletionResult>
+	processEmbedding: (
+		instance: EngineInstance,
+		ctx: EngineEmbeddingContext<T>,
+		signal?: AbortSignal,
+	) => Promise<EngineEmbeddingResult>
 }
 
 export interface EngineCompletionContext<T extends EngineOptionsBase>
@@ -161,6 +180,16 @@ export interface EngineChatCompletionContext<T extends EngineOptionsBase>
 	onChunk?: (chunk: CompletionChunk) => void
 	resetContext?: boolean
 	request: ChatCompletionRequest
+}
+
+export interface EngineEmbeddingContext<T extends EngineOptionsBase>
+	extends EngineContext<T> {
+	request: EmbeddingRequest
+}
+
+export interface EngineEmbeddingResult {
+	embeddings: Float32Array[]
+	inputTokens: number
 }
 
 export interface EngineContext<
@@ -203,11 +232,11 @@ interface GPT4AllLLMOptions extends LLMOptionsBase {
 	engineOptions?: GPT4AllOptions
 }
 
-interface DefaultEngineLLMOptions extends LLMOptionsBase {
-	engineOptions?: LlamaCppOptions
-}
+// interface DefaultEngineLLMOptions extends LLMOptionsBase {
+// 	engineOptions?: LlamaCppOptions
+// }
 
 export type LLMOptions =
 	| NodeLlamaCppLLMOptions
 	| GPT4AllLLMOptions
-	| DefaultEngineLLMOptions
+	// | DefaultEngineLLMOptions

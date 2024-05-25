@@ -3,22 +3,15 @@ import { format as formatURL } from 'node:url'
 import { serveLLMs, StandaloneServerOptions } from '#lllms/http.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 
-const functions = {
-	getCurrentLocation: {
-		description: 'Get the current location',
-		handler: async () => {
-			return 'New York, New York, United States'
-		},
-	},
-}
+// Currently only used for debugging. Do not use.
 
 const serverOptions: StandaloneServerOptions = {
 	listen: {
 		port: 3000,
 	},
 	log: LogLevels.debug,
-	// inferenceConcurrency: 2,
-	// downloadConcurrency: 2,
+	// concurrency: 2,
+	// maxDownloads: 2,
 	models: {
 		// 'phi3-mini-4k': {
 		// 	url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
@@ -32,21 +25,32 @@ const serverOptions: StandaloneServerOptions = {
 		// 	},
 		// 	functions,
 		// },
-		'hermes': {
-			url: 'https://huggingface.co/NousResearch/Hermes-2-Pro-Llama-3-8B-GGUF/resolve/main/Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf',
-			minInstances: 1,
-		},
-		// 'llama3-8b': {
-		// 	url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-		// 	systemPrompt: 'Only answer in json format',
-		// 	completionDefaults: {
-		// 		grammar: 'json_object',
-		// 	},
+		// 'hermes': {
+		// 	url: 'https://huggingface.co/NousResearch/Hermes-2-Pro-Llama-3-8B-GGUF/resolve/main/Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf',
+		// 	minInstances: 1,
 		// 	engineOptions: {
-		// 		// memLock: true,
-		// 		gpu: true,
-		// 	},
+		// 		gpu: false,
+		// 	}
 		// },
+		'nomic-text-embed': {
+			url: 'https://gpt4all.io/models/gguf/nomic-embed-text-v1.f16.gguf',
+			minInstances: 1,
+			engine: 'gpt4all',
+			task: 'embedding',
+		},
+		'llama3-8b': {
+			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+			engine: 'node-llama-cpp',
+			task: 'inference',
+			// systemPrompt: 'Only answer in json format',
+			// completionDefaults: {
+			// 	grammar: 'json_object',
+			// },
+			// engineOptions: {
+			// 	// memLock: true,
+			// 	gpu: true,
+			// },
+		},
 		// 'llama3-70b': {
 		// 	url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-70B-Instruct-GGUF/resolve/main/Meta-Llama-3-70B-Instruct.Q4_0.gguf',
 		// 	engine: 'node-llama-cpp',

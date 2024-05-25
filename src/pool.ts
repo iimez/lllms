@@ -8,12 +8,13 @@ import {
 	LLMConfig,
 	IncomingLLMRequest,
 	LLMRequest,
+	LLMTaskType,
 } from '#lllms/types/index.js'
 import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
 
-interface CompletionTask {
+interface LLMTask {
 	instance: LLMInstance
-	request: CompletionRequest | ChatCompletionRequest
+	request: LLMRequest
 }
 
 type PrepareInstanceCallback = (
@@ -22,12 +23,12 @@ type PrepareInstanceCallback = (
 ) => Promise<void>
 
 interface LLMPoolConfig {
-	inferenceConcurrency: number
+	concurrency: number
 	models: Record<string, LLMConfig>
 }
 
 export interface LLMPoolOptions {
-	inferenceConcurrency?: number
+	concurrency?: number
 	releaseTimeout?: number
 	models: Record<string, LLMConfig>
 	log?: Logger | LogLevel
@@ -62,12 +63,12 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			}
 		}
 		const config: LLMPoolConfig = {
-			inferenceConcurrency: 1,
+			concurrency: 1,
 			...opts,
 			models,
 		}
 		this.queue = new PQueue({
-			concurrency: config.inferenceConcurrency,
+			concurrency: config.concurrency,
 		})
 		this.config = config
 		this.instances = {}
@@ -505,8 +506,8 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		return ++this.requestSequence
 	}
 
-	// requests an instance from the pool to handle a chat completion request
-	async requestLLM(incomingRequest: IncomingLLMRequest, signal?: AbortSignal) {
+	// requests an language model instance from the pool
+	async requestInstance(incomingRequest: IncomingLLMRequest, signal?: AbortSignal) {
 		const requestSequence = this.getRequestSequence()
 		const request = {
 			...incomingRequest,
@@ -535,10 +536,10 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 
 		// once instance is acquired & locked, we can pass it on to the caller
 		// the queue task promise will be forwarded as releaseInstance
-		let resolveQueueTask: (value: CompletionTask) => void = () => {}
+		let resolveQueueTask: (value: LLMTask) => void = () => {}
 
 		this.queue
-			.add((): Promise<CompletionTask> => {
+			.add((): Promise<LLMTask> => {
 				this.waitingRequests--
 				return new Promise((resolve, reject) => {
 					resolveQueueTask = resolve

@@ -2,10 +2,12 @@ import path from 'node:path'
 import {
 	loadModel,
 	createCompletion,
+	createEmbedding,
 	InferenceModel,
 	LoadModelOptions,
 	CompletionInput,
 	ChatMessage,
+	EmbeddingModel,
 } from 'gpt4all'
 import {
 	EngineCompletionContext,
@@ -13,9 +15,10 @@ import {
 	EngineChatCompletionResult,
 	EngineCompletionResult,
 	CompletionFinishReason,
-	// ChatTemplateFormat,
 	EngineContext,
 	EngineOptionsBase,
+	EngineEmbeddingContext,
+	EngineEmbeddingResult,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 
@@ -26,6 +29,8 @@ export async function loadInstance(
 	signal?: AbortSignal,
 ) {
 	log(LogLevels.info, `Load GPT4All model ${config.file}`)
+
+	console.debug(config)
 
 	const loadOpts: LoadModelOptions = {
 		modelPath: path.dirname(config.file),
@@ -41,7 +46,10 @@ export async function loadInstance(
 	// 	modelName,
 	// 	loadOpts,
 	// })
-	const instance = await loadModel(path.basename(config.file), loadOpts)
+	const instance = await loadModel(path.basename(config.file), {
+		...loadOpts,
+		type: config.task,
+	})
 	if (config.engineOptions?.cpuThreads) {
 		instance.llm.setThreadCount(config.engineOptions.cpuThreads)
 	}
@@ -114,29 +122,6 @@ export async function processCompletion(
 	}
 }
 
-// function addSystemPromptTemplate(
-// 	systemPrompt: string,
-// 	templateFormat: ChatTemplateFormat,
-// ) {
-// 	if (templateFormat === 'chatml') {
-// 		return `<|im_start|>system\n${systemPrompt}<|im_end|>\n`
-// 	}
-// 	if (templateFormat === 'llama3') {
-// 		return `<|start_header_id|>system<|end_header_id|>\n\n${systemPrompt}<|eot_id|>`
-// 	}
-// 	if (templateFormat === 'alpaca') {
-// 		return `### System:\n${systemPrompt}\n\n`
-// 	}
-// 	if (templateFormat === 'phi') {
-// 		return `<|system|>\n${systemPrompt}<|end|>\n`
-// 	}
-// 	if (templateFormat === 'llama2') {
-// 		// return `[INST]${systemPrompt}[/INST]\n`
-// 		return `<s>[INST] <<SYS>>\n${systemPrompt}\n<</SYS>>[/INST]</s>\n\n`
-// 	}
-// 	return systemPrompt
-// }
-
 export async function processChatCompletion(
 	instance: InferenceModel,
 	{
@@ -161,7 +146,9 @@ export async function processChatCompletion(
 
 	// if we have reset context, we need to reingest the chat history,
 	// or otherwise just append the last user message.
-	const nonSystemMessages = request.messages.filter((m) => m.role !== 'system' && m.role !== 'function')
+	const nonSystemMessages = request.messages.filter(
+		(m) => m.role !== 'system' && m.role !== 'function',
+	)
 	let input: CompletionInput
 
 	if (resetContext) {
@@ -177,7 +164,7 @@ export async function processChatCompletion(
 	}
 
 	let finishReason: CompletionFinishReason = 'eogToken'
-	let removeTailingToken: string | undefined
+	let suffixToRemove: string | undefined
 
 	const defaults = config.completionDefaults ?? {}
 	const stopTriggers = request.stop ?? defaults.stop ?? []
@@ -194,7 +181,7 @@ export async function processChatCompletion(
 		onResponseToken: (tokenId, token) => {
 			if (stopTriggers.includes(token)) {
 				finishReason = 'stopGenerationTrigger'
-				removeTailingToken = token
+				suffixToRemove = token
 				return false
 			}
 			if (onChunk) {
@@ -213,8 +200,8 @@ export async function processChatCompletion(
 	}
 
 	let response = result.choices[0].message.content
-	if (removeTailingToken) {
-		response = response.slice(0, -removeTailingToken.length)
+	if (suffixToRemove) {
+		response = response.slice(0, -suffixToRemove.length)
 	}
 
 	return {
@@ -226,5 +213,30 @@ export async function processChatCompletion(
 		promptTokens: result.usage.prompt_tokens,
 		completionTokens: result.usage.completion_tokens,
 		totalTokens: result.usage.total_tokens,
+	}
+}
+
+export async function processEmbedding(
+	instance: EmbeddingModel,
+	{ request, config }: EngineEmbeddingContext<GPT4AllOptions>,
+	signal?: AbortSignal,
+): Promise<EngineEmbeddingResult> {
+	const texts: string[] = []
+	if (typeof request.input === 'string') {
+		texts.push(request.input)
+	} else {
+		const strInputs = request.input.filter(
+			(i) => typeof i === 'string',
+		) as string[]
+		texts.push(...strInputs)
+	}
+
+	const res = await createEmbedding(instance, texts, {
+		dimensionality: request.dimensions,
+	})
+
+	return {
+		embeddings: res.embeddings,
+		inputTokens: res.n_prompt_tokens,
 	}
 }

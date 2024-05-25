@@ -22,7 +22,7 @@ export interface LLMStoreModelConfig extends LLMConfig {
 }
 
 export interface LLMMStoreOptions {
-	downloadConcurrency?: number
+	maxDownloads?: number
 	modelsPath: string,
 	models: Record<string, LLMConfig>,
 	log?: Logger | LogLevel
@@ -44,7 +44,7 @@ export class LLMStore {
 			this.logger = createLogger(LogLevels.warn)
 		}
 		this.downloadQueue = new PQueue({
-			concurrency: options.downloadConcurrency ?? 1,
+			concurrency: options.maxDownloads ?? 1,
 		})
 		this.modelsPath = options.modelsPath
 		this.models = options.models
@@ -75,8 +75,13 @@ export class LLMStore {
 
 		const modelStatus = Object.fromEntries(
 			Object.entries(this.models).map(([modelId, model]) => {
-				const fileExists = existsSync(model.file)
-				const fileSize = fileExists ? statSync(model.file).size : 0
+				let fileSize = 0
+				let lastModified = ''
+				if (existsSync(model.file)) {
+					const stat = statSync(model.file)
+					fileSize = stat.size
+					lastModified = new Date(stat.mtimeMs).toISOString()
+				}
 				return [
 					modelId,
 					{
@@ -88,6 +93,7 @@ export class LLMStore {
 							url: model.url,
 							file: model.file,
 							size: fileSize,
+							lastModified,
 							checksums: model.meta?.checksums,
 							gguf: model.meta?.gguf,
 							download: downloadStatus[modelId],

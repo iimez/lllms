@@ -9,10 +9,11 @@ import { LLMServer, LLMServerOptions } from '#lllms/server.js'
 
 export function createOpenAIMiddleware(llmServer: LLMServer) {
 	const router = express.Router()
-	const requestHandlers = createOpenAIRequestHandlers(llmServer.pool)
-	router.get('/v1/models', requestHandlers.listModels)
+	const requestHandlers = createOpenAIRequestHandlers(llmServer)
+	router.get('/v1/models', requestHandlers.models)
 	router.post('/v1/completions', requestHandlers.completions)
 	router.post('/v1/chat/completions', requestHandlers.chatCompletions)
+	router.post('/v1/embeddings', requestHandlers.embeddings)
 	return router
 }
 

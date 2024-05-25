@@ -1,6 +1,6 @@
-import { IncomingMessage, ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import { LLMPool } from '#lllms/pool.js'
+import type { LLMServer } from '#lllms/server.js'
 import { CompletionRequest } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
@@ -20,7 +20,7 @@ interface OpenAICompletionChunk extends OpenAI.Completions.Completion {
 
 // v1/completions
 // https://platform.openai.com/docs/api-reference/completions/create
-export function createCompletionHandler(pool: LLMPool) {
+export function createCompletionHandler(llms: LLMServer) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
 		let args: OpenAICompletionParams
 
@@ -40,7 +40,7 @@ export function createCompletionHandler(pool: LLMPool) {
 			res.end(JSON.stringify({ error: 'Invalid request' }))
 			return
 		}
-		if (!pool.config.models[args.model]) {
+		if (!llms.getModelConfig(args.model)) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
@@ -78,6 +78,7 @@ export function createCompletionHandler(pool: LLMPool) {
 			}
 
 			const completionReq = omitEmptyValues<CompletionRequest>({
+				task: 'inference',
 				model: args.model,
 				prompt: args.prompt as string,
 				temperature: args.temperature ? args.temperature : undefined,
@@ -101,7 +102,7 @@ export function createCompletionHandler(pool: LLMPool) {
 				topK: args.top_k ? args.top_k : undefined,
 			})
 
-			const { instance, release } = await pool.requestLLM(
+			const { instance, release } = await llms.requestModel(
 				completionReq,
 				controller.signal,
 			)

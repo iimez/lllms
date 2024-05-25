@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs'
 import { ggufMetadata } from 'hyllama'
 
+// only typing the properties we interact with
 export interface GGUFMeta {
 	version: number
 	general: {
@@ -20,6 +21,7 @@ export interface GGUFMeta {
 	}
 }
 
+// Creates a nested object from the metadata key/value pairs
 function structureGGUFMeta(metadata: Record<string, any>): GGUFMeta {
 	const structuredMeta: any = {}
 
@@ -46,8 +48,6 @@ export async function readGGUFMetaFromFile(file: string) {
 	await fd.read(buffer, 0, 10_000_000, 0)
 	await fd.close()
 	const { metadata, tensorInfos } = ggufMetadata(buffer.buffer)
-	// console.log(metadata)
-	// console.log(tensorInfos)
 	return structureGGUFMeta(metadata)
 }
 
@@ -56,8 +56,5 @@ export async function readGGUFMetaFromURL(url: string) {
 	const res = await fetch(url, { headers })
 	const arrayBuffer = await res.arrayBuffer()
 	const { metadata, tensorInfos } = ggufMetadata(arrayBuffer)
-	// console.log(metadata)
-	// console.log(tensorInfos)
-
 	return structureGGUFMeta(metadata)
 }

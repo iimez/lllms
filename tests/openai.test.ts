@@ -3,12 +3,13 @@ import { Server } from 'node:http'
 import OpenAI from 'openai'
 import { serveLLMs } from '#lllms/http.js'
 
-const testModel = 'test'
+const chatModel = 'chat'
+const embeddingsModel = 'text-embed'
 
 function runOpenAITests(client: OpenAI) {
 	test('chat.completions.create', async () => {
 		const completion = await client.chat.completions.create({
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			messages: [
 				{ role: 'user', content: 'This is a test. Just answer with "Test".' },
@@ -19,7 +20,7 @@ function runOpenAITests(client: OpenAI) {
 
 	test('chat.completions.create stream=true', async () => {
 		const completion = await client.chat.completions.create({
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			stream: true,
 			messages: [
@@ -38,7 +39,7 @@ function runOpenAITests(client: OpenAI) {
 	test('beta.chat.completions.create stream=true', async () => {
 		const completion = await client.beta.chat.completions.stream({
 			stream_options: { include_usage: true },
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			messages: [
 				{ role: 'user', content: 'This is a test. Just answer with "Test".' },
@@ -52,14 +53,14 @@ function runOpenAITests(client: OpenAI) {
 		}
 		const finalResult = await completion.finalChatCompletion()
 		expect(receivedTestChunk).toBe(true)
-		expect(finalResult.model).toBe(testModel)
+		expect(finalResult.model).toBe(chatModel)
 		expect(finalResult.usage).toBeDefined()
 		expect(finalResult.usage?.completion_tokens).toBeGreaterThan(0)
 	})
 
 	test('completions.create', async () => {
 		const completion = await client.completions.create({
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			max_tokens: 1,
 			prompt: 'To verify our code works we will first write an integration',
@@ -71,7 +72,7 @@ function runOpenAITests(client: OpenAI) {
 	test('completions.create stream=true', async () => {
 		const completion = await client.completions.create({
 			stream_options: { include_usage: true },
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			stream: true,
 			stop: ['.'],
@@ -95,7 +96,7 @@ function runOpenAITests(client: OpenAI) {
 
 	test('response_format json_object / json grammar', async () => {
 		const completion = await client.chat.completions.create({
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			response_format: { type: 'json_object' },
 			messages: [
@@ -114,7 +115,7 @@ function runOpenAITests(client: OpenAI) {
 
 	test('function call', async () => {
 		const completion = await client.chat.completions.create({
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			tools: [
 				{
@@ -148,7 +149,7 @@ function runOpenAITests(client: OpenAI) {
 	test('function call with streaming', async () => {
 		const completion = await client.beta.chat.completions.stream({
 			stream_options: { include_usage: true },
-			model: testModel,
+			model: chatModel,
 			temperature: 0,
 			tools: [
 				{
@@ -177,14 +178,23 @@ function runOpenAITests(client: OpenAI) {
 		expect(receivedToolCallChunk).toBe(true)
 		
 		const finalResult = await completion.finalChatCompletion()
-		// console.debug({ finalResult: JSON.stringify(finalResult) })
 		expect(finalResult.choices[0].message.tool_calls).toBeInstanceOf(Array)
 		expect(finalResult.choices[0].message.tool_calls![0].type).toBe('function')
 		expect(finalResult.choices[0].message.tool_calls![0].function.name).toBe('getRandomNumber')
 		expect(finalResult.choices[0].message.tool_calls![0].function.arguments).toBe('{"min":1,"max":6}')
-		expect(finalResult.model).toBe(testModel)
+		expect(finalResult.model).toBe(chatModel)
 		expect(finalResult.usage).toBeDefined()
-		// expect(finalResult.usage?.completion_tokens).toBeGreaterThan(0)
+		expect(finalResult.usage?.completion_tokens).toBeGreaterThan(0)
+	})
+	
+	test('embeddings.create', async () => {
+		const res = await client.embeddings.create({
+			model: embeddingsModel,
+			input: 'This is a test.',
+		})
+		expect(res.data).toBeInstanceOf(Array)
+		expect(res.data[0].embedding).toBeInstanceOf(Array)
+		expect(Number.isFinite(res.data[0].embedding[0])).toBe(true)
 	})
 }
 
@@ -199,12 +209,25 @@ suite('OpenAI API (node-llama-cpp)', () => {
 		server = await serveLLMs({
 			// log: 'debug',
 			listen: { port: 3000 },
-			inferenceConcurrency: 2,
+			concurrency: 2,
 			models: {
-				[testModel]: {
+				[embeddingsModel]: {
+					url: 'https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1/resolve/main/gguf/mxbai-embed-large-v1-f16.gguf',
+					minInstances: 1,
+					engine: 'node-llama-cpp',
+					task: 'embedding',
+					engineOptions: {
+						gpu: false,
+					}
+				},
+				[chatModel]: {
 					url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 					engine: 'node-llama-cpp',
-					minInstances: 2,
+					minInstances: 1,
+					task: 'inference',
+					engineOptions: {
+						gpu: 'vulkan',
+					}
 				},
 			},
 		})
@@ -228,12 +251,19 @@ suite('OpenAI API (gpt4all)', () => {
 		server = await serveLLMs({
 			// log: 'debug',
 			listen: { port: 3001 },
-			inferenceConcurrency: 2,
+			concurrency: 2,
 			models: {
-				[testModel]: {
-					url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
-					minInstances: 2,
+				[embeddingsModel]: {
+					url: 'https://gpt4all.io/models/gguf/nomic-embed-text-v1.f16.gguf',
+					minInstances: 1,
 					engine: 'gpt4all',
+					task: 'embedding',
+				},
+				[chatModel]: {
+					url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+					minInstances: 1,
+					engine: 'gpt4all',
+					task: 'inference',
 				}
 			},
 		})

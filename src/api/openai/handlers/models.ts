@@ -1,25 +1,28 @@
-import { IncomingMessage, ServerResponse } from 'node:http'
-import { existsSync, statSync } from 'node:fs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import type { OpenAI } from 'openai'
-import { LLMPool } from '#lllms/pool.js'
+import type { LLMServer } from '#lllms/server'
 
 // https://platform.openai.com/docs/api-reference/models/list
-export function createListModelsHandler(pool: LLMPool) {
+export function createModelsHandler(llms: LLMServer) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
-		const data: OpenAI.Model[] = Object.entries(pool.config.models).map(
-			([id, config]) => {
-				let created = 0
-				if (existsSync(config.file)) {
-					//https://stackoverflow.com/a/51442878
-					created = Math.floor(statSync(config.file).birthtime.getTime() / 1000)
-				}
-				// TODO possible to get created/owned_by from gguf metadata?
+		
+		const models = llms.store.getStatus()
+		const data: OpenAI.Model[] = Object.entries(models).map(
+			([id, info]) => {
+				const lastModDate = new Date(info.source.lastModified)
+				const created = Math.floor(lastModDate.getTime() / 1000)
+				
+				const dirPath = path.dirname(info.source.file);
+				const lastDir = path.basename(dirPath);
+				const baseName = path.basename(info.source.file);
+				const owned_by = info.engine + ':' + path.join(lastDir, baseName);
+
 				return {
 					object: 'model',
-					owned_by: path.basename(config.file),
 					id,
 					created,
+					owned_by,
 				}
 			},
 		)

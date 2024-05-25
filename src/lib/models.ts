@@ -9,7 +9,7 @@ export function validateModelId(id: string) {
 	}
 }
 
-export function resolveModelLocation(modelsPath: string, options: { file?: string; url?: string }) {
+export function resolveModelFile(modelsPath: string, options: { file?: string; url?: string }) {
 	if (!options.file && !options.url) {
 		throw new Error(`Must have either file or url`)
 	}

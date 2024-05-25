@@ -2,16 +2,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { LLMPool } from '#lllms/pool.js'
 import { LLMInstance } from '#lllms/instance.js'
-import { LLMOptions, LLMConfig, LLMRequest } from '#lllms/types/index.js'
+import { LLMOptions, LLMConfig, IncomingLLMRequest } from '#lllms/types/index.js'
 import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
-import { validateModelId, resolveModelLocation } from '#lllms/lib/models.js'
+import { validateModelId, resolveModelFile } from '#lllms/lib/models.js'
 import { loadGBNFGrammars } from '#lllms/lib/grammar.js'
 import { LLMStore } from '#lllms/store.js'
 
 export interface LLMServerOptions {
 	models: Record<string, LLMOptions>
-	inferenceConcurrency?: number
-	downloadConcurrency?: number
+	concurrency?: number
+	maxDownloads?: number
 	modelsPath?: string
 	log?: Logger | LogLevel
 }
@@ -50,39 +50,47 @@ export class LLMServer {
 				id: modelId,
 				minInstances: 0,
 				maxInstances: 1,
-				engine: 'node-llama-cpp',
 				engineOptions: {},
-				grammars: defaultGrammars,
 				...modelOptions,
-				file: resolveModelLocation(modelsPath, {
+				file: resolveModelFile(modelsPath, {
 					file: modelOptions.file,
 					url: modelOptions.url,
 				}),
 			}
+			if (modelOptions.task === 'inference') {
+				modelsWithDefaults[modelId].grammars = {
+					...defaultGrammars,
+					...modelOptions.grammars,
+				}
+			}
 		}
 		
 		this.store = new LLMStore({
-			downloadConcurrency: opts.downloadConcurrency ?? 1,
+			maxDownloads: opts.maxDownloads ?? 1,
 			log: this.logger,
 			modelsPath,
 			models: modelsWithDefaults,
 		})
 		this.pool = new LLMPool(
 			{
-				inferenceConcurrency: opts.inferenceConcurrency ?? 1,
+				concurrency: opts.concurrency ?? 1,
 				log: this.logger,
 				models: modelsWithDefaults,
 			},
 			this.prepareInstance.bind(this),
 		)
 	}
+	
+	getModelConfig(modelId: string) {
+		return this.pool.config.models[modelId]
+	}
 
 	async start() {
 		await Promise.all([this.store.init(), this.pool.init()])
 	}
 
-	async requestLLM(request: LLMRequest, signal?: AbortSignal) {
-		return this.pool.requestLLM(request, signal)
+	async requestModel(request: IncomingLLMRequest, signal?: AbortSignal) {
+		return this.pool.requestInstance(request, signal)
 	}
 
 	// gets called by the pool right before a new instance is created

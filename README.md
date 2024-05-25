@@ -1,19 +1,20 @@
 ## lllms
 
-Local Large Language Models. Providing an LLM instance pool and tools to run and host multiple models on any machine. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all).
+Local Large Language Models. Providing an instance pool and tools to run your LLM application on any machine. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all).
 
-Note that this is a dev and learning tool and not meant for production use. It is not secure, not scalable, and (currently) not (enough) optimized for performance. It is meant to be used on a local machine or a small server for personal use or small scale experiments. Prioritizing ease of use and simple APIs. For larger scale hosting see [these other solutions](#related-solutions).
+Power LLM applications on localhost. Host chatbots for a few users on minimal hardware. Prioritizing ease of use and simple APIs. For larger scale hosting see [these other solutions](#related-solutions). 
+
+Note that this is currently not secure (ie the HTTP API is probably DoS-able, only minimal input validation) and not designed to be scalable beyond a single machine. Misconfiguration or misuse can lead to process crashes or high memory usage. There are no additional safeguards in place and node.js memory limits will not apply.
 
 ⚠️ This package is currently in beta. Some APIs may change. Feel free to report any issues you encounter.
 
 ### Features
 
-- Run multiple large language models concurrently, adjust cache lifetimes and 
-- OpenAI spec API endpoints. See [#progress](#progress) for compatibility.
-- Cache loaded models and their contexts/sessions across stateless API requests.
+- Configure as many models as you want, download and cache them on demand to `~/.cache/lllms`. Or provide them as abs file paths.
+- Adjust the pools `concurrency`, and the models `maxInstances`, `ttl` and `contextSize` to fit your usecase. Can be tuned to either use no resources when idle or to always keep a model ready.
+- OpenAI spec API endpoints. See [#progress](#progress) for compatibility. Including a chat session cache that attempts to reuse existing sessions across stateless api requests.
 - BYO web server or use the provided express server and middleware.
-- Or use the LLM instance pool directly within your application.
-- Automatically downloads and caches GGUF's to `~/.cache/lllms`.
+- Or directly use the LLM instance pool within your application.
 
 ### Usage
 
@@ -30,27 +31,29 @@ import { serveLLMs } from 'lllms'
 // Starts a http server for up to two instances of phi3 and exposes them via openai API
 serveLLMs({
   // Limit how many completions can be processed concurrently. If its exceeded, requests
-  // will stall until a slot is free. Defaults to 1.
-  inferenceConcurrency: 2,
-  downloadConcurrency: 2, // How many models may be downloaded concurrently
-  // Where to write models to, defaults to `~/.cache/lllms`
+  // will stall until a model instance is released. Defaults to 1.
+  concurrency: 2,
+  maxDownloads: 2, // How many models to download at once. Defaults to 1.
+  // Where to cache models to. Defaults to `~/.cache/lllms`
   // modelsPath: '/path/to/models',
   models: {
     // Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-
-    // Only URL is required. Per default models will only be downloaded on demand.
+    // Required are `task`, `engine`, `url` and/or `file`.
     'phi3-mini-4k': {
+      task: 'inference', // Use 'inference' for completions, 'embedding' for embeddings.
+      engine: 'node-llama-cpp', // Choose between node-llama-cpp or gpt4all as bindings.
       // Model weights may be specified by file and/or url.
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-      // Absolute or relative to modelsPath. If it does not exist and a url is configured
+      // Abs file path or relative to modelsPath. If it does not exist and a url is configured
       // it will be downloaded to the given location.
       file: 'Phi-3-mini-4k-instruct-q4.gguf',
       // Checksums are optional and will be verified before loading the model if set.
       // md5: 'cb68b653b24dc432b78b02df76921a54',
       // sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
-      // Use these to control how much memory your LLMs may use.
+      // Use these to control resource usage.
       contextSize: 4096, // Maximum context size. Will be determined automatically if not set.
       maxInstances: 2, // How many active sessions you wanna be able to cache at the same time.
-      minInstances: 1, // To always keep at least one instance ready.
+      minInstances: 1, // To always keep at least one instance ready. Defaults to 0.
       ttl: 300, // Idle sessions will be disposed after this many seconds.
       // Set defaults for completions. These can be overridden per request.
       // If unset, default values depend on the engine.
@@ -73,13 +76,10 @@ serveLLMs({
       //     'yes': -100,
       //   },
       },
-      // Choose between node-llama-cpp or gpt4all as bindings to llama.cpp.
-      engine: 'node-llama-cpp',
+      // Available options and their defaults are engine specific.
       engineOptions: {
         // GPU will be used automatically, but models can be forced to always run on gpu by
-        // setting to true. Note that both engines currently do not support running multiple
-        // models on gpu at the same time. Requests will stall until a gpu slot is free and
-        // context cannot be reused if there are multiple sessions going on.
+        // setting `gpu` to true. Usually better to leave it unset. See limitations.
         // gpu: true,
         // batchSize: 512,
         cpuThreads: 4,
@@ -149,8 +149,8 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 | ------------------- | ------- | -------------- |
 | v1/chat/completions | ✅      | ✅             |
 | v1/completions      | ✅      | ✅             |
-| v1/embeddings       | ❌      | ❌             |
-| v1/models           | 🚧      |
+| v1/embeddings       | ✅      | ✅             |
+| v1/models           | ✅      | ✅             |
 
 | Spec params         | gpt4all | node-llama-cpp |
 | ------------------- | ------- | -------------- |
@@ -184,20 +184,25 @@ On the packaged server there is only one additional HTTP endpoint that is not pa
 
 | Feature               | gpt4all | node-llama-cpp |
 | --------------------- | ------- | -------------- |
-| Context cache         | ✅      | ✅             |
+| Chat context cache    | ✅      | ✅             |
 | System prompt         | ✅      | ✅             |
 | GPU                   | ✅      | ✅             |
 | Content part messages | ❌      | ❌             |
+| Grammar               | ❌      | ✅             |
 | Function Calling      | ❌      | ✅             |
 
 
 #### Limitations and Known Issues
 
+##### GPU Support limited to one model
+Both engines currently do not support running multiple models on gpu at the same time. This means if gpu is force enabled for a model requests will stall until a gpu slot is free. Otherwise more cpu instances will be spawned. And gpu will be used by the first instance that requests it.
+If you require closer control over which requests exactly use gpu, you can always configure a model multiple times with different parameters.
+
 ##### System Messages
 System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored.
 
-##### Context Cache
-Note that the current context cache implementation for the OpenAI API only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
+##### Chat Context Cache
+Note that the current context cache implementation only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
 
 ##### Function Calling
 Parallel function calls are currently not possible. `tool_choice` will always be `auto`.
@@ -222,12 +227,14 @@ Not in any particular order:
 - [x] Support configuring a timeout on completion processing
 - [x] Logit bias / Token bias support
 - [ ] Improve node-llama-cpp token usage counts / TokenMeter
+- [ ] Nicer grammar api / loading
 - [ ] Support preloading instances with context, like a long system message or few shot examples
 - [ ] Improve tests for longer conversations / context window shifting
-- [ ] Tests for request cancellation
+- [ ] Tests for request cancellation and timeouts
 - [ ] A mock engine implementing for testing and examples / Allow user to customize engine implementations
 - [ ] Embeddings APIs
 - [ ] Logprobs support
+- [ ] Improve offline support
 - [ ] Replace express with tinyhttp?
 - [ ] Script to generate a minimal dummy/testing GGUF https://github.com/ggerganov/llama.cpp/discussions/5038#discussioncomment-8181056
 - [ ] Allow configuring total RAM/VRAM usage (See https://github.com/ggerganov/llama.cpp/issues/4315 Check estimates?)

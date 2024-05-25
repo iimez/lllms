@@ -1,11 +1,15 @@
-import { IncomingMessage, ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import { LLMPool } from '#lllms/pool.js'
-import { ChatCompletionRequest, ChatCompletionFunction, ChatMessage } from '#lllms/types/index.js'
+import type { SchemaObject } from 'ajv'
+import type { LLMServer } from '#lllms/server.js'
+import {
+	ChatCompletionRequest,
+	ChatCompletionFunction,
+	ChatMessage,
+} from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
 import { finishReasons } from '../finishReasons.js'
-import { GbnfJsonObjectSchema } from 'node-llama-cpp'
 
 interface OpenAIChatCompletionParams
 	extends Omit<OpenAI.ChatCompletionCreateParamsStreaming, 'stream'> {
@@ -21,7 +25,7 @@ interface OpenAIChatCompletionChunk extends OpenAI.ChatCompletionChunk {
 
 // v1/chat/completions
 // https://platform.openai.com/docs/api-reference/chat/create
-export function createChatCompletionHandler(pool: LLMPool) {
+export function createChatCompletionHandler(llms: LLMServer) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
 		let args: OpenAIChatCompletionParams
 
@@ -42,7 +46,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			return
 		}
 
-		if (!pool.config.models[args.model]) {
+		if (!llms.getModelConfig(args.model)) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
@@ -84,24 +88,28 @@ export function createChatCompletionHandler(pool: LLMPool) {
 			if (typeof stop === 'string') {
 				stop = [stop]
 			}
-			
+
 			let completionGrammar: 'json' | undefined
 			if (args.response_format) {
 				if (args.response_format.type === 'json_object') {
 					completionGrammar = 'json'
 				}
 			}
-			
-			let completionFunctions: Record<string, ChatCompletionFunction> | undefined = undefined
-			
+
+			let completionFunctions:
+				| Record<string, ChatCompletionFunction>
+				| undefined = undefined
+
 			if (args.tools) {
-				const functionTools = args.tools.filter(tool => tool.type === 'function').map((tool) => {
-					return {
-						name: tool.function.name,
-						description: tool.function.description,
-						parameters: tool.function.parameters as GbnfJsonObjectSchema,
-					}
-				})
+				const functionTools = args.tools
+					.filter((tool) => tool.type === 'function')
+					.map((tool) => {
+						return {
+							name: tool.function.name,
+							description: tool.function.description,
+							parameters: tool.function.parameters as SchemaObject,
+						}
+					})
 				if (functionTools.length) {
 					if (!completionFunctions) {
 						completionFunctions = {}
@@ -114,8 +122,9 @@ export function createChatCompletionHandler(pool: LLMPool) {
 					}
 				}
 			}
-			
+
 			const completionReq = omitEmptyValues<ChatCompletionRequest>({
+				task: 'inference',
 				model: args.model,
 				// TODO support multimodal image content array
 				messages: args.messages.filter((m) => {
@@ -143,7 +152,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 				minP: args.min_p ? args.min_p : undefined,
 				topK: args.top_k ? args.top_k : undefined,
 			})
-			const { instance, release } = await pool.requestLLM(
+			const { instance, release } = await llms.requestModel(
 				completionReq,
 				controller.signal,
 			)
@@ -201,9 +210,9 @@ export function createChatCompletionHandler(pool: LLMPool) {
 							},
 						],
 					}
-					
-					if ('functionCalls' in result.message && result.message.functionCalls?.length) {
-						streamedToolCallChunk.choices[0].delta.tool_calls = result.message.functionCalls.map((call, index) => {
+
+					const toolCalls: OpenAI.ChatCompletionChunk.Choice.Delta.ToolCall[] =
+						result.message.functionCalls!.map((call, index) => {
 							return {
 								index,
 								id: call.id,
@@ -214,10 +223,8 @@ export function createChatCompletionHandler(pool: LLMPool) {
 								},
 							}
 						})
-					}
-					res.write(
-						`data: ${JSON.stringify(streamedToolCallChunk)}\n\n`,
-					)
+					streamedToolCallChunk.choices[0].delta.tool_calls = toolCalls
+					res.write(`data: ${JSON.stringify(streamedToolCallChunk)}\n\n`)
 				}
 				if (args.stream_options?.include_usage) {
 					const finalChunk: OpenAIChatCompletionChunk = {
@@ -242,9 +249,7 @@ export function createChatCompletionHandler(pool: LLMPool) {
 							total_tokens: result.totalTokens,
 						},
 					}
-					res.write(
-						`data: ${JSON.stringify(finalChunk)}\n\n`,
-					)
+					res.write(`data: ${JSON.stringify(finalChunk)}\n\n`)
 				}
 				res.write('data: [DONE]')
 				res.end()
@@ -274,17 +279,21 @@ export function createChatCompletionHandler(pool: LLMPool) {
 						total_tokens: result.totalTokens,
 					},
 				}
-				if ('functionCalls' in result.message && result.message.functionCalls?.length) {
-					response.choices[0].message.tool_calls = result.message.functionCalls.map((call) => {
-						return {
-							id: call.id,
-							type: 'function',
-							function: {
-								name: call.name,
-								arguments: JSON.stringify(call.parameters),
-							},
-						}
-					})
+				if (
+					'functionCalls' in result.message &&
+					result.message.functionCalls?.length
+				) {
+					response.choices[0].message.tool_calls =
+						result.message.functionCalls.map((call) => {
+							return {
+								id: call.id,
+								type: 'function',
+								function: {
+									name: call.name,
+									arguments: JSON.stringify(call.parameters),
+								},
+							}
+						})
 				}
 				res.writeHead(200, { 'Content-Type': 'application/json' })
 				res.end(JSON.stringify(response, null, 2))

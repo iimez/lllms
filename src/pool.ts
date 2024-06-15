@@ -43,7 +43,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	config: LLMPoolConfig
 	instances: Record<string, LLMInstance>
 	private evictionInterval?: NodeJS.Timeout
-	private logger: Logger
+	private log: Logger
 	private requestSequence: number = 0
 	private waitingRequests: number = 0 // TODO should keep requests around so connections can be canceled on dispose?
 	private gpuLock: boolean = false // TODO could derive this from "is there any instance that has gpu=true"
@@ -52,9 +52,9 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	constructor(opts: LLMPoolOptions, prepareInstance?: PrepareInstanceCallback) {
 		super()
 		if (opts.log) {
-			this.logger = typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
+			this.log = typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
 		} else {
-			this.logger = createLogger(LogLevels.warn)
+			this.log = createLogger(LogLevels.warn)
 		}
 		const models: Record<string, LLMConfig> = {}
 		for (const id in opts.models) {
@@ -128,7 +128,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				const spawnPromise = this.spawnInstance(model.id)
 				spawnPromises.push(spawnPromise)
 			} else {
-				this.logger(LogLevels.warn, 'Failed to spawn min instances for', {
+				this.log(LogLevels.warn, 'Failed to spawn min instances for', {
 					model: model.id,
 				})
 				break
@@ -138,7 +138,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	}
 
 	async dispose() {
-		this.logger(LogLevels.info, 'Disposing LLMPool')
+		this.log(LogLevels.info, 'Disposing LLMPool')
 		clearInterval(this.evictionInterval)
 		const disposePromises = Object.values(this.instances).map((instance) =>
 			instance.dispose(),
@@ -157,7 +157,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			).length
 			const minInstanceCount = this.config.models[instance.model].minInstances ?? 0
 			if (modelInstanceCount > minInstanceCount && instanceAge > instance.ttl && instance.status === 'idle') {
-				this.logger(LogLevels.info, 'Auto disposing instance', {
+				this.log(LogLevels.info, 'Auto disposing instance', {
 					instance: instance.id,
 				})
 				this.disposeInstance(instance).then(() => {
@@ -201,7 +201,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		// and prevent spawning more instances if the gpu is already locked.
 		const requiresGpu = modelConfig.engineOptions?.gpu === true
 		if (requiresGpu && this.gpuLock) {
-			this.logger(
+			this.log(
 				LogLevels.debug,
 				'Denied spawning instance because of GPU lock',
 				{
@@ -216,7 +216,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			(instance) => instance.model === modelId,
 		)
 		if (currentInstances.length >= maxInstances) {
-			this.logger(
+			this.log(
 				LogLevels.debug,
 				'Denied spawning instance because of maxInstances',
 				{
@@ -229,7 +229,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	}
 
 	private async disposeInstance(instance: LLMInstance) {
-		this.logger(LogLevels.debug, 'Disposing instance', {
+		this.log(LogLevels.debug, 'Disposing instance', {
 			instance: instance.id,
 		})
 		await instance.dispose()
@@ -260,7 +260,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		const instance = new LLMInstance(engineMethods, {
 			...model,
 			gpu: useGpu,
-			logger: this.logger,
+			logger: this.log,
 		})
 		this.instances[instance.id] = instance
 
@@ -268,13 +268,13 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			this.gpuLock = true
 		}
 		if (this.prepareInstance) {
-			this.logger(LogLevels.debug, 'Preparing instance', {
+			this.log(LogLevels.debug, 'Preparing instance', {
 				instance: instance.id,
 			})
 			try {
 				await this.prepareInstance(instance, options?.signal)
 			} catch (error) {
-				this.logger(LogLevels.error, 'Error preparing instance', {
+				this.log(LogLevels.error, 'Error preparing instance', {
 					model: modelId,
 					instance: instance.id,
 					error,
@@ -358,7 +358,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 						instance.lock(request)
 						resolve(instance)
 					} catch (error: any) {
-						this.logger(LogLevels.error, 'Error acquiring idle instance', {
+						this.log(LogLevels.error, 'Error acquiring idle instance', {
 							error,
 						})
 						reject(error)
@@ -388,7 +388,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					instance.status === 'idle' &&
 					instance.matchesContextState(request)
 				) {
-					this.logger(LogLevels.debug, 'Cache hit - reusing cached instance', {
+					this.log(LogLevels.debug, 'Cache hit - reusing cached instance', {
 						instance: instance.id,
 						sequence: request.sequence,
 					})
@@ -396,7 +396,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					return instance
 				}
 			}
-			this.logger(
+			this.log(
 				LogLevels.debug,
 				'Cache miss - continue acquiring model instance',
 				{ sequence: request.sequence },
@@ -411,7 +411,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				instance.status === 'idle' &&
 				!instance.hasContextState()
 			) {
-				this.logger(LogLevels.debug, 'Reusing instance with no context state', {
+				this.log(LogLevels.debug, 'Reusing instance with no context state', {
 					instance: instance.id,
 					sequence: request.sequence,
 				})
@@ -425,7 +425,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			const instance = await this.spawnInstance(request.model, {
 				emit: false,
 			})
-			this.logger(LogLevels.debug, 'Spawned instance acquired', {
+			this.log(LogLevels.debug, 'Spawned instance acquired', {
 				instance: instance.id,
 				sequence: request.sequence,
 			})
@@ -442,7 +442,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			const lruInstance = availableInstances.reduce((prev, current) =>
 				prev.lastUsed < current.lastUsed ? prev : current,
 			)
-			this.logger(LogLevels.debug, 'Reusing least recently used instance', {
+			this.log(LogLevels.debug, 'Reusing least recently used instance', {
 				instance: lruInstance.id,
 				sequence: request.sequence,
 			})
@@ -459,12 +459,12 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			)!
 
 			if (gpuInstance.model !== request.model) {
-				this.logger(LogLevels.debug, 'Awaiting GPU instance for', {
+				this.log(LogLevels.debug, 'Awaiting GPU instance for', {
 					model: request.model,
 					sequence: request.sequence,
 				})
 				const instance = await this.acquireGpuInstance(request, signal)
-				this.logger(LogLevels.debug, 'GPU instance acquired', {
+				this.log(LogLevels.debug, 'GPU instance acquired', {
 					instance: instance.id,
 					sequence: request.sequence,
 				})
@@ -487,12 +487,12 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		}
 
 		// wait until an instance of our model is released or spawned
-		this.logger(LogLevels.debug, 'Awaiting idle instance for', {
+		this.log(LogLevels.debug, 'Awaiting idle instance for', {
 			model: request.model,
 			sequence: request.sequence,
 		})
 		const instance = await this.acquireIdleInstance(request, signal)
-		this.logger(LogLevels.debug, 'Idle instance acquired', {
+		this.log(LogLevels.debug, 'Idle instance acquired', {
 			instance: instance.id,
 			sequence: request.sequence,
 		})
@@ -520,11 +520,11 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			sequence: requestSequence,
 		}
 		if (!this.config.models[request.model]) {
-			this.logger(LogLevels.error, `Model not found: ${request.model}`)
+			this.log(LogLevels.error, `Model not found: ${request.model}`)
 			throw new Error(`Model not found: ${request.model}`)
 		}
 
-		this.logger(LogLevels.info, 'Incoming request for', {
+		this.log(LogLevels.info, 'Incoming request for', {
 			model: request.model,
 			sequence: request.sequence,
 		})
@@ -562,7 +562,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			return new Promise<void>((resolve, reject) => {
 				process.nextTick(() => {
 					resolveQueueTask({ instance, request })
-					this.logger(LogLevels.info, 'Task completed, releasing', {
+					this.log(LogLevels.info, 'Task completed, releasing', {
 						instance: instance.id,
 						sequence: request.sequence,
 					})

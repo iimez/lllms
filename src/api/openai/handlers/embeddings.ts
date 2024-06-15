@@ -55,7 +55,6 @@ export function createEmbeddingsHandler(llms: LLMServer) {
 			}
 
 			const embeddingReq = omitEmptyValues<EmbeddingRequest>({
-				task: 'embedding',
 				model: args.model,
 				input: args.input as string,
 			})

@@ -99,7 +99,6 @@ export interface ChatCompletionRequest extends CompletionRequestBase {
 }
 
 export interface EmbeddingRequest {
-	task: 'embedding'
 	model: string
 	input: string | string[] | number[] | number[][];
 	dimensions?: number

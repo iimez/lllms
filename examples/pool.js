@@ -46,7 +46,7 @@ async function createCompletion(prompt) {
 		temperature: 3,
 		maxTokens: 200,
 	}
-	const { instance, release } = await pool.requestLLM(req)
+	const { instance, release } = await pool.requestInstance(req)
 	const completion = instance.createCompletion(req)
 	const completionBegin = process.hrtime.bigint()
 	const result = await completion.process()

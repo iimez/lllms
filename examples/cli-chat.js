@@ -12,6 +12,7 @@ const pool = new LLMPool(
 		log: 'debug',
 		models: {
 			'phi3-mini-4k': {
+				task: 'inference',
 				// note that this file needs to be downloaded manually when using the pool directly.
 				// file: path.resolve(os.homedir(), '.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf'),
 				// engine: 'gpt4all',
@@ -53,7 +54,7 @@ while (true) {
 		messages,
 	}
 	// ... both to decide which instance to use ...
-	const { instance, release } = await pool.requestLLM(req)
+	const { instance, release } = await pool.requestInstance(req)
 	// ... and to create the completion
 	const completion = instance.createChatCompletion(req)
 	process.stdout.write(chalk.bold(chalk.dim('model > ')))

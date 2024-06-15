@@ -3,9 +3,10 @@ import { startLLMs } from '../dist/index.js'
 
 const llms = startLLMs({
 	log: 'info',
-	inferenceConcurrency: 2,
+	concurrency: 2,
 	models: {
 		'phi3-mini-4k': {
+			task: 'inference',
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 			engine: 'gpt4all',
 			maxInstances: 2,
@@ -24,7 +25,7 @@ const httpServer = http.createServer((req, res) => {
 		})
 		req.on('end', async () => {
 			const req = JSON.parse(body)
-			const { instance, release } = await llms.requestLLM(req)
+			const { instance, release } = await llms.requestModel(req)
 			const completion = instance.createChatCompletion(req)
 			const result = await completion.process()
 			release()

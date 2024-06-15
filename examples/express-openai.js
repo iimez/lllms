@@ -11,9 +11,10 @@ import { createExpressMiddleware } from '../dist/http.js'
 const llms = new LLMServer({
 	// Default model path is ~/.cache/lllms.
 	// modelsPath: path.resolve(os.homedir(), '.cache/models'),
-	inferenceConcurrency: 2,
+	concurrency: 2,
 	models: {
 		'phi3-mini-4k': {
+			task: 'inference',
 			url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
 			engine: 'node-llama-cpp',
 			maxInstances: 2,
@@ -38,7 +39,7 @@ const openai = new OpenAI({
 const completion = await openai.chat.completions.create({
 	model: 'phi3-mini-4k',
 	messages: [{ role: 'user', content: 'Lets count to three!' }],
-  stop: ['Two'],
+	stop: ['Two'],
 })
 
 console.log(JSON.stringify(completion, null, 2))

@@ -1,6 +1,6 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.3",
+	"version": "1.0.0-beta.4",
 	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
@@ -18,7 +18,7 @@
 		"upgrade": "npx npm-check-updates -i",
 		"reinstall": "rimraf ./node_modules ./package-lock.json && npm install",
 		"prebuild": "rimraf ./dist",
-		"build": "tsc --build tsconfig.release.json --force && cp -r src/grammars dist/grammars",
+		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json && cp -r src/grammars dist/grammars",
 		"test": "vitest --run --test-timeout=-1 --pool=forks --maxConcurrency=1",
 		"test:openai": "vitest tests/openai.test.ts --test-timeout=-1 --pool=forks",
 		"test:gpu": "vitest tests/gpu.test.ts --test-timeout=-1 --pool=forks",
@@ -71,6 +71,7 @@
 		"cross-env": "^7.0.3",
 		"openai": "^4.47.1",
 		"supertest": "^7.0.0",
+		"tsc-alias": "^1.8.10",
 		"typescript": "^5.4.5",
 		"vite-tsconfig-paths": "^4.3.2",
 		"vitest": "^1.6.0"

@@ -152,7 +152,11 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		for (const key in this.instances) {
 			const instance = this.instances[key]
 			const instanceAge = (now - instance.lastUsed) / 1000
-			if (instanceAge > instance.ttl && instance.status === 'idle') {
+			const modelInstanceCount = Object.values(this.instances).filter(
+				(i) => i.model === instance.model,
+			).length
+			const minInstanceCount = this.config.models[instance.model].minInstances ?? 0
+			if (modelInstanceCount > minInstanceCount && instanceAge > instance.ttl && instance.status === 'idle') {
 				this.logger(LogLevels.info, 'Auto disposing instance', {
 					instance: instance.id,
 				})

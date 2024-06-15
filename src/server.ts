@@ -4,14 +4,13 @@ import { LLMPool } from '#lllms/pool.js'
 import { LLMInstance } from '#lllms/instance.js'
 import { LLMOptions, LLMConfig, IncomingLLMRequest } from '#lllms/types/index.js'
 import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
-import { validateModelId, resolveModelFile } from '#lllms/lib/models.js'
+import { validateModelId, resolveModelFile, resolveModelUrl } from '#lllms/lib/models.js'
 import { loadGBNFGrammars } from '#lllms/lib/grammar.js'
 import { LLMStore } from '#lllms/store.js'
 
 export interface LLMServerOptions {
 	models: Record<string, LLMOptions>
 	concurrency?: number
-	maxDownloads?: number
 	modelsPath?: string
 	log?: Logger | LogLevel
 }
@@ -25,13 +24,13 @@ export function startLLMs(opts: LLMServerOptions) {
 export class LLMServer {
 	pool: LLMPool
 	store: LLMStore
-	logger: Logger
+	log: Logger
 
 	constructor(opts: LLMServerOptions) {
 		if (opts.log) {
-			this.logger = typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
+			this.log = typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
 		} else {
-			this.logger = createLogger(LogLevels.warn)
+			this.log = createLogger(LogLevels.warn)
 		}
 		const modelsPath =
 			opts?.modelsPath || path.resolve(os.homedir(), '.cache/lllms')
@@ -46,15 +45,17 @@ export class LLMServer {
 			if (!modelOptions.file && !modelOptions.url) {
 				throw new Error(`Model ${modelId} must have either file or url`)
 			}
+			const modelUrl = modelOptions.url ? resolveModelUrl(modelOptions.url) : undefined
 			modelsWithDefaults[modelId] = {
 				id: modelId,
 				minInstances: 0,
 				maxInstances: 1,
 				engineOptions: {},
 				...modelOptions,
+				url: modelUrl,
 				file: resolveModelFile(modelsPath, {
 					file: modelOptions.file,
-					url: modelOptions.url,
+					url: modelUrl,
 				}),
 			}
 			if (modelOptions.task === 'inference') {
@@ -66,15 +67,14 @@ export class LLMServer {
 		}
 		
 		this.store = new LLMStore({
-			maxDownloads: opts.maxDownloads ?? 1,
-			log: this.logger,
+			log: this.log,
 			modelsPath,
 			models: modelsWithDefaults,
 		})
 		this.pool = new LLMPool(
 			{
+				log: this.log,
 				concurrency: opts.concurrency ?? 1,
-				log: this.logger,
 				models: modelsWithDefaults,
 			},
 			this.prepareInstance.bind(this),

@@ -13,13 +13,16 @@ export async function runStopTriggerTest(llms: LLMServer) {
 		stop: ['OK'],
 		maxTokens: 10,
 	})
-	expect(chat.result.finishReason).toBe('stopGenerationTrigger')
+	console.debug({
+		response: chat.result.message.content,
+	})
+	expect(chat.result.finishReason).toBe('stopTrigger')
 	expect(chat.result.message.content).toBe('')
 	const completion = await createCompletion(llms, {
 		prompt: "Let's count to four. One, two,",
 		stop: [' three'],
 		maxTokens: 10,
 	})
-	expect(completion.result.finishReason).toBe('stopGenerationTrigger')
+	expect(completion.result.finishReason).toBe('stopTrigger')
 	expect(completion.result.text).toBe('')
 }

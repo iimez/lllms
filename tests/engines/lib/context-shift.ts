@@ -9,7 +9,7 @@ export async function runContextShiftTest(
 	model: string = 'test',
 ) {
 	
-	// Turn 1
+	// Turn 1: Tell the model a fact to remember so we can later make sure that a shift occured.
 	const messages: ChatMessage[] = [
 		{
 			role: 'system',
@@ -27,20 +27,21 @@ export async function runContextShiftTest(
 		messages,
 		stop: ['OK'],
 	})
-	console.debug({ response1: response1.result.message.content })
 	const instanceId1 = parseInstanceId(response1.handle.id)
-	
-	// Turn 2
+
+	// Turn 2: Ask the model to start generating text about an animal with a specific name
+	// The animal name will later be used to check if the context shift messed up the output.
+	const animalName = 'Nedwick'
 	messages.push(response1.result.message, {
 		role: 'user',
-		content: 'Now, I\'d like you to create a concept for a new animal. Please provide a realistic outline of a made up animal, including its social structures, appearance, habitat, origins and diet.',
+		content: `Now, I\'d like you to create a concept for a new animal called "${animalName}". Please provide a realistic outline of a made up animal, including its social structures, appearance, habitat, origins and diet.`,
 	})
 	const response2 = await createChatCompletion(llms, {
 		temperature: 1,
 		messages,
-		maxTokens: 4096,
+		maxTokens: 1024,
 	})
-	console.debug({ response2: response2.result.message.content })
+	console.debug({ turn2: response2.result.message.content })
 	const instanceId2 = parseInstanceId(response2.handle.id)
 	expect(instanceId1).toBe(instanceId2)
 	
@@ -49,16 +50,20 @@ export async function runContextShiftTest(
 	const elaborateOn = async (field: string) => {
 		messages.push({
 			role: 'user',
-			content: `Elaborate on its ${field}.`,
+			content: `Elaborate on its ${field}. Afterwards, make sure you end your response with 'OK'.`,
 		})
 		const response = await createChatCompletion(llms, {
 			temperature: 1,
 			messages,
-			maxTokens: 4096,
-		})
-		console.debug({ response: response.result.message.content })
+			maxTokens: 1024,
+		}, 60000)
+		console.debug({ field, response: response.result.message.content })
 		const instanceId = parseInstanceId(response.handle.id)
 		expect(instanceId1).toBe(instanceId)
+		// make sure the model gave proper output throughout its elaboration
+		expect(response.result.message.content?.substring(-6)).toMatch(/OK/i)
+		// make sure its still about the same animal
+		expect(response.result.message.content).toMatch(new RegExp(animalName, 'i'))
 		messages.push(response.result.message)
 	}
 	
@@ -74,7 +79,8 @@ export async function runContextShiftTest(
 	})
 	const response3 = await createChatCompletion(llms, {
 		messages,
-		maxTokens: 4096,
+		maxTokens: 1024,
 	})
-	console.debug({ response3: response3.result.message.content })
+	console.debug({ shiftCheck: response3.result.message.content })
+	expect(response3.result.message.content).not.toMatch(/platypus/i)
 }

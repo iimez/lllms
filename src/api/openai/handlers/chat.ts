@@ -124,7 +124,6 @@ export function createChatCompletionHandler(llms: LLMServer) {
 			}
 
 			const completionReq = omitEmptyValues<ChatCompletionRequest>({
-				task: 'inference',
 				model: args.model,
 				// TODO support multimodal image content array
 				messages: args.messages.filter((m) => {

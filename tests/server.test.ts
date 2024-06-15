@@ -7,10 +7,11 @@ import { createExpressMiddleware } from '#lllms/http.js'
 const testModel = 'phi3-mini-4k'
 
 const testConfig: LLMServerOptions = {
-	inferenceConcurrency: 1,
+	concurrency: 1,
 	models: {
 		[testModel]: {
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+			task: 'inference',
 			engine: 'gpt4all',
 			minInstances: 1,
 		},

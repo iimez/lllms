@@ -10,7 +10,10 @@ import {
 
 const models: Record<string, LLMOptions> = {
 	test: {
-		url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+		task: 'inference',
+		url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+		md5: 'c87ad09e1e4c8f9c35a5fcef52b6f1c9',
+		// url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 		// md5: 'f8347badde9bfc2efbe89124d78ddaf5',
 		engine: 'gpt4all',
 		maxInstances: 2,
@@ -19,7 +22,7 @@ const models: Record<string, LLMOptions> = {
 
 suite('Features', () => {
 	const llms = new LLMServer({
-		log: 'debug',
+		// log: 'debug',
 		models,
 	})
 
@@ -40,7 +43,10 @@ suite('Features', () => {
 })
 
 suite('Context / Sessions', () => {
-	const llms = new LLMServer({ models })
+	const llms = new LLMServer({
+		// log: 'debug',
+		models,
+	})
 
 	beforeAll(async () => {
 		await llms.start()

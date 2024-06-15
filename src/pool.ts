@@ -3,14 +3,16 @@ import EventEmitter3 from 'eventemitter3'
 import { engines } from '#lllms/engines/index.js'
 import { LLMInstance } from '#lllms/instance.js'
 import {
-	CompletionRequest,
-	ChatCompletionRequest,
 	LLMConfig,
 	IncomingLLMRequest,
 	LLMRequest,
-	LLMTaskType,
 } from '#lllms/types/index.js'
 import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
+
+export interface LLMInstanceHandle {
+	instance: LLMInstance
+	release: () => Promise<void>
+}
 
 interface LLMTask {
 	instance: LLMInstance
@@ -507,7 +509,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	}
 
 	// requests an language model instance from the pool
-	async requestInstance(incomingRequest: IncomingLLMRequest, signal?: AbortSignal) {
+	async requestInstance(incomingRequest: IncomingLLMRequest, signal?: AbortSignal): Promise<LLMInstanceHandle> {
 		const requestSequence = this.getRequestSequence()
 		const request = {
 			...incomingRequest,

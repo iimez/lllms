@@ -26,8 +26,8 @@ const getLocationWeather: ChatCompletionFunction<GetLocationWeatherParams> = {
 	},
 }
 
-const getCurrentLocation = {
-	description: 'Get the current location',
+const getUserLocation = {
+	description: 'Get the current user location',
 	handler: async () => {
 		return 'New York, New York, United States'
 	},
@@ -37,15 +37,20 @@ export async function runFunctionCallTest(llms: LLMServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
-			content: "What's the weather like today?",
+			content: "What's the weather like today? (use the getUserLocation function to get my location)",
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {
 		functions: {
-			getCurrentLocation,
+			getUserLocation,
 			getLocationWeather,
 		},
+		temperature: 0.5,
 		messages,
+	})
+	console.debug({
+		turn1: turn1.result.message.content,
+		functionCalls: turn1.result.message.functionCalls,
 	})
 	expect(turn1.result.message.functionCalls).toBeDefined()
 	expect(turn1.result.message.functionCalls!.length).toBe(1)
@@ -55,16 +60,15 @@ export async function runFunctionCallTest(llms: LLMServer) {
 		callId: turn1FunctionCall.id,
 		role: 'function',
 		name: turn1FunctionCall.name,
-		content: 'The weather today is cloudy with a high chance of raining fish.',
+		content: 'New York today: Cloudy, 21°, high chance of raining fish.',
 	})
 	const turn2 = await createChatCompletion(llms, {
 		functions: {
-			getCurrentLocation,
+			getUserLocation,
 			getLocationWeather,
 		},
 		messages,
 	})
-
 	expect(turn2.result.message.content).toMatch(/fish/)
 }
 
@@ -95,8 +99,7 @@ export async function runParallelFunctionCallTest(llms: LLMServer) {
 			return num.toString()
 		},
 	}
-	
-	// this fails if the model starts talking after the first roll
+
 	const turn1 = await createChatCompletion(llms, {
 		functions: { getRandomNumber },
 		messages: [
@@ -106,25 +109,7 @@ export async function runParallelFunctionCallTest(llms: LLMServer) {
 			},
 		]
 	})
-	/*
-	lastMessage {
-		"type": "model",
-		"response": [
-			{
-				"type": "functionCall",
-				"name": "getRandomNumber",
-				"description": "Generate a random integer in given range",
-				"params": {
-					"min": 1,
-					"max": 6
-				},
-				"result": "3",
-				"raw": "\n<|from|>assistant\n<|recipient|>getRandomNumber\n<|content|>{\"min\": 1, \"max\": 6}\n<|from|>getRandomNumber\n<|recipient|>all\n<|content|>\"3\"\n"
-			},
-			" The first roll resulted in a 3. Let's proceed with the second roll.\n<|from|> assistant\n<|recipient|> getRandomNumber\n<|content|> {\"min\": 1, \"max\": 6}"
-		]
-	}
-	*/
+
 	// console.debug({
 	// 	turn1: turn1.result.message,
 	// })

@@ -30,24 +30,26 @@ import { serveLLMs } from 'lllms'
 
 // Starts a http server for up to two instances of phi3 and exposes them via openai API
 serveLLMs({
-  // Limit how many completions can be processed concurrently. If its exceeded, requests
+  // Limit how many instances can be used concurrently. If its exceeded, requests
   // will stall until a model instance is released. Defaults to 1.
   concurrency: 2,
-  maxDownloads: 2, // How many models to download at once. Defaults to 1.
   // Where to cache models to. Defaults to `~/.cache/lllms`
   // modelsPath: '/path/to/models',
   models: {
     // Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-
     // Required are `task`, `engine`, `url` and/or `file`.
     'phi3-mini-4k': {
-      task: 'inference', // Use 'inference' for completions, 'embedding' for embeddings.
+      task: 'inference', // Use 'inference' or 'embedding'
       engine: 'node-llama-cpp', // Choose between node-llama-cpp or gpt4all as bindings.
       // Model weights may be specified by file and/or url.
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
       // Abs file path or relative to modelsPath. If it does not exist and a url is configured
       // it will be downloaded to the given location.
       file: 'Phi-3-mini-4k-instruct-q4.gguf',
-      // Checksums are optional and will be verified before loading the model if set.
+      // When to download and verify models weights. Defaults to 'on-demand'.
+      // "blocking" = download on startup, "async" = download on startup but don't block.
+      prepare: 'on-demand', 
+      // Checksums are optional and will be verified when preparing the model if set.
       // md5: 'cb68b653b24dc432b78b02df76921a54',
       // sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
       // Use these to control resource usage.
@@ -205,7 +207,7 @@ System role messages are supported only as the first message in a chat completio
 Note that the current context cache implementation only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
 
 ##### Function Calling
-Parallel function calls are currently not possible. `tool_choice` will always be `auto`.
+Parallel function calls are working with node-llama-cpp + [functionary models](https://functionary.meetkai.com/). Other models, like llama3 instruct, also work with function calling (but no parallel calls). `tool_choice` can currently not be controlled and will always be `auto`.
 
 #### TODO / Roadmap
 
@@ -226,13 +228,16 @@ Not in any particular order:
 - [x] Improve template code / stop trigger support
 - [x] Support configuring a timeout on completion processing
 - [x] Logit bias / Token bias support
-- [ ] Improve node-llama-cpp token usage counts / TokenMeter
+- [x] Improve tests for longer conversations / context window shifting
+- [x] Embeddings APIs
+- [x] Improve node-llama-cpp token usage counts / TokenMeter
+- [x] Reuse download logic from node-llama-cpp to support split ggufs.
+- [ ] Document function call handler usage
 - [ ] Nicer grammar api / loading
 - [ ] Support preloading instances with context, like a long system message or few shot examples
-- [ ] Improve tests for longer conversations / context window shifting
 - [ ] Tests for request cancellation and timeouts
+- [ ] Improve tests for embeddings
 - [ ] A mock engine implementing for testing and examples / Allow user to customize engine implementations
-- [ ] Embeddings APIs
 - [ ] Logprobs support
 - [ ] Improve offline support
 - [ ] Replace express with tinyhttp?

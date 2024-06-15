@@ -7,23 +7,21 @@ import type {
 import type { Logger } from '#lllms/lib/logger.js'
 import type { SchemaObject } from 'ajv'
 
-// export type LLMTaskType = 'completion' | 'chat' | 'embedding'
 export type LLMTaskType = 'inference' | 'embedding'
-
-export interface CompletionChunk {
-	tokens: number[]
-	text: string
-}
 
 export type CompletionFinishReason =
 	| 'maxTokens'
 	| 'functionCall'
 	| 'eogToken'
-	| 'stopGenerationTrigger'
-	| 'customStopTrigger'
+	| 'stopTrigger'
 	| 'abort'
 	| 'cancel'
 	| 'timeout'
+
+export interface CompletionChunk {
+	tokens: number[]
+	text: string
+}
 
 export interface CompletionProcessingOptions {
 	timeout?: number
@@ -84,7 +82,6 @@ export interface CompletionRequestBase extends CompletionParams {
 }
 
 export interface CompletionRequest extends CompletionRequestBase {
-	task: 'inference'
 	prompt?: string
 }
 
@@ -95,7 +92,6 @@ export interface ChatCompletionFunction<TParams = any> {
 }
 
 export interface ChatCompletionRequest extends CompletionRequestBase {
-	task: 'inference'
 	systemPrompt?: string
 	messages: ChatMessage[]
 	grammar?: string
@@ -125,6 +121,7 @@ export interface LLMOptionsBase {
 	file?: string
 	engine: EngineType
 	task: LLMTaskType
+	prepare?: 'blocking' | 'async' | 'on-demand'
 	contextSize?: number
 	minInstances?: number
 	maxInstances?: number

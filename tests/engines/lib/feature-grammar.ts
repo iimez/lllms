@@ -22,11 +22,11 @@ export async function runGrammarTest(llms: LLMServer) {
 	const turn1Data = JSON.parse(turn1.result.message.content!)
 	expect(turn1Data.test).toMatch(/test/)
 	expect(turn1Data.cats).toBeInstanceOf(Array)
-	
-	const secondCat = turn1Data.cats[1]
+
+	const firstCat = turn1Data.cats[0]
 	messages.push({
 		role: 'user',
-		content: 'Write a haiku on the second cat in the array.',
+		content: 'Write a haiku using the name of the first cat in the array.',
 	})
 	const turn2 = await createChatCompletion(llms, {
 		messages,
@@ -34,6 +34,6 @@ export async function runGrammarTest(llms: LLMServer) {
 	// console.debug({
 	// 	turn2: turn2.result.message.content,
 	// })
-	expect(turn2.result.message.content).toContain(secondCat)
+	expect(turn2.result.message.content).toContain(firstCat)
 	
 }

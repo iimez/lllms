@@ -1,6 +1,6 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.2",
+	"version": "1.0.0-beta.3",
 	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
@@ -24,7 +24,6 @@
 		"test:gpu": "vitest tests/gpu.test.ts --test-timeout=-1 --pool=forks",
 		"test:gpt4all": "vitest tests/engines/gpt4all.test.ts --test-timeout=-1 --pool=forks",
 		"test:llama": "vitest tests/engines/node-llama-cpp.test.ts --test-timeout=-1 --pool=forks",
-		"test:llama:minimal": "vitest tests/engines/node-llama-cpp-minimal.test.ts --test-timeout=-1 --pool=forks",
 		"test:server": "vitest tests/server.test.ts --test-timeout=-1 --pool=forks",
 		"prewatch": "rimraf ./dist",
 		"watch": "tsc -w -p tsconfig.release.json",
@@ -59,7 +58,7 @@
 		"ipull": "^3.2.2",
 		"is-unicode-supported": "^2.0.0",
 		"nanoid": "^5.0.7",
-		"node-llama-cpp": "^3.0.0-beta.22",
+		"node-llama-cpp": "^3.0.0-beta.27",
 		"ora": "^8.0.1",
 		"p-queue": "^8.0.1"
 	},

@@ -15,15 +15,13 @@ import {
 
 const models: Record<string, LLMOptions> = {
 	test: {
-		// TODO has issues with templates.
-		// url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-		// sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
-		// url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-		// sha256: '19ded996fe6c60254dc7544d782276eff41046ed42aa5f2d0005dc457e5c0895',
-		url: 'https://huggingface.co/meetkai/functionary-small-v2.4-GGUF/resolve/main/functionary-small-v2.4.Q4_0.gguf',
-		sha256: 'a092a87db6251a10a61ef4b91f30eb1d53c1660e0ddd1977832175ba589e2d58',
-		// url: 'https://huggingface.co/NousResearch/Hermes-2-Pro-Llama-3-8B-GGUF/resolve/main/Hermes-2-Pro-Llama-3-8B-Q4_K_M.gguf',
-		// sha256: '10c52a4820137a35947927be741bb411a9200329367ce2590cc6757cd98e746c',
+		task: 'inference',
+		// on llama3 instruct everything but parallel function calls works.
+		url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
+		sha256: 'c57380038ea85d8bec586ec2af9c91abc2f2b332d41d6cf180581d7bdffb93c1',
+		// on functionary everything but the context shift test works.
+		// url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
+		// sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
 		engine: 'node-llama-cpp',
 		contextSize: 2048,
 		maxInstances: 2,
@@ -61,7 +59,10 @@ suite('Features', () => {
 	
 	test('function calls', async () => {
 		await runFunctionCallTest(llms)
-		// await runParallelFunctionCallTest(llms)
+	})
+	
+	test('parallel function calls', async () => {
+		await runParallelFunctionCallTest(llms)
 	})
 })
 
@@ -82,7 +83,7 @@ suite('Context / Sessions', () => {
 	it('should not leak when handling multiple sessions', async () => {
 		await runContextLeakTest(llms)
 	})
-	it('context shift', async () => {
+	it('should do a context shift', async () => {
 		await runContextShiftTest(llms)
 	})
 })

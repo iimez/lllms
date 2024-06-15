@@ -1,6 +1,8 @@
 import { promises as fs, existsSync, statSync } from 'node:fs'
+import path from 'node:path'
 import PQueue from 'p-queue'
-import { downloadFile, DownloadEngineNodejs } from 'ipull'
+import { ModelDownloader, createModelDownloader } from 'node-llama-cpp'
+import { FormattedStatus } from 'ipull'
 import { LLMConfig } from '#lllms/types/index.js'
 import { GGUFMeta, readGGUFMetaFromFile } from '#lllms/lib/gguf.js'
 import { calcFileChecksums } from '#lllms/lib/calcFileChecksums.js'
@@ -9,7 +11,8 @@ import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
 interface DownloadTask {
 	status: 'pending' | 'processing' | 'completed' | 'error'
 	model: string
-	handle: DownloadEngineNodejs
+	handle: ModelDownloader
+	progress: FormattedStatus | null
 }
 
 interface LLMMeta {
@@ -22,7 +25,6 @@ export interface LLMStoreModelConfig extends LLMConfig {
 }
 
 export interface LLMMStoreOptions {
-	maxDownloads?: number
 	modelsPath: string,
 	models: Record<string, LLMConfig>,
 	log?: Logger | LogLevel
@@ -33,18 +35,18 @@ export class LLMStore {
 	downloadTasks: DownloadTask[] = []
 	modelsPath: string
 	models: Record<string, LLMStoreModelConfig> = {}
-	private logger: Logger
+	private log: Logger
 
 	constructor(
 		options: LLMMStoreOptions,
 	) {
 		if (options.log) {
-			this.logger = typeof options.log === 'string' ? createLogger(options.log) : options.log
+			this.log = typeof options.log === 'string' ? createLogger(options.log) : options.log
 		} else {
-			this.logger = createLogger(LogLevels.warn)
+			this.log = createLogger(LogLevels.warn)
 		}
 		this.downloadQueue = new PQueue({
-			concurrency: options.maxDownloads ?? 1,
+			concurrency: 1,
 		})
 		this.modelsPath = options.modelsPath
 		this.models = options.models
@@ -54,6 +56,15 @@ export class LLMStore {
 		if (!existsSync(this.modelsPath)) {
 			await fs.mkdir(this.modelsPath, { recursive: true })
 		}
+		
+		for (const modelId in this.models) {
+			const model = this.models[modelId]
+			if (model.prepare === 'blocking') {
+				await this.prepareModel(modelId)
+			} else if (model.prepare === 'async') {
+				this.prepareModel(modelId)
+			}
+		}
 	}
 
 	getStatus() {
@@ -62,13 +73,15 @@ export class LLMStore {
 				task.model,
 				{
 					status: task.status,
-					progress: {
-						percentage: task.handle.status.percentage,
-						speed: task.handle.status.speed,
-						speedFormatted: task.handle.status.formattedSpeed,
-						timeLeft: task.handle.status.timeLeft,
-						timeLeftFormatted: task.handle.status.formatTimeLeft,
-					},
+					totalBytes: task.handle.totalSize,
+					downloadedBytes: task.handle.downloadedSize,
+					progress: task.progress ? {
+						percentage: task.progress.percentage,
+						speed: task.progress.speed,
+						formattedSpeed: task.progress.formattedSpeed,
+						timeLeft: task.progress.timeLeft,
+						formatTimeLeft: task.progress.formatTimeLeft,
+					} : null,
 				},
 			]),
 		)
@@ -106,6 +119,8 @@ export class LLMStore {
 		return modelStatus
 	}
 
+	// TODO pull out (file: string, checksums: Record<string, string>) => Promise<Meta>
+	// any split metadata reading logic
 	async validateModel(modelId: string) {
 		const model = this.models[modelId]
 		const ggufMeta = await readGGUFMetaFromFile(model.file)
@@ -156,6 +171,7 @@ export class LLMStore {
 
 	async prepareModel(modelId: string, signal?: AbortSignal) {
 		const model = this.models[modelId]
+		this.log(LogLevels.info, `Preparing model ${modelId}`, { model: modelId })
 		// make sure the model files exists, download if possible.
 		if (!existsSync(model.file) && model.url) {
 			await this.downloadModel(modelId, signal)
@@ -179,12 +195,21 @@ export class LLMStore {
 		const existingTask = this.downloadTasks.find((t) => t.model === modelId)
 		if (existingTask) {
 			return new Promise<void>((resolve, reject) => {
-				existingTask.handle.once('completed', () => resolve())
-				existingTask.handle.once('error', (error) => reject(error))
+				const onCompleted = (task: DownloadTask) => {
+					if (task.model === modelId) {
+						if (task.status === 'error') {
+							reject(new Error(`Download failed for ${modelId}`))
+						} else {
+							this.downloadQueue.off('completed', onCompleted)
+							resolve()
+						}
+					}
+				}
+				this.downloadQueue.on('completed', onCompleted)
 			})
 		}
 
-		this.logger(LogLevels.info, `Downloading ${modelId}`, {
+		this.log(LogLevels.info, `Downloading ${modelId}`, {
 			url: model.url,
 			file: model.file,
 		})
@@ -192,32 +217,45 @@ export class LLMStore {
 		const task: DownloadTask = {
 			model: modelId,
 			status: 'pending',
-			handle: await downloadFile({
-				url: model.url,
-				savePath: model.file,
-				// parallelStreams: 3 // Number of parallel connections (default: 3)
+			progress: null,
+			handle: await createModelDownloader({
+				modelUrl: model.url,
+				dirPath: path.dirname(model.file),
+				fileName: path.basename(model.file),
+				deleteTempFileOnCancel: false,
+				onProgress: (status) => {}, // this does not seem to be called
 			}),
+		}
+		// @ts-ignore .. but setting onProgress will allow for this to be called
+		task.handle._onDownloadProgress = (status: FormattedStatus) => {
+			task.progress = status
 		}
 		
 		const logInterval = setInterval(() => {
-			const percentage = task.handle.status.percentage.toFixed(2)
-			const speed = task.handle.status.formattedSpeed
-			const eta = task.handle.status.formatTimeLeft
-			this.logger(LogLevels.info, `Downloading ${modelId}: ${percentage}% at ${speed} - ETA: ${eta}`)
+			if (!task.progress) {
+				return
+			}
+			const percentage = task.progress.percentage.toFixed(2)
+			const speed = task.progress.formattedSpeed
+			const eta = task.progress.formatTimeLeft
+			this.log(LogLevels.info, `Downloading ${modelId}: ${percentage}% at ${speed} - ETA: ${eta}`)
 		}, 60000)
 
 		if (signal) {
 			signal.addEventListener('abort', () => {
-				task.handle.close()
+				// task.handle.close()
 			})
 		}
 		this.downloadTasks.push(task)
 		try {
-			await this.downloadQueue.add(() => {
+			await this.downloadQueue.add(async () => {
 				task.status = 'processing'
-				return task.handle.download()
+				await task.handle.download({ signal })
+				task.status = 'completed'
+				return task
 			})
-			task.status = 'completed'
+		} catch (err) {
+			task.status = 'error'
 		} finally {
 			this.downloadTasks = this.downloadTasks.filter((t) => t !== task)
 			clearInterval(logInterval)

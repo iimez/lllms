@@ -12,7 +12,7 @@ export async function runContextReuseTest(
 	// middle part of the completion id is the instance uid.
 	// we'll use this to verify which instance handled a completion.
 	const messagesA: ChatMessage[] = [
-		{ role: 'user', content: 'Write a haiku about bears.' },
+		{ role: 'user', content: 'Tell me a fun fact about bears.' },
 	]
 	const responseA1 = await createChatCompletion(llms, {
 		maxTokens: 100,
@@ -34,7 +34,7 @@ export async function runContextReuseTest(
 	// send a follow up turn to see if context is still there
 	messagesA.push(responseA1.result.message, {
 		role: 'user',
-		content: 'Give it a 6 word title.',
+		content: 'Continue.',
 	})
 	const responseA2 = await createChatCompletion(llms, {
 		maxTokens: 100,
@@ -42,5 +42,6 @@ export async function runContextReuseTest(
 	})
 	const instanceIdA2 = parseInstanceId(responseA2.handle.id)
 	expect(instanceIdA1).toBe(instanceIdA2)
-	expect(responseA2.result.message.content).toMatch(/bear|giant/i)
+	// assert its still about bears
+	expect(responseA2.result.message.content).toMatch(/bear/i)
 }

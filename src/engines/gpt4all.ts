@@ -30,8 +30,6 @@ export async function loadInstance(
 ) {
 	log(LogLevels.info, `Load GPT4All model ${config.file}`)
 
-	console.debug(config)
-
 	const loadOpts: LoadModelOptions = {
 		modelPath: path.dirname(config.file),
 		// file: config.file,
@@ -70,10 +68,11 @@ export async function processCompletion(
 	}
 
 	let finishReason: CompletionFinishReason = 'eogToken'
-	let removeTailingToken: string | undefined
+	let suffixToRemove: string | undefined
 
 	const defaults = config.completionDefaults ?? {}
 	const stopTriggers = request.stop ?? defaults.stop ?? []
+	const includesStopTriggers = (text: string) => stopTriggers.find((t) => text.includes(t))
 	const result = await instance.generate(request.prompt, {
 		// @ts-ignore
 		special: true, // allows passing in raw prompt (including <|start|> etc.)
@@ -88,16 +87,33 @@ export async function processCompletion(
 		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // https://github.com/nomic-ai/gpt4all/issues/1952
-		onResponseToken: (tokenId, token) => {
-			if (stopTriggers.includes(token)) {
-				finishReason = 'stopGenerationTrigger'
-				removeTailingToken = token
+		onResponseToken: (tokenId, text) => {
+			const matchingTrigger = includesStopTriggers(text)
+			if (matchingTrigger) {
+				finishReason = 'stopTrigger'
+				suffixToRemove = text
 				return false
 			}
 			if (onChunk) {
 				onChunk({
-					text: token,
+					text,
 					tokens: [tokenId],
+				})
+			}
+			return !signal?.aborted
+		},
+		// @ts-ignore
+		onResponseTokens: ({ tokenIds, text }) => {
+			const matchingTrigger = includesStopTriggers(text)
+			if (matchingTrigger) {
+				finishReason = 'stopTrigger'
+				suffixToRemove = text
+				return false
+			}
+			if (onChunk) {
+				onChunk({
+					text,
+					tokens: tokenIds,
 				})
 			}
 			return !signal?.aborted
@@ -109,8 +125,8 @@ export async function processCompletion(
 	}
 
 	let responseText = result.text
-	if (removeTailingToken) {
-		responseText = responseText.slice(0, -removeTailingToken.length)
+	if (suffixToRemove) {
+		responseText = responseText.slice(0, -suffixToRemove.length)
 	}
 
 	return {
@@ -168,6 +184,7 @@ export async function processChatCompletion(
 
 	const defaults = config.completionDefaults ?? {}
 	const stopTriggers = request.stop ?? defaults.stop ?? []
+	const includesStopTriggers = (text: string) => stopTriggers.find((t) => text.includes(t))
 	const result = await createCompletion(session, input, {
 		temperature: request.temperature ?? defaults.temperature,
 		nPredict: request.maxTokens ?? defaults.maxTokens,
@@ -178,16 +195,33 @@ export async function processChatCompletion(
 		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // see https://github.com/nomic-ai/gpt4all/issues/1952
-		onResponseToken: (tokenId, token) => {
-			if (stopTriggers.includes(token)) {
-				finishReason = 'stopGenerationTrigger'
-				suffixToRemove = token
+		onResponseToken: (tokenId, text) => {
+			const matchingTrigger = includesStopTriggers(text)
+			if (matchingTrigger) {
+				finishReason = 'stopTrigger'
+				suffixToRemove = text
 				return false
 			}
 			if (onChunk) {
 				onChunk({
+					text,
 					tokens: [tokenId],
-					text: token,
+				})
+			}
+			return !signal?.aborted
+		},
+		// @ts-ignore
+		onResponseTokens: ({tokenIds, text}) => {
+			const matchingTrigger = includesStopTriggers(text)
+			if (matchingTrigger) {
+				finishReason = 'stopTrigger'
+				suffixToRemove = text
+				return false
+			}
+			if (onChunk) {
+				onChunk({
+					tokens: tokenIds,
+					text,
 				})
 			}
 

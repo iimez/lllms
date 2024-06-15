@@ -6,19 +6,20 @@ const testDefaults = {
 	temperature: 0,
 	maxTokens: 64,
 }
-const testTimeout = 30000
+const defaultTimeout = 30000
 
 export async function createChatCompletion(
 	server: LLMServer,
 	args: Omit<ChatCompletionRequest, 'model'> & { model?: string },
+	timeout = defaultTimeout
 ) {
 	const mergedArgs = {
 		...testDefaults,
 		...args,
 	}
-	const lock = await server.pool.requestLLM(mergedArgs)
+	const lock = await server.pool.requestInstance(mergedArgs)
 	const handle = lock.instance.createChatCompletion(mergedArgs)
-	const result = await handle.process({ timeout: testTimeout })
+	const result = await handle.process({ timeout })
 	const device = lock.instance.gpu ? 'gpu' : 'cpu'
 	await lock.release()
 	return { handle, result, device }
@@ -26,15 +27,16 @@ export async function createChatCompletion(
 
 export async function createCompletion(
 	server: LLMServer,
-	args: Omit<CompletionRequest, 'model'> & { model?: string }
+	args: Omit<CompletionRequest, 'model'> & { model?: string },
+	timeout = defaultTimeout
 ) {
 	const mergedArgs = {
 		...testDefaults,
 		...args,
 	}
-	const lock = await server.pool.requestLLM(mergedArgs)
+	const lock = await server.pool.requestInstance(mergedArgs)
 	const handle = lock.instance.createCompletion(mergedArgs)
-	const result = await handle.process({ timeout: testTimeout })
+	const result = await handle.process({ timeout })
 	const device = lock.instance.gpu ? 'gpu' : 'cpu'
 	await lock.release()
 	return { handle, result, device }

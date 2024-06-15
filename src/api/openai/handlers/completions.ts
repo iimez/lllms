@@ -78,7 +78,6 @@ export function createCompletionHandler(llms: LLMServer) {
 			}
 
 			const completionReq = omitEmptyValues<CompletionRequest>({
-				task: 'inference',
 				model: args.model,
 				prompt: args.prompt as string,
 				temperature: args.temperature ? args.temperature : undefined,

@@ -172,6 +172,10 @@ export class LLMInstance {
 		const cancel = () => {
 			cancelController.abort()
 		}
+		
+		// TODO
+		// - start completion immediately
+		// - return completion object, remove process method
 
 		return {
 			id,

@@ -212,7 +212,8 @@ suite('OpenAI API (node-llama-cpp)', () => {
 			concurrency: 2,
 			models: {
 				[embeddingsModel]: {
-					url: 'https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1/resolve/main/gguf/mxbai-embed-large-v1-f16.gguf',
+					url: 'https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/blob/main/nomic-embed-text-v1.5.Q8_0.gguf',
+					sha256: '3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7',
 					minInstances: 1,
 					engine: 'node-llama-cpp',
 					task: 'embedding',
@@ -221,13 +222,16 @@ suite('OpenAI API (node-llama-cpp)', () => {
 					}
 				},
 				[chatModel]: {
-					url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+					// url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
+					// sha256: 'c57380038ea85d8bec586ec2af9c91abc2f2b332d41d6cf180581d7bdffb93c1',
+					url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
+					sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
 					engine: 'node-llama-cpp',
 					minInstances: 1,
 					task: 'inference',
-					engineOptions: {
-						gpu: 'vulkan',
-					}
+					// engineOptions: {
+					// 	gpu: 'vulkan',
+					// }
 				},
 			},
 		})

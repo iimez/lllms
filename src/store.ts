@@ -171,7 +171,7 @@ export class LLMStore {
 
 	async prepareModel(modelId: string, signal?: AbortSignal) {
 		const model = this.models[modelId]
-		this.log(LogLevels.info, `Preparing model ${modelId}`, { model: modelId })
+		this.log(LogLevels.info, `Preparing model`, { model: modelId })
 		// make sure the model files exists, download if possible.
 		if (!existsSync(model.file) && model.url) {
 			await this.downloadModel(modelId, signal)

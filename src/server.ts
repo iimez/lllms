@@ -89,7 +89,7 @@ export class LLMServer {
 		await Promise.all([this.store.init(), this.pool.init()])
 	}
 
-	async requestModel(request: IncomingLLMRequest, signal?: AbortSignal) {
+	async requestInstance(request: IncomingLLMRequest, signal?: AbortSignal) {
 		return this.pool.requestInstance(request, signal)
 	}
 

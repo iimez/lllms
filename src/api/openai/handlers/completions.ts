@@ -101,7 +101,7 @@ export function createCompletionHandler(llms: LLMServer) {
 				topK: args.top_k ? args.top_k : undefined,
 			})
 
-			const { instance, release } = await llms.requestModel(
+			const { instance, release } = await llms.requestInstance(
 				completionReq,
 				controller.signal,
 			)

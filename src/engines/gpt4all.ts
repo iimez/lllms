@@ -18,7 +18,7 @@ import {
 	EngineContext,
 	EngineOptionsBase,
 	EngineEmbeddingContext,
-	EngineEmbeddingResult,
+	EngineEmbeddingsResult,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 
@@ -40,10 +40,7 @@ export async function loadInstance(
 		// verbose: true,
 		// signal?: // TODO no way to cancel load
 	}
-	// console.debug('creating gpt4all model instance', {
-	// 	modelName,
-	// 	loadOpts,
-	// })
+
 	const instance = await loadModel(path.basename(config.file), {
 		...loadOpts,
 		type: config.task,
@@ -250,11 +247,11 @@ export async function processChatCompletion(
 	}
 }
 
-export async function processEmbedding(
+export async function processEmbeddings(
 	instance: EmbeddingModel,
 	{ request, config }: EngineEmbeddingContext<GPT4AllOptions>,
 	signal?: AbortSignal,
-): Promise<EngineEmbeddingResult> {
+): Promise<EngineEmbeddingsResult> {
 	const texts: string[] = []
 	if (typeof request.input === 'string') {
 		texts.push(request.input)

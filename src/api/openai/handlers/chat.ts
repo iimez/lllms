@@ -4,8 +4,9 @@ import type { SchemaObject } from 'ajv'
 import type { LLMServer } from '#lllms/server.js'
 import {
 	ChatCompletionRequest,
-	ChatCompletionFunction,
+	FunctionDefinition,
 	ChatMessage,
+	FunctionDefinitionParams,
 } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
@@ -97,7 +98,7 @@ export function createChatCompletionHandler(llms: LLMServer) {
 			}
 
 			let completionFunctions:
-				| Record<string, ChatCompletionFunction>
+				| Record<string, FunctionDefinition>
 				| undefined = undefined
 
 			if (args.tools) {
@@ -107,7 +108,7 @@ export function createChatCompletionHandler(llms: LLMServer) {
 						return {
 							name: tool.function.name,
 							description: tool.function.description,
-							parameters: tool.function.parameters as SchemaObject,
+							parameters: tool.function.parameters,
 						}
 					})
 				if (functionTools.length) {
@@ -151,7 +152,7 @@ export function createChatCompletionHandler(llms: LLMServer) {
 				minP: args.min_p ? args.min_p : undefined,
 				topK: args.top_k ? args.top_k : undefined,
 			})
-			const { instance, release } = await llms.requestModel(
+			const { instance, release } = await llms.requestInstance(
 				completionReq,
 				controller.signal,
 			)

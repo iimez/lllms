@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
 import { LLMServer } from '#lllms/server.js'
-import { ChatMessage, ChatCompletionFunction } from '#lllms/types/index.js'
+import { ChatMessage, FunctionDefinition } from '#lllms/types/index.js'
 import { createChatCompletion } from '../../util.js'
 
 interface GetLocationWeatherParams {
@@ -8,7 +8,7 @@ interface GetLocationWeatherParams {
 	unit?: 'celsius' | 'fahrenheit'
 }
 
-const getLocationWeather: ChatCompletionFunction<GetLocationWeatherParams> = {
+const getLocationWeather: FunctionDefinition<GetLocationWeatherParams> = {
 	description: 'Get the weather in a location',
 	parameters: {
 		type: 'object',
@@ -37,7 +37,25 @@ export async function runFunctionCallTest(llms: LLMServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
-			content: "What's the weather like today? (use the getUserLocation function to get my location)",
+			content: "Where am I?",
+		},
+	]
+	const turn1 = await createChatCompletion(llms, {
+		functions: {
+			getUserLocation,
+		},
+		temperature: 0.5,
+		messages,
+	})
+	expect(turn1.result.message.functionCalls).toBeUndefined()
+	expect(turn1.result.message.content).toMatch(/New York/)
+}
+
+export async function runSequentialFunctionCallTest(llms: LLMServer) {
+	const messages: ChatMessage[] = [
+		{
+			role: 'user',
+			content: "What's the weather like today? (use functions!)",
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {
@@ -79,7 +97,7 @@ interface GetRandomNumberParams {
 
 export async function runParallelFunctionCallTest(llms: LLMServer) {
 	const generatedNumbers: number[] = []
-	const getRandomNumber: ChatCompletionFunction<GetRandomNumberParams> = {
+	const getRandomNumber: FunctionDefinition<GetRandomNumberParams> = {
 		description: 'Generate a random integer in given range',
 		parameters: {
 			type: 'object',

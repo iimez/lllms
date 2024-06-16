@@ -8,7 +8,7 @@ import {
 	LLMConfig,
 	LLMRequest,
 	CompletionProcessingOptions,
-	EmbeddingRequest,
+	EmbeddingsRequest,
 } from '#lllms/types/index.js'
 import type { EngineInstance } from '#lllms/engines/index.js'
 import { createContextStateHash } from '#lllms/lib/createContextStateHash.js'
@@ -290,7 +290,7 @@ export class LLMInstance {
 		}
 	}
 	
-	async createEmbedding(request: EmbeddingRequest) {
+	async createEmbeddings(request: EmbeddingsRequest) {
 		if (!request.input) {
 			throw new Error('Input is required for embeddings.')
 		}
@@ -303,7 +303,7 @@ export class LLMInstance {
 		embeddingLogger(LogLevels.verbose, 'Creating embedding')
 		
 		const processingBegin = process.hrtime.bigint()
-		const result = await this.engine.processEmbedding(
+		const result = await this.engine.processEmbeddings(
 			this.llm,
 			{
 				request,

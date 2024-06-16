@@ -25,7 +25,7 @@ const httpServer = http.createServer((req, res) => {
 		})
 		req.on('end', async () => {
 			const req = JSON.parse(body)
-			const { instance, release } = await llms.requestModel(req)
+			const { instance, release } = await llms.requestInstance(req)
 			const completion = instance.createChatCompletion(req)
 			const result = await completion.process()
 			release()

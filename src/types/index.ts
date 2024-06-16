@@ -5,7 +5,8 @@ import type {
 	GPT4AllOptions,
 } from '#lllms/engines/index.js'
 import type { Logger } from '#lllms/lib/logger.js'
-import type { SchemaObject } from 'ajv'
+import type { SchemaObject, JSONSchemaType } from 'ajv'
+import type { GbnfJsonSchema, GbnfJsonObjectSchema } from 'node-llama-cpp'
 
 export type LLMTaskType = 'inference' | 'embedding'
 
@@ -49,7 +50,7 @@ export interface SystemMessage {
 
 export interface AssistantMessage {
 	role: 'assistant'
-	content: string | null
+	content: string
 	functionCalls?: AssistantFunctionCall[]
 }
 
@@ -85,9 +86,14 @@ export interface CompletionRequest extends CompletionRequestBase {
 	prompt?: string
 }
 
-export interface ChatCompletionFunction<TParams = any> {
+// TODO figure out how to type this better.
+// export type FunctionDefinitionParams<TParamList extends string = any> = GbnfJsonObjectSchema
+// export type FunctionDefinitionParams<TParams = any> = JSONSchemaType<TParams>
+export type FunctionDefinitionParams<TParams = any> = Record<string, unknown>;
+
+export interface FunctionDefinition<TParams = any> {
 	description?: string
-	parameters?: SchemaObject
+	parameters?: FunctionDefinitionParams<TParams>
 	handler?: (params: TParams) => Promise<string>
 }
 
@@ -95,16 +101,16 @@ export interface ChatCompletionRequest extends CompletionRequestBase {
 	systemPrompt?: string
 	messages: ChatMessage[]
 	grammar?: string
-	functions?: Record<string, ChatCompletionFunction>
+	functions?: Record<string, FunctionDefinition>
 }
 
-export interface EmbeddingRequest {
+export interface EmbeddingsRequest {
 	model: string
 	input: string | string[] | number[] | number[][];
 	dimensions?: number
 }
 
-export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest | EmbeddingRequest
+export type IncomingLLMRequest = CompletionRequest | ChatCompletionRequest | EmbeddingsRequest
 export interface LLMRequestMeta {
 	sequence: number
 }
@@ -126,7 +132,7 @@ export interface LLMOptionsBase {
 	maxInstances?: number
 	systemPrompt?: string
 	grammars?: Record<string, string>
-	functions?: Record<string, ChatCompletionFunction>
+	functions?: Record<string, FunctionDefinition>
 	completionDefaults?: CompletionParams
 	md5?: string
 	sha256?: string
@@ -158,11 +164,11 @@ export interface LLMEngine<T extends EngineOptionsBase = EngineOptionsBase> {
 		ctx: EngineCompletionContext<T>,
 		signal?: AbortSignal,
 	) => Promise<EngineCompletionResult>
-	processEmbedding: (
+	processEmbeddings: (
 		instance: EngineInstance,
 		ctx: EngineEmbeddingContext<T>,
 		signal?: AbortSignal,
-	) => Promise<EngineEmbeddingResult>
+	) => Promise<EngineEmbeddingsResult>
 }
 
 export interface EngineCompletionContext<T extends EngineOptionsBase>
@@ -180,10 +186,10 @@ export interface EngineChatCompletionContext<T extends EngineOptionsBase>
 
 export interface EngineEmbeddingContext<T extends EngineOptionsBase>
 	extends EngineContext<T> {
-	request: EmbeddingRequest
+	request: EmbeddingsRequest
 }
 
-export interface EngineEmbeddingResult {
+export interface EngineEmbeddingsResult {
 	embeddings: Float32Array[]
 	inputTokens: number
 }

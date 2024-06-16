@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid'
 import {
 	getLlama,
 	LlamaChat,
@@ -17,7 +18,9 @@ import {
 	LlamaEmbeddingContext,
 	defineChatSessionFunction,
 	GbnfJsonSchema,
+	ChatSessionModelFunction,
 } from 'node-llama-cpp'
+import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 import {
 	EngineChatCompletionResult,
 	EngineCompletionResult,
@@ -25,16 +28,14 @@ import {
 	EngineChatCompletionContext,
 	EngineContext,
 	EngineOptionsBase,
-	ChatCompletionFunction,
+	FunctionDefinition,
 	FunctionCallResultMessage,
 	AssistantMessage,
 	EngineEmbeddingContext,
-	EngineEmbeddingResult,
+	EngineEmbeddingsResult,
 	CompletionFinishReason,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
-import { nanoid } from 'nanoid'
-import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 
 // https://github.com/withcatai/node-llama-cpp/pull/105
 // https://github.com/withcatai/node-llama-cpp/discussions/109
@@ -52,12 +53,6 @@ interface LlamaCppInstance {
 	pendingFunctionCalls: Record<string, any>
 	lastEvaluation?: LlamaChatResponse['lastEvaluation']
 	embeddingContext?: LlamaEmbeddingContext
-}
-
-interface LlamaChatFunction {
-	description?: string
-	params?: any
-	handler?: (params: any) => any
 }
 
 interface LlamaChatResult {
@@ -223,6 +218,7 @@ export async function processChatCompletion(
 			contextSequence: instance.context.getSequence(),
 		})
 
+		// TODO should do this in init
 		const preloadBegin = Date.now()
 		const preloadRes = await instance.chat.loadChatAndCompleteUserMessage(
 			instance.chatHistory,
@@ -269,10 +265,10 @@ export async function processChatCompletion(
 	}
 
 	// set additional stop generation triggers for this completion
-	const stopGenerationTriggers: StopGenerationTrigger[] = []
+	const customStopTriggers: StopGenerationTrigger[] = []
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
 	if (stopTrigger) {
-		stopGenerationTriggers.push(...stopTrigger.map((t) => [t]))
+		customStopTriggers.push(...stopTrigger.map((t) => [t]))
 	}
 	// setting up logit/token bias dictionary
 	let tokenBias: TokenBias | undefined
@@ -291,9 +287,8 @@ export async function processChatCompletion(
 		}
 	}
 
-
 	// setting up available function definitions
-	const functionDefinitions: Record<string, ChatCompletionFunction> = {
+	const functionDefinitions: Record<string, FunctionDefinition> = {
 		...config.functions,
 		...request.functions,
 	}
@@ -321,6 +316,7 @@ export async function processChatCompletion(
 						message.content,
 					),
 			})
+			delete instance.pendingFunctionCalls[message.callId]
 		} else {
 			log(LogLevels.warn, 'Pending function call not found', message)
 		}
@@ -353,7 +349,7 @@ export async function processChatCompletion(
 	// currently ignoring function definitions if grammar is provided
 
 	let inputGrammar: LlamaGrammar | undefined
-	let inputFunctions: Record<string, LlamaChatFunction> | undefined
+	let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
 
 	if (request.grammar) {
 		if (!instance.grammars[request.grammar]) {
@@ -368,7 +364,7 @@ export async function processChatCompletion(
 				description: functionDef.description,
 				params: functionDef.parameters as GbnfJsonSchema,
 				handler: functionDef.handler || (() => {}),
-			})
+			}) as ChatSessionModelFunction
 		}
 	}
 
@@ -380,21 +376,34 @@ export async function processChatCompletion(
 		? undefined
 		: instance.chatHistory.slice()
 
-	newChatHistory.push({
-		type: 'model',
-		response: [],
-	})
-	if (newContextWindowChatHistory) {
-		newContextWindowChatHistory.push({
+	if (instance.chatHistory[instance.chatHistory.length - 1].type !== 'model') {
+		newChatHistory.push({
 			type: 'model',
 			response: [],
 		})
+		if (newContextWindowChatHistory) {
+			newContextWindowChatHistory.push({
+				type: 'model',
+				response: [],
+			})
+		}
 	}
 
 	let completionResult: LlamaChatResult
 
 	const inputTokenCountBefore = instance.chat.sequence.tokenMeter.usedInputTokens
 	const outputTokenCountBefore = instance.chat.sequence.tokenMeter.usedOutputTokens
+	
+	const conditionalParams = inputFunctions ? {
+		functions: inputFunctions,
+		documentFunctionParams: true,
+		maxParallelFunctionCalls: 2,
+		onFunctionCall: (functionCall: any) => {
+			log(LogLevels.debug, 'Called function', functionCall)
+		},
+	} : {
+		grammar: inputGrammar,
+	}
 	while (true) {
 		// console.debug('Generating response', JSON.stringify(newChatHistory, null, 2))
 		const {
@@ -402,24 +411,27 @@ export async function processChatCompletion(
 			lastEvaluation: currentLastEvaluation,
 			metadata,
 		} = await instance.chat.generateResponse(newChatHistory, {
+			signal,
 			maxTokens: request.maxTokens ?? defaults.maxTokens,
 			temperature: request.temperature ?? defaults.temperature,
 			topP: request.topP ?? defaults.topP,
 			topK: request.topK ?? defaults.topK,
 			minP: request.minP ?? defaults.minP,
 			tokenBias,
-			grammar: inputGrammar,
-			// @ts-ignore we have asserted that grammar and functions are mutually exclusive
-			functions: inputFunctions,
-			// @ts-ignore we have asserted that grammar and functions are mutually exclusive
-			documentFunctionParams: !!inputFunctions,
-			customStopTriggers: stopGenerationTriggers,
+			customStopTriggers,
 			repeatPenalty: {
 				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 				frequencyPenalty: request.frequencyPenalty ?? defaults.frequencyPenalty,
 				presencePenalty: request.presencePenalty ?? defaults.presencePenalty,
 			},
-			signal,
+			contextShift: {
+				lastEvaluationMetadata: lastEvaluation?.contextShiftMetadata,
+			},
+			lastEvaluationContextWindow: {
+				history: newContextWindowChatHistory,
+				minimumOverlapPercentageToPreventContextShift: 0.5,
+			},
+			...conditionalParams,
 			onToken: (tokens) => {
 				const text = instance.model.detokenize(tokens)
 				if (onChunk) {
@@ -428,13 +440,6 @@ export async function processChatCompletion(
 						text,
 					})
 				}
-			},
-			contextShift: {
-				lastEvaluationMetadata: lastEvaluation?.contextShiftMetadata,
-			},
-			lastEvaluationContextWindow: {
-				history: newContextWindowChatHistory,
-				minimumOverlapPercentageToPreventContextShift: 0.5,
 			},
 		})
 
@@ -465,7 +470,7 @@ export async function processChatCompletion(
 					const functionCallResult = await functionDef.handler!(
 						functionCall.params,
 					)
-					log(LogLevels.debug, 'Called function handler', {
+					log(LogLevels.debug, 'Function handler resolved', {
 						name: functionCall.functionName,
 						params: functionCall.params,
 						result: functionCallResult,
@@ -538,7 +543,7 @@ export async function processChatCompletion(
 
 	const assistantMessage: AssistantMessage = {
 		role: 'assistant',
-		content: completionResult.responseText,
+		content: completionResult.responseText || '',
 	}
 
 	if (completionResult.functionCalls) {
@@ -668,11 +673,11 @@ export async function processCompletion(
 	}
 }
 
-export async function processEmbedding(
+export async function processEmbeddings(
 	instance: LlamaCppInstance,
 	{ request, config }: EngineEmbeddingContext<LlamaCppOptions>,
 	signal?: AbortSignal,
-): Promise<EngineEmbeddingResult> {
+): Promise<EngineEmbeddingsResult> {
 	const texts: string[] = []
 	if (typeof request.input === 'string') {
 		texts.push(request.input)

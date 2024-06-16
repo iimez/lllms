@@ -1,6 +1,6 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import { EmbeddingRequest } from '#lllms/types/index.js'
+import { EmbeddingsRequest } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
 import { LLMServer } from '#lllms/server.js'
@@ -54,16 +54,16 @@ export function createEmbeddingsHandler(llms: LLMServer) {
 				throw new Error('Input must be a string')
 			}
 
-			const embeddingReq = omitEmptyValues<EmbeddingRequest>({
+			const embeddingsReq = omitEmptyValues<EmbeddingsRequest>({
 				model: args.model,
 				input: args.input as string,
 			})
 
-			const { instance, release } = await llms.requestModel(
-				embeddingReq,
+			const { instance, release } = await llms.requestInstance(
+				embeddingsReq,
 				controller.signal,
 			)
-			const result = await instance.createEmbedding(embeddingReq)
+			const result = await instance.createEmbeddings(embeddingsReq)
 
 			release()
 

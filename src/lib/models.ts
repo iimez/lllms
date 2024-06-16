@@ -1,6 +1,6 @@
 import path from 'node:path'
 
-const modelIdPattern = /^[a-zA-Z0-9_:\-]+$/
+const modelIdPattern = /^[a-zA-Z0-9_\-\.]+$/
 export function validateModelId(id: string) {
 	if (!modelIdPattern.test(id)) {
 		throw new Error(

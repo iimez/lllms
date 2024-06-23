@@ -19,5 +19,6 @@ export async function runSystemMessageTest(llms: LLMServer) {
 	// console.debug({
 	// 	response: chat.result.message.content,
 	// })
-	expect(chat.result.message.content).toMatch(/Gotham|Joker|Riddler|criminal|Batman/)
+	expect(chat.result.message.content).toMatch(/Gotham|Joker|Riddler|criminal/)
+	expect(chat.result.message.content).not.toMatch(/Assistant|AI|model/)
 }

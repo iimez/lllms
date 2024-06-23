@@ -46,12 +46,15 @@ serveLLMs({
       // Abs file path or relative to modelsPath. If it does not exist and a url is configured
       // it will be downloaded to the given location.
       file: 'Phi-3-mini-4k-instruct-q4.gguf',
-      // When to download and verify models weights. Defaults to 'on-demand'.
-      // "blocking" = download on startup, "async" = download on startup but don't block.
-      prepare: 'on-demand', 
-      // Checksums are optional and will be verified when preparing the model if set.
+      // Checksums are optional and will be verified when preparing the model, if set.
       // md5: 'cb68b653b24dc432b78b02df76921a54',
       // sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
+      // When to download and verify models weights. Defaults to 'on-demand'.
+      // "blocking" = download on startup, "async" = download on startup but don't block.
+      prepare: 'on-demand',
+      // Whether a chat session should be preloaded when a new instance is created
+      // currently only takes "chat" as a value, which will ingest system prompt and function call docs.
+      preload: 'chat',
       // Use these to control resource usage.
       contextSize: 4096, // Maximum context size. Will be determined automatically if not set.
       maxInstances: 2, // How many active sessions you wanna be able to cache at the same time.
@@ -232,9 +235,9 @@ Not in any particular order:
 - [x] Embeddings APIs
 - [x] Improve node-llama-cpp token usage counts / TokenMeter
 - [x] Reuse download logic from node-llama-cpp to support split ggufs.
+- [x] Support preloading instances with context, like a long system message or few shot examples
 - [ ] Document function call handler usage
 - [ ] Nicer grammar api / loading
-- [ ] Support preloading instances with context, like a long system message or few shot examples
 - [ ] Tests for request cancellation and timeouts
 - [ ] Improve tests for embeddings
 - [ ] A mock engine implementing for testing and examples / Allow user to customize engine implementations

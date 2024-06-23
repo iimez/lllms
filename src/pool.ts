@@ -529,14 +529,6 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			sequence: request.sequence,
 		})
 
-		// if we can, prepare a new instance to be ready for the next incoming request
-		// TODO this slows down the response time for all requests until maxInstances is reached.
-		// should do it after the request is completed. only spawn a new instance during completion
-		// processing if theres actually another request.
-		// if (this.canSpawnInstance(request.model)) {
-		// 	this.spawnInstance(request.model)
-		// }
-
 		this.waitingRequests++
 		const instance = await this.acquireInstance(request, signal)
 
@@ -552,6 +544,9 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				})
 			})
 			.then((task) => {
+				if (!this.waitingRequests && this.canSpawnInstance(request.model)) {
+					this.spawnInstance(request.model)
+				}
 				if (task?.instance) {
 					this.emit('release', instance)
 				}

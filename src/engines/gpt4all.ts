@@ -48,6 +48,15 @@ export async function loadInstance(
 	if (config.engineOptions?.cpuThreads) {
 		instance.llm.setThreadCount(config.engineOptions.cpuThreads)
 	}
+	
+	if (config.preload === 'chat' && 'createChatSession' in instance) {
+		await instance.createChatSession({
+			systemPrompt: config.systemPrompt,
+		})
+		// await instance.generate('', {
+		// 	nPredict: 0,
+		// })
+	}
 	return instance
 }
 

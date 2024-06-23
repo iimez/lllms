@@ -47,7 +47,7 @@ export interface LlamaCppOptions extends EngineOptionsBase {
 interface LlamaCppInstance {
 	model: LlamaModel
 	context: LlamaContext
-	chat: LlamaChat
+	chat?: LlamaChat
 	chatHistory: ChatHistoryItem[]
 	grammars: Record<string, LlamaGrammar>
 	pendingFunctionCalls: Record<string, any>
@@ -127,14 +127,79 @@ export async function loadInstance(
 		// },
 		createSignal: signal,
 	})
-
-	return {
+	
+	const instance: LlamaCppInstance = {
 		model,
 		context,
 		grammars,
-		chat: null,
+		chat: undefined,
+		chatHistory: [],
 		pendingFunctionCalls: {},
+		lastEvaluation: undefined,
 	}
+	
+	// return {
+	// 	model,
+	// 	context,
+	// 	grammars,
+	// 	chat,
+	// 	pendingFunctionCalls: {},
+	// 	lastEvaluation: {
+	// 		cleanHistory: initialChatHistory,
+	// 		contextWindow: preloadRes.lastEvaluation.contextWindow,
+	// 		contextShiftMetadata: preloadRes.lastEvaluation.contextShiftMetadata,
+	// 	}
+	// }
+	if (config.preload === 'chat') {
+		
+
+		
+		const initialChatHistory: ChatHistoryItem[] = []
+		if (config.systemPrompt) {
+			initialChatHistory.push({
+				type: 'system',
+				text: config.systemPrompt,
+			})
+		}
+		const chat = new LlamaChat({
+			contextSequence: context.getSequence(),
+		})
+		
+		let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
+		let documentFunctionParams
+
+		if (config.functions && Object.keys(config.functions).length > 0) {
+			inputFunctions = {}
+			documentFunctionParams = true
+			for (const functionName in config.functions) {
+				const functionDef = config.functions[functionName]
+				inputFunctions[functionName] = defineChatSessionFunction({
+					description: functionDef.description,
+					params: functionDef.parameters as GbnfJsonSchema,
+					handler: functionDef.handler || (() => {}),
+				}) as ChatSessionModelFunction
+			}
+		}
+		
+		const preloadRes = await chat.loadChatAndCompleteUserMessage(
+			initialChatHistory,
+			{
+				initialUserPrompt: '',
+				functions: inputFunctions,
+				documentFunctionParams,
+			},
+		)
+		
+		instance.chat = chat
+		instance.chatHistory = initialChatHistory
+		instance.lastEvaluation = {
+			cleanHistory: initialChatHistory,
+			contextWindow: preloadRes.lastEvaluation.contextWindow,
+			contextShiftMetadata: preloadRes.lastEvaluation.contextShiftMetadata,
+		}
+	}
+	
+	return instance
 }
 
 export async function disposeInstance(instance: LlamaCppInstance) {
@@ -192,15 +257,18 @@ export async function processChatCompletion(
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
 	if (!instance.chat || !instance.chat.context.sequencesLeft || resetContext) {
-		if (instance.chat && !instance.chat?.context?.sequencesLeft) {
-			log(LogLevels.debug, 'No sequencesLeft, recreating LlamaChat')
-		}
-		if (!instance.chat) {
-			log(LogLevels.debug, 'Creating LlamaChat')
-		}
+		// if (!instance.chat?.context?.sequencesLeft) {
+		// 	log(LogLevels.debug, 'No sequences left, recreating context')
+		// }
+		
+		// if (resetContext) {
+			log(LogLevels.debug, 'Resetting context, recreating chat')
+		// }
+
 		if (instance.chat) {
 			await instance.chat.dispose()
 		}
+
 
 		instance.lastEvaluation = undefined
 		instance.chatHistory = []
@@ -217,19 +285,12 @@ export async function processChatCompletion(
 		instance.chat = new LlamaChat({
 			contextSequence: instance.context.getSequence(),
 		})
-
-		// TODO should do this in init
-		const preloadBegin = Date.now()
 		const preloadRes = await instance.chat.loadChatAndCompleteUserMessage(
 			instance.chatHistory,
 			{
 				initialUserPrompt: '',
 			},
 		)
-		const preloadEnd = Date.now()
-		log(LogLevels.debug, 'Preload time', {
-			time: preloadEnd - preloadBegin,
-		})
 		instance.lastEvaluation = {
 			cleanHistory: instance.chatHistory,
 			contextWindow: preloadRes.lastEvaluation.contextWindow,

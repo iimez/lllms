@@ -19,7 +19,9 @@ const serverOptions: StandaloneServerOptions = {
 			task: 'embedding',
 		},
 		'llama3-8b': {
-			url: 'https://huggingface.co/mradermacher/Llama-3-Smaug-8B-OAS-i1-GGUF/blob/main/Llama-3-Smaug-8B-OAS.i1-Q4_K_M.gguf',
+			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+			sha256: '1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
+			// url: 'https://huggingface.co/mradermacher/Llama-3-Smaug-8B-OAS-i1-GGUF/blob/main/Llama-3-Smaug-8B-OAS.i1-Q4_K_M.gguf',
 			engine: 'node-llama-cpp',
 			task: 'inference',
 			prepare: 'async',

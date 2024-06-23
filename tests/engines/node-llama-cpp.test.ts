@@ -18,8 +18,8 @@ const models: Record<string, LLMOptions> = {
 	test: {
 		task: 'inference',
 		// on llama3 instruct everything but parallel function calls works.
-		// url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
-		// sha256: 'c57380038ea85d8bec586ec2af9c91abc2f2b332d41d6cf180581d7bdffb93c1',
+		// url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+		// sha256: '1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
 		// on functionary everything but the context shift test works.
 		url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
 		sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
@@ -30,7 +30,7 @@ const models: Record<string, LLMOptions> = {
 
 suite('Features', () => {
 	const llms = new LLMServer({
-		log: 'debug',
+		// log: 'debug',
 		models,
 	})
 

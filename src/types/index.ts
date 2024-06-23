@@ -24,9 +24,12 @@ export interface CompletionChunk {
 	text: string
 }
 
-export interface CompletionProcessingOptions {
+export interface ProcessingOptions {
 	timeout?: number
 	signal?: AbortSignal
+}
+
+export interface CompletionProcessingOptions extends ProcessingOptions {
 	onChunk?: (chunk: CompletionChunk) => void
 }
 
@@ -127,6 +130,7 @@ export interface LLMOptionsBase {
 	engine: EngineType
 	task: LLMTaskType
 	prepare?: 'blocking' | 'async' | 'on-demand'
+	preload?: 'chat'
 	contextSize?: number
 	minInstances?: number
 	maxInstances?: number

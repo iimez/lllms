@@ -2,9 +2,22 @@ import os from 'node:os'
 import path from 'node:path'
 import { LLMPool } from '#lllms/pool.js'
 import { LLMInstance } from '#lllms/instance.js'
-import { LLMOptions, LLMConfig, IncomingLLMRequest } from '#lllms/types/index.js'
+import {
+	LLMOptions,
+	LLMConfig,
+	IncomingLLMRequest,
+	CompletionProcessingOptions,
+	ChatCompletionRequest,
+	EmbeddingsRequest,
+	ProcessingOptions,
+	CompletionRequest,
+} from '#lllms/types/index.js'
 import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
-import { validateModelId, resolveModelFile, resolveModelUrl } from '#lllms/lib/models.js'
+import {
+	validateModelId,
+	resolveModelFile,
+	resolveModelUrl,
+} from '#lllms/lib/models.js'
 import { loadGBNFGrammars } from '#lllms/lib/grammar.js'
 import { LLMStore } from '#lllms/store.js'
 
@@ -28,16 +41,17 @@ export class LLMServer {
 
 	constructor(opts: LLMServerOptions) {
 		if (opts.log) {
-			this.log = typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
+			this.log =
+				typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
 		} else {
 			this.log = createLogger(LogLevels.warn)
 		}
 		const modelsPath =
 			opts?.modelsPath || path.resolve(os.homedir(), '.cache/lllms')
-		
+
 		const dirname = path.dirname(new URL(import.meta.url).pathname)
 		const defaultGrammars = loadGBNFGrammars(path.join(dirname, './grammars'))
-		
+
 		const modelsWithDefaults: Record<string, LLMConfig> = {}
 		for (const modelId in opts.models) {
 			validateModelId(modelId)
@@ -45,7 +59,9 @@ export class LLMServer {
 			if (!modelOptions.file && !modelOptions.url) {
 				throw new Error(`Model ${modelId} must have either file or url`)
 			}
-			const modelUrl = modelOptions.url ? resolveModelUrl(modelOptions.url) : undefined
+			const modelUrl = modelOptions.url
+				? resolveModelUrl(modelOptions.url)
+				: undefined
 			modelsWithDefaults[modelId] = {
 				id: modelId,
 				minInstances: 0,
@@ -65,7 +81,7 @@ export class LLMServer {
 				}
 			}
 		}
-		
+
 		this.store = new LLMStore({
 			log: this.log,
 			modelsPath,
@@ -80,7 +96,7 @@ export class LLMServer {
 			this.prepareInstance.bind(this),
 		)
 	}
-	
+
 	getModelConfig(modelId: string) {
 		return this.pool.config.models[modelId]
 	}
@@ -91,6 +107,35 @@ export class LLMServer {
 
 	async requestInstance(request: IncomingLLMRequest, signal?: AbortSignal) {
 		return this.pool.requestInstance(request, signal)
+	}
+
+	async createChatCompletion(
+		args: ChatCompletionRequest,
+		opts?: CompletionProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const handle = lock.instance.createChatCompletion(args)
+		const result = await handle.process(opts)
+		await lock.release()
+		return result
+	}
+
+	async createCompletion(
+		args: CompletionRequest,
+		opts?: CompletionProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const handle = lock.instance.createCompletion(args)
+		const result = await handle.process(opts)
+		await lock.release()
+		return result
+	}
+
+	async createEmbeddings(args: EmbeddingsRequest, opts?: ProcessingOptions) {
+		const lock = await this.requestInstance(args)
+		const result = await lock.instance.createEmbeddings(args)
+		await lock.release()
+		return result
 	}
 
 	// gets called by the pool right before a new instance is created
@@ -115,4 +160,3 @@ export class LLMServer {
 		}
 	}
 }
-

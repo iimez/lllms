@@ -1,4 +1,5 @@
-import { suite, it, test, beforeAll, afterAll } from 'vitest'
+import { suite, test, expect, beforeAll, afterAll } from 'vitest'
+
 import { LLMServer } from '#lllms/server.js'
 import { LLMOptions } from '#lllms/types/index.js'
 import {
@@ -7,7 +8,9 @@ import {
 	runSystemMessageTest,
 	runContextLeakTest,
 	runContextReuseTest,
-	runContextShiftTest,
+	runFileIngestionTest,
+	runContextShiftGenerationTest,
+	runContextShiftIngestionTest,
 	runFunctionCallTest,
 	runSequentialFunctionCallTest,
 	runParallelFunctionCallTest,
@@ -18,13 +21,16 @@ const models: Record<string, LLMOptions> = {
 	test: {
 		task: 'inference',
 		// on llama3 instruct everything but parallel function calls works.
-		// url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-		// sha256: '1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
+		url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+		sha256: '1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
 		// on functionary everything but the context shift test works.
-		url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
-		sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
+		// url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
+		// sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
 		engine: 'node-llama-cpp',
 		contextSize: 2048,
+		// engineOptions: {
+		// 	gpu: false,
+		// },
 	},
 }
 
@@ -70,7 +76,44 @@ suite('Features', () => {
 	})
 })
 
-suite('Context / Sessions', () => {
+suite('ingest', () => {
+	const llms = new LLMServer({
+		log: 'debug',
+		models,
+	})
+	beforeAll(async () => {
+		await llms.start()
+	})
+	afterAll(async () => {
+		await llms.stop()
+	})
+	// works
+	test('normal text', async () => {
+		const res = await runFileIngestionTest(llms, 'lovecraft')
+		expect(res.message.content).toMatch(/horror|lovecraft/i)
+		console.debug({
+			res: res.message.content,
+		})
+	})
+	// works
+	test('a small website', async () => {
+		const res = await runFileIngestionTest(llms, 'hackernews')
+		expect(res.message.content).toMatch(/hacker|news/i)
+		console.debug({
+			res: res.message.content,
+		})
+	})
+	// errors with "max callstack exceeded"
+	test('a large website', async () => {
+		const res = await runFileIngestionTest(llms, 'github')
+		expect(res.message.content).toMatch(/github/i)
+		console.debug({
+			res: res.message.content,
+		})
+	})
+})
+
+suite('context', () => {
 	const llms = new LLMServer({
 		// log: 'debug',
 		models: {
@@ -86,13 +129,17 @@ suite('Context / Sessions', () => {
 	afterAll(async () => {
 		await llms.stop()
 	})
-	it('should reuse context on stateless requests', async () => {
+
+	test('reuse context on stateless requests', async () => {
 		await runContextReuseTest(llms)
 	})
-	it('should not leak when handling multiple sessions', async () => {
+	test('no leak when handling multiple sessions', async () => {
 		await runContextLeakTest(llms)
 	})
-	it('should do a context shift', async () => {
-		await runContextShiftTest(llms)
+	test('input that exceeds context size', async () => {
+		await runContextShiftIngestionTest(llms)
+	})
+	test('context shift during generation', async () => {
+		await runContextShiftGenerationTest(llms)
 	})
 })

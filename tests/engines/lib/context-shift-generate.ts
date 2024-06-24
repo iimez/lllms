@@ -3,8 +3,8 @@ import { LLMServer } from '#lllms/server.js'
 import { ChatMessage, ChatCompletionRequest } from '#lllms/types/index.js'
 import { createChatCompletion, parseInstanceId } from '../../util.js'
 
-// conversation that tests behavior when context window is exceeded
-export async function runContextShiftTest(
+// conversation that tests behavior when context window is exceeded while the model is generating text
+export async function runContextShiftGenerationTest(
 	llms: LLMServer,
 	model: string = 'test',
 ) {

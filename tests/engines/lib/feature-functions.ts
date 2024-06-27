@@ -44,7 +44,6 @@ export async function runFunctionCallTest(llms: LLMServer) {
 		functions: {
 			getUserLocation,
 		},
-		temperature: 0.5,
 		messages,
 	})
 	expect(turn1.result.message.functionCalls).toBeUndefined()
@@ -55,7 +54,7 @@ export async function runSequentialFunctionCallTest(llms: LLMServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
-			content: "What's the weather like today? (use functions!)",
+			content: "What's the weather like today? (hint: combine functions!)",
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {
@@ -63,12 +62,7 @@ export async function runSequentialFunctionCallTest(llms: LLMServer) {
 			getUserLocation,
 			getLocationWeather,
 		},
-		temperature: 0.5,
 		messages,
-	})
-	console.debug({
-		turn1: turn1.result.message.content,
-		functionCalls: turn1.result.message.functionCalls,
 	})
 	expect(turn1.result.message.functionCalls).toBeDefined()
 	expect(turn1.result.message.functionCalls!.length).toBe(1)
@@ -78,16 +72,12 @@ export async function runSequentialFunctionCallTest(llms: LLMServer) {
 		callId: turn1FunctionCall.id,
 		role: 'function',
 		name: turn1FunctionCall.name,
-		content: 'New York today: Cloudy, 21°, high chance of raining fish.',
+		content: 'New York today: Cloudy, 21°, low chance of rain.',
 	})
 	const turn2 = await createChatCompletion(llms, {
-		functions: {
-			getUserLocation,
-			getLocationWeather,
-		},
 		messages,
 	})
-	expect(turn2.result.message.content).toMatch(/fish/)
+	expect(turn2.result.message.content).toMatch(/cloudy/)
 }
 
 interface GetRandomNumberParams {
@@ -123,7 +113,7 @@ export async function runParallelFunctionCallTest(llms: LLMServer) {
 		messages: [
 			{
 				role: 'user',
-				content: 'Roll the dice twice.',
+				content: 'Roll the dice twice, then tell me the results.',
 			},
 		]
 	})

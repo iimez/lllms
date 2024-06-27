@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import {
 	getLlama,
+	LlamaOptions,
 	LlamaChat,
 	LlamaModel,
 	LlamaContext,
@@ -19,6 +20,7 @@ import {
 	defineChatSessionFunction,
 	GbnfJsonSchema,
 	ChatSessionModelFunction,
+	LlamaTextJSON,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 import {
@@ -34,6 +36,7 @@ import {
 	EngineEmbeddingContext,
 	EngineEmbeddingsResult,
 	CompletionFinishReason,
+	ChatMessage,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 
@@ -73,15 +76,49 @@ function prepareGrammars(llama: Llama, grammarConfig: Record<string, string>) {
 	return grammars
 }
 
+function createChatMessageArray(messages: ChatMessage[]): ChatHistoryItem[] {
+	const items: ChatHistoryItem[] = []
+	let systemPrompt: string | undefined
+	for (const message of messages) {
+		if (message.role === 'user') {
+			items.push({
+				type: 'user',
+				text: message.content,
+			})
+		} else if (message.role === 'assistant') {
+			items.push({
+				type: 'model',
+				response: [message.content],
+			})
+		} else if (message.role === 'system') {
+			if (systemPrompt) {
+				systemPrompt += '\n\n' + message.content
+			} else {
+				systemPrompt = message.content
+			}
+		}
+	}
+
+	if (systemPrompt) {
+		items.unshift({
+			type: 'system',
+			text: systemPrompt,
+		})
+	}
+
+	return items
+}
+
 export async function loadInstance(
 	{ config, log }: EngineContext<LlamaCppOptions>,
 	signal?: AbortSignal,
 ) {
 	log(LogLevels.debug, 'Load Llama model', config.engineOptions)
-
+	// takes "auto" | "metal" | "cuda" | "vulkan"
+	const gpuSetting = (config.engineOptions?.gpu ??
+		'auto') as LlamaOptions['gpu']
 	const llama = await getLlama({
-		// may be "auto" | "metal" | "cuda" | "vulkan"
-		gpu: config.engineOptions?.gpu ? 'auto' : false,
+		gpu: gpuSetting,
 		// forwarding llama logger
 		logLevel: LlamaLogLevel.debug,
 		logger: (level, message) => {
@@ -115,7 +152,7 @@ export async function loadInstance(
 	})
 
 	const context = await model.createContext({
-		sequences: 2,
+		sequences: 1,
 		seed: createSeed(0, 1000000),
 		threads: config.engineOptions?.cpuThreads,
 		batchSize: config.engineOptions?.batchSize,
@@ -127,7 +164,7 @@ export async function loadInstance(
 		// },
 		createSignal: signal,
 	})
-	
+
 	const instance: LlamaCppInstance = {
 		model,
 		context,
@@ -137,68 +174,60 @@ export async function loadInstance(
 		pendingFunctionCalls: {},
 		lastEvaluation: undefined,
 	}
-	
-	// return {
-	// 	model,
-	// 	context,
-	// 	grammars,
-	// 	chat,
-	// 	pendingFunctionCalls: {},
-	// 	lastEvaluation: {
-	// 		cleanHistory: initialChatHistory,
-	// 		contextWindow: preloadRes.lastEvaluation.contextWindow,
-	// 		contextShiftMetadata: preloadRes.lastEvaluation.contextShiftMetadata,
-	// 	}
-	// }
-	if (config.preload === 'chat') {
-		
 
-		
-		const initialChatHistory: ChatHistoryItem[] = []
-		if (config.systemPrompt) {
-			initialChatHistory.push({
-				type: 'system',
-				text: config.systemPrompt,
+	if (config.preload) {
+		// preloading chat session
+		if ('messages' in config.preload) {
+			const initialChatHistory = createChatMessageArray(config.preload.messages)
+			const chat = new LlamaChat({
+				contextSequence: context.getSequence(),
 			})
-		}
-		const chat = new LlamaChat({
-			contextSequence: context.getSequence(),
-		})
-		
-		let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
-		let documentFunctionParams
 
-		if (config.functions && Object.keys(config.functions).length > 0) {
-			inputFunctions = {}
-			documentFunctionParams = true
-			for (const functionName in config.functions) {
-				const functionDef = config.functions[functionName]
-				inputFunctions[functionName] = defineChatSessionFunction({
-					description: functionDef.description,
-					params: functionDef.parameters as GbnfJsonSchema,
-					handler: functionDef.handler || (() => {}),
-				}) as ChatSessionModelFunction
+			let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
+			if (config.functions && Object.keys(config.functions).length > 0) {
+				inputFunctions = {}
+				for (const functionName in config.functions) {
+					const functionDef = config.functions[functionName]
+					inputFunctions[functionName] = defineChatSessionFunction({
+						description: functionDef.description,
+						params: functionDef.parameters as GbnfJsonSchema,
+						handler: functionDef.handler || (() => {}),
+					}) as ChatSessionModelFunction
+				}
+			}
+
+			const preloadRes = await chat.loadChatAndCompleteUserMessage(
+				initialChatHistory,
+				{
+					initialUserPrompt: '',
+					functions: inputFunctions,
+					documentFunctionParams: config.preload.documentFunctions,
+				},
+			)
+
+			instance.chat = chat
+			instance.chatHistory = initialChatHistory
+			instance.lastEvaluation = {
+				cleanHistory: initialChatHistory,
+				contextWindow: preloadRes.lastEvaluation.contextWindow,
+				contextShiftMetadata: preloadRes.lastEvaluation.contextShiftMetadata,
 			}
 		}
-		
-		const preloadRes = await chat.loadChatAndCompleteUserMessage(
-			initialChatHistory,
-			{
-				initialUserPrompt: '',
-				functions: inputFunctions,
-				documentFunctionParams,
-			},
-		)
-		
-		instance.chat = chat
-		instance.chatHistory = initialChatHistory
-		instance.lastEvaluation = {
-			cleanHistory: initialChatHistory,
-			contextWindow: preloadRes.lastEvaluation.contextWindow,
-			contextShiftMetadata: preloadRes.lastEvaluation.contextShiftMetadata,
+
+		if ('prefix' in config.preload) {
+			// TODO preloading completion prefix
+			// context.getSequence()
+			// const completion = new LlamaCompletion({
+			// 	contextSequence: context.getSequence(),
+			// })
+			// const tokens = model.tokenize(config.preload.prefix)
+			// await completion.generateCompletion(tokens, {
+			// 	maxTokens: 0,
+			// })
+			// completion.dispose()
 		}
 	}
-	
+
 	return instance
 }
 
@@ -219,7 +248,14 @@ function addFunctionCallToChatHistory({
 	callParams,
 	callResult,
 	rawCall,
-}: any) {
+}: {
+	chatHistory: ChatHistoryItem[]
+	functionName: string
+	functionDescription?: string
+	callParams: any
+	callResult: any
+	rawCall?: LlamaTextJSON
+}) {
 	const newChatHistory = chatHistory.slice()
 	if (
 		newChatHistory.length === 0 ||
@@ -229,11 +265,16 @@ function addFunctionCallToChatHistory({
 			type: 'model',
 			response: [],
 		})
-	const lastModelResponseItem = newChatHistory[newChatHistory.length - 1]
+
+	const lastModelResponseItem = newChatHistory[
+		newChatHistory.length - 1
+	] as ChatModelResponse
 	const newLastModelResponseItem = { ...lastModelResponseItem }
 	newChatHistory[newChatHistory.length - 1] = newLastModelResponseItem
+
 	const modelResponse = newLastModelResponseItem.response.slice()
 	newLastModelResponseItem.response = modelResponse
+
 	modelResponse.push({
 		type: 'functionCall',
 		name: functionName,
@@ -242,6 +283,7 @@ function addFunctionCallToChatHistory({
 		result: callResult,
 		rawCall,
 	})
+
 	return newChatHistory
 }
 
@@ -256,73 +298,22 @@ export async function processChatCompletion(
 	}: EngineChatCompletionContext<LlamaCppOptions>,
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
-	if (!instance.chat || !instance.chat.context.sequencesLeft || resetContext) {
-		// if (!instance.chat?.context?.sequencesLeft) {
-		// 	log(LogLevels.debug, 'No sequences left, recreating context')
-		// }
-		
-		// if (resetContext) {
-			log(LogLevels.debug, 'Resetting context, recreating chat')
-		// }
-
+	if (!instance.chat || resetContext) {
+		// if context reset is requested, dispose the chat instance
 		if (instance.chat) {
 			await instance.chat.dispose()
-		}
-
-
-		instance.lastEvaluation = undefined
-		instance.chatHistory = []
-		let systemPrompt = request.systemPrompt ?? config.systemPrompt
-		if (!systemPrompt && request.messages[0].role === 'system') {
-			systemPrompt = request.messages[0].content
-		}
-		if (systemPrompt) {
-			instance.chatHistory.push({
-				type: 'system',
-				text: systemPrompt,
-			})
 		}
 		instance.chat = new LlamaChat({
 			contextSequence: instance.context.getSequence(),
 		})
-		const preloadRes = await instance.chat.loadChatAndCompleteUserMessage(
-			instance.chatHistory,
-			{
-				initialUserPrompt: '',
-			},
-		)
-		instance.lastEvaluation = {
-			cleanHistory: instance.chatHistory,
-			contextWindow: preloadRes.lastEvaluation.contextWindow,
-			contextShiftMetadata: preloadRes.lastEvaluation.contextShiftMetadata,
-		}
-	}
-
-	// if context has been reset we need to reingest the conversation history
-	if (resetContext) {
-		const newMessages: ChatHistoryItem[] = []
-		for (const message of request.messages) {
-			if (!message.content) {
-				continue
-			}
-			if (message.role === 'user') {
-				newMessages.push({
-					type: 'user',
-					text: message.content,
-				})
-			} else if (message.role === 'assistant') {
-				newMessages.push({
-					type: 'model',
-					response: [message.content],
-				})
-			}
-		}
-		// drop last user message, thats what we wanna prompt with.
-		if (newMessages[newMessages.length - 1].type === 'user') {
-			newMessages.pop()
-		}
+		// reset state and reingest the conversation history
 		instance.lastEvaluation = undefined
-		instance.chatHistory.push(...newMessages)
+		instance.pendingFunctionCalls = {}
+		instance.chatHistory = createChatMessageArray(request.messages)
+		// drop last user message. its gonna be added later, after resolved function calls
+		if (instance.chatHistory[instance.chatHistory.length - 1].type === 'user') {
+			instance.chatHistory.pop()
+		}
 	}
 
 	// set additional stop generation triggers for this completion
@@ -394,6 +385,7 @@ export async function processChatCompletion(
 		})
 	}
 
+	// add the new user message to the chat history
 	let newUserMessage: string | undefined
 	const lastMessage = request.messages[request.messages.length - 1]
 	if (lastMessage.role === 'user') {
@@ -433,7 +425,7 @@ export async function processChatCompletion(
 	let lastEvaluation: LlamaChatResponse['lastEvaluation'] | undefined =
 		instance.lastEvaluation
 	let newChatHistory = instance.chatHistory.slice()
-	let newContextWindowChatHistory = lastEvaluation?.contextWindow
+	let newContextWindowChatHistory = !lastEvaluation?.contextWindow
 		? undefined
 		: instance.chatHistory.slice()
 
@@ -452,21 +444,27 @@ export async function processChatCompletion(
 
 	let completionResult: LlamaChatResult
 
-	const inputTokenCountBefore = instance.chat.sequence.tokenMeter.usedInputTokens
-	const outputTokenCountBefore = instance.chat.sequence.tokenMeter.usedOutputTokens
-	
-	const conditionalParams = inputFunctions ? {
-		functions: inputFunctions,
-		documentFunctionParams: true,
-		maxParallelFunctionCalls: 2,
-		onFunctionCall: (functionCall: any) => {
-			log(LogLevels.debug, 'Called function', functionCall)
-		},
-	} : {
-		grammar: inputGrammar,
-	}
+	const inputTokenCountBefore =
+		instance.chat.sequence.tokenMeter.usedInputTokens
+	const outputTokenCountBefore =
+		instance.chat.sequence.tokenMeter.usedOutputTokens
+
+	const functionsOrGrammar = inputFunctions
+		? {
+				functions: inputFunctions,
+				documentFunctionParams: true,
+				maxParallelFunctionCalls: 2,
+				onFunctionCall: async (
+					functionCall: LlamaChatResponseFunctionCall<any>,
+				) => {
+					// log(LogLevels.debug, 'Called function', functionCall)
+				},
+		  }
+		: {
+				grammar: inputGrammar,
+		}
+
 	while (true) {
-		// console.debug('Generating response', JSON.stringify(newChatHistory, null, 2))
 		const {
 			functionCalls,
 			lastEvaluation: currentLastEvaluation,
@@ -480,19 +478,22 @@ export async function processChatCompletion(
 			minP: request.minP ?? defaults.minP,
 			tokenBias,
 			customStopTriggers,
+			trimWhitespaceSuffix: false,
+			stopOnAbortSignal: true,
+			...functionsOrGrammar,
 			repeatPenalty: {
 				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 				frequencyPenalty: request.frequencyPenalty ?? defaults.frequencyPenalty,
 				presencePenalty: request.presencePenalty ?? defaults.presencePenalty,
 			},
 			contextShift: {
+				// strategy: 'eraseFirstResponseAndKeepFirstSystem',
 				lastEvaluationMetadata: lastEvaluation?.contextShiftMetadata,
 			},
 			lastEvaluationContextWindow: {
 				history: newContextWindowChatHistory,
 				minimumOverlapPercentageToPreventContextShift: 0.5,
 			},
-			...conditionalParams,
 			onToken: (tokens) => {
 				const text = instance.model.detokenize(tokens)
 				if (onChunk) {
@@ -532,9 +533,9 @@ export async function processChatCompletion(
 						functionCall.params,
 					)
 					log(LogLevels.debug, 'Function handler resolved', {
-						name: functionCall.functionName,
-						params: functionCall.params,
-						result: functionCallResult,
+						functionName: functionCall.functionName,
+						functionParams: functionCall.params,
+						functionResult: functionCallResult,
 					})
 					return {
 						functionDef,
@@ -595,7 +596,7 @@ export async function processChatCompletion(
 		const responseText = lastMessage.response
 			.filter((item: any) => typeof item === 'string')
 			.join('')
-			completionResult = {
+		completionResult = {
 			responseText,
 			stopReason: metadata.stopReason,
 		}
@@ -610,10 +611,12 @@ export async function processChatCompletion(
 	if (completionResult.functionCalls) {
 		// TODO its possible that there are tailing immediately-evaluatable function calls.
 		// as is, these may never resolve
-		const pendingFunctionCalls = completionResult.functionCalls.filter((call) => {
-			const functionDef = functionDefinitions[call.functionName]
-			return !functionDef.handler
-		})
+		const pendingFunctionCalls = completionResult.functionCalls.filter(
+			(call) => {
+				const functionDef = functionDefinitions[call.functionName]
+				return !functionDef.handler
+			},
+		)
 
 		assistantMessage.functionCalls = pendingFunctionCalls.map((call) => {
 			const callId = nanoid()
@@ -626,9 +629,10 @@ export async function processChatCompletion(
 			}
 		})
 	}
-	
+
 	const inputTokenCountAfter = instance.chat.sequence.tokenMeter.usedInputTokens
-	const outputTokenCountAfter = instance.chat.sequence.tokenMeter.usedOutputTokens
+	const outputTokenCountAfter =
+		instance.chat.sequence.tokenMeter.usedOutputTokens
 	const promptTokens = inputTokenCountAfter - inputTokenCountBefore
 	const completionTokens = outputTokenCountAfter - outputTokenCountBefore
 	return {

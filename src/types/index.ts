@@ -8,7 +8,7 @@ import type { Logger } from '#lllms/lib/logger.js'
 import type { SchemaObject, JSONSchemaType } from 'ajv'
 import type { GbnfJsonSchema, GbnfJsonObjectSchema } from 'node-llama-cpp'
 
-export type LLMTaskType = 'inference' | 'embedding'
+export type LLMTaskType = 'text-completion' | 'embedding'
 
 export type CompletionFinishReason =
 	| 'maxTokens'
@@ -101,7 +101,6 @@ export interface FunctionDefinition<TParams = any> {
 }
 
 export interface ChatCompletionRequest extends CompletionRequestBase {
-	systemPrompt?: string
 	messages: ChatMessage[]
 	grammar?: string
 	functions?: Record<string, FunctionDefinition>
@@ -124,17 +123,27 @@ export interface ChatCompletionResult extends EngineChatCompletionResult {
 	model: string
 }
 
+export interface ChatPreloadOptions {
+	messages: ChatMessage[]
+	documentFunctions?: boolean
+}
+
+export interface PrefixPreloadOptions {
+	prefix: string
+}
+
+export type LLMPreloadOptions = ChatPreloadOptions | PrefixPreloadOptions
+
 export interface LLMOptionsBase {
 	url?: string
 	file?: string
 	engine: EngineType
 	task: LLMTaskType
 	prepare?: 'blocking' | 'async' | 'on-demand'
-	preload?: 'chat'
+	preload?: LLMPreloadOptions
 	contextSize?: number
 	minInstances?: number
 	maxInstances?: number
-	systemPrompt?: string
 	grammars?: Record<string, string>
 	functions?: Record<string, FunctionDefinition>
 	completionDefaults?: CompletionParams
@@ -222,7 +231,7 @@ export interface EngineCompletionResult {
 }
 
 export interface EngineOptionsBase {
-	gpu?: boolean | 'auto' | string
+	gpu?: boolean | 'auto' | string & {}
 	gpuLayers?: number
 	batchSize?: number
 	cpuThreads?: number

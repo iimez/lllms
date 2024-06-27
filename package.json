@@ -25,7 +25,6 @@
 		"test:gpu": "vitest tests/gpu.test.ts --test-timeout=-1 --pool=forks",
 		"test:gpt4all": "vitest tests/engines/gpt4all.test.ts --test-timeout=-1 --pool=forks",
 		"test:llama": "vitest tests/engines/node-llama-cpp.test.ts --test-timeout=-1 --pool=forks",
-		"test:llama-min": "vitest tests/engines/node-llama-cpp-minimal.test.ts --test-timeout=-1 --pool=forks",
 		"test:server": "vitest tests/server.test.ts --test-timeout=-1 --pool=forks",
 		"prewatch": "rimraf ./dist",
 		"watch": "tsc -w -p tsconfig.release.json",

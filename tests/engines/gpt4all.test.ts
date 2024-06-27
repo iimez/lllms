@@ -10,7 +10,7 @@ import {
 
 const models: Record<string, LLMOptions> = {
 	test: {
-		task: 'inference',
+		task: 'text-completion',
 		url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 		md5: 'c87ad09e1e4c8f9c35a5fcef52b6f1c9',
 		// url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',

@@ -228,7 +228,7 @@ suite('OpenAI API (node-llama-cpp)', () => {
 					sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
 					engine: 'node-llama-cpp',
 					minInstances: 1,
-					task: 'inference',
+					task: 'text-completion',
 					// engineOptions: {
 					// 	gpu: 'vulkan',
 					// }
@@ -267,7 +267,7 @@ suite('OpenAI API (gpt4all)', () => {
 					url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 					minInstances: 1,
 					engine: 'gpt4all',
-					task: 'inference',
+					task: 'text-completion',
 				}
 			},
 		})

@@ -6,7 +6,7 @@ const llms = startLLMs({
 	concurrency: 2,
 	models: {
 		'phi3-mini-4k': {
-			task: 'inference',
+			task: 'text-completion',
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 			engine: 'gpt4all',
 			maxInstances: 2,

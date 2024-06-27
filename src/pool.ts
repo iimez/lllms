@@ -31,7 +31,6 @@ interface LLMPoolConfig {
 
 export interface LLMPoolOptions {
 	concurrency?: number
-	releaseTimeout?: number
 	models: Record<string, LLMConfig>
 	log?: Logger | LogLevel
 }
@@ -201,13 +200,14 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		// and prevent spawning more instances if the gpu is already locked.
 		const requiresGpu = modelConfig.engineOptions?.gpu === true
 		if (requiresGpu && this.gpuLock) {
-			this.log(
-				LogLevels.debug,
-				'Denied spawning instance because of GPU lock',
-				{
-					model: modelId,
-				},
-			)
+			// TODO check if we are allowed to shut down the locking instance
+			// this.log(
+			// 	LogLevels.debug,
+			// 	'Denied spawning instance because of GPU lock',
+			// 	{
+			// 		model: modelId,
+			// 	},
+			// )
 			return false
 		}
 		// see if we're within maxInstances limit
@@ -216,13 +216,13 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			(instance) => instance.model === modelId,
 		)
 		if (currentInstances.length >= maxInstances) {
-			this.log(
-				LogLevels.debug,
-				'Denied spawning instance because of maxInstances',
-				{
-					model: modelId,
-				},
-			)
+			// this.log(
+			// 	LogLevels.debug,
+			// 	'Denied spawning instance because of maxInstances',
+			// 	{
+			// 		model: modelId,
+			// 	},
+			// )
 			return false
 		}
 		return true
@@ -544,6 +544,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				})
 			})
 			.then((task) => {
+				// if theres more requests waiting, prioritize handling them first
 				if (!this.waitingRequests && this.canSpawnInstance(request.model)) {
 					this.spawnInstance(request.model)
 				}

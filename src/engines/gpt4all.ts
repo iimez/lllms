@@ -6,7 +6,7 @@ import {
 	InferenceModel,
 	LoadModelOptions,
 	CompletionInput,
-	ChatMessage,
+	ChatMessage as GPT4AllChatMessage,
 	EmbeddingModel,
 } from 'gpt4all'
 import {
@@ -19,10 +19,38 @@ import {
 	EngineOptionsBase,
 	EngineEmbeddingContext,
 	EngineEmbeddingsResult,
+	ChatMessage,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 
 export interface GPT4AllOptions extends EngineOptionsBase {}
+
+function createChatMessageArray(messages: ChatMessage[]): GPT4AllChatMessage[] {
+	const chatMessages: GPT4AllChatMessage[] = []
+	let systemPrompt: string | undefined
+	for (const message of messages) {
+		// if (sharedRoles.includes(message.role)) {
+		if (message.role === 'user' || message.role === 'assistant') {
+			chatMessages.push({
+				role: message.role,
+				content: message.content,
+			})
+		} else if (message.role === 'system') {
+			if (systemPrompt) {
+				systemPrompt += '\n\n' + message.content
+			} else {
+				systemPrompt = message.content
+			}
+		}
+	}
+	if (systemPrompt) {
+		chatMessages.unshift({
+			role: 'system',
+			content: systemPrompt,
+		})
+	}
+	return chatMessages
+}
 
 export async function loadInstance(
 	{ config, log }: EngineContext<GPT4AllOptions>,
@@ -40,23 +68,47 @@ export async function loadInstance(
 		// verbose: true,
 		// signal?: // TODO no way to cancel load
 	}
+	
+	let modelType: 'inference' | 'embedding'
+	if (config.task === 'text-completion') {
+		modelType = 'inference'
+	} else if (config.task === 'embedding') {
+		modelType = 'embedding'
+	} else {
+		throw new Error(`Unsupported task type: ${config.task}`)
+	}
 
 	const instance = await loadModel(path.basename(config.file), {
 		...loadOpts,
-		type: config.task,
+		type: modelType,
 	})
 	if (config.engineOptions?.cpuThreads) {
 		instance.llm.setThreadCount(config.engineOptions.cpuThreads)
 	}
 	
-	if (config.preload === 'chat' && 'createChatSession' in instance) {
-		await instance.createChatSession({
-			systemPrompt: config.systemPrompt,
-		})
-		// await instance.generate('', {
-		// 	nPredict: 0,
-		// })
+	if (config.preload && 'generate' in instance) {
+		if ('messages' in config.preload) {
+			let messages = createChatMessageArray(config.preload.messages)
+			let systemPrompt
+			if (messages[0].role === 'system') {
+				systemPrompt = messages[0].content
+				messages = messages.slice(1)
+			}
+			await instance.createChatSession({
+				systemPrompt,
+				messages,
+			})
+		} else if ('prefix' in config.preload) {
+			await instance.generate(config.preload.prefix, {
+				nPredict: 0,
+			})
+		} else {
+			await instance.generate('', {
+				nPredict: 0,
+			})
+		}
 	}
+
 	return instance
 }
 
@@ -156,29 +208,36 @@ export async function processChatCompletion(
 ): Promise<EngineChatCompletionResult> {
 	let session = instance.activeChatSession
 	if (!session || resetContext) {
-		let systemPrompt = request.systemPrompt ?? config.systemPrompt
-		// allow overriding system prompt via initial message.
-		if (request.messages[0].role === 'system') {
-			systemPrompt = request.messages[0].content
+		// let systemPrompt = request.systemPrompt ?? config.systemPrompt
+		// // allow overriding system prompt via initial message.
+		// if (request.messages[0].role === 'system') {
+		// 	systemPrompt = request.messages[0].content
+		// }
+		let messages = createChatMessageArray(request.messages)
+		let systemPrompt
+		if (messages[0].role === 'system') {
+			systemPrompt = messages[0].content
+			messages = messages.slice(1)
 		}
 		session = await instance.createChatSession({
 			systemPrompt,
+			messages,
 		})
 	}
 
-	// if we have reset context, we need to reingest the chat history,
-	// or otherwise just append the last user message.
-	const nonSystemMessages = request.messages.filter(
-		(m) => m.role !== 'system' && m.role !== 'function',
+	// const conversationMessages = createChatMessageArray(request.messages)
+	const conversationMessages = session.messages.filter(
+		(m) => m.role !== 'system',
 	)
 	let input: CompletionInput
 
 	if (resetContext) {
-		// reingests all, then prompts automatically for last user message
-		input = nonSystemMessages as ChatMessage[]
+		// if we have reset context, we need to input the chat history,
+		// passing in the array will reingest the conversation, then prompt for the tailing user message
+		input = conversationMessages
 	} else {
-		// append the last (user) message
-		const lastMessage = nonSystemMessages[nonSystemMessages.length - 1]
+		// otherwise just prompt with last user message
+		const lastMessage = conversationMessages[conversationMessages.length - 1]
 		if (lastMessage.role !== 'user') {
 			throw new Error('Last message must be from user.')
 		}

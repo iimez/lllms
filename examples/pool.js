@@ -18,8 +18,8 @@ const pool = new LLMPool(
 	{
 		// to see what's going on, set the log level to 'debug'
 		log: 'debug',
-		// global inference concurrency limit, across all instances of all models
-		inferenceConcurrency: 2,
+		// global processing concurrency limit, across all instances of all models
+		concurrency: 2,
 		models: {
 			'phi3-mini-4k': {
 				// note that this path needs to be absolute and the file needs to be downloaded beforehand.

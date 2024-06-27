@@ -9,20 +9,26 @@ import { LLMPool } from '../dist/index.js'
 
 const pool = new LLMPool(
 	{
-		log: 'debug',
+		// log: 'debug',
 		models: {
 			'phi3-mini-4k': {
-				task: 'inference',
+				task: 'text-completion',
+				prepare: 'blocking',
+				// preload: 'chat',
+				minInstances: 1,
+				// preload: 
 				// note that this file needs to be downloaded manually when using the pool directly.
-				// file: path.resolve(os.homedir(), '.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf'),
-				// engine: 'gpt4all',
 				// setting this to 1 will load the model on pool.init(), otherwise it will be loaded on-demand
-				// minInstances: 1,
 				file: path.resolve(
 					os.homedir(),
-					'.cache/lllms/Phi-3-mini-4k-instruct-q4.gguf',
+					// '.cache/lllms/huggingface/microsoft/Phi-3-mini-4k-instruct-gguf-main/Phi-3-mini-4k-instruct-q4.gguf',
+					'.cache/lllms/huggingface/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+					// '.cache/lllms/huggingface/QuantFactory/Phi-3-mini-128k-instruct-GGUF-main/Phi-3-mini-128k-instruct.Q4_0.gguf',
 				),
 				engine: 'node-llama-cpp',
+				// engineOptions: {
+				// 	gpu: false,
+				// },
 			},
 		},
 	}
@@ -72,5 +78,5 @@ while (true) {
 		totalTokens: result.totalTokens,
 	})
 	// don't forget to release the instance, or the followup turn will be blocked
-	release()
+	await release()
 }

@@ -4,7 +4,7 @@ node_modules
 .DS_Store
 
 NOTES.md
-examples/pool-debug.js
+examples/debug.js
 
 /dist
 /.env

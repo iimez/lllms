@@ -14,7 +14,7 @@ const llms = new LLMServer({
 	concurrency: 2,
 	models: {
 		'phi3-mini-4k': {
-			task: 'inference',
+			task: 'text-completion',
 			url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
 			engine: 'node-llama-cpp',
 			maxInstances: 2,

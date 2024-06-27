@@ -36,7 +36,7 @@ export async function serveLLMs(options: StandaloneServerOptions) {
 	const { listen, ...serverOpts } = options
 	const listenOpts = listen ?? { port: 3000 }
 	const llmServer = new LLMServer(serverOpts)
-	llmServer.start()
+	await llmServer.start()
 	const app = express()
 	app.use(
 		cors(),

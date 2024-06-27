@@ -4,7 +4,6 @@ import { ChatMessage } from '#lllms/types/index.js'
 interface ContextStateData {
 	messages?: ChatMessage[]
 	prompt?: string
-	systemPrompt?: string
 }
 export function createContextStateHash(
 	state: ContextStateData,
@@ -14,7 +13,7 @@ export function createContextStateHash(
 	if (dropLastMessage && messages.length > 1) {
 		messages.pop()
 	}
-	const systemPromptData = state.systemPrompt || ''
+	const systemPromptData = messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n')
 	const messagesData = messages
 		.filter((message) => message.role !== 'system' && message.role !== 'function' && message.content)
 		.map((message) => message.role + message.content)

@@ -74,7 +74,7 @@ export class LLMServer {
 					url: modelUrl,
 				}),
 			}
-			if (modelOptions.task === 'inference') {
+			if (modelOptions.task === 'text-completion') {
 				modelsWithDefaults[modelId].grammars = {
 					...defaultGrammars,
 					...modelOptions.grammars,

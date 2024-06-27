@@ -8,7 +8,6 @@ export async function runContextShiftGenerationTest(
 	llms: LLMServer,
 	model: string = 'test',
 ) {
-	
 	// Turn 1: Tell the model a fact to remember so we can later make sure that a shift occured.
 	const messages: ChatMessage[] = [
 		{
@@ -34,7 +33,10 @@ export async function runContextShiftGenerationTest(
 	const animalName = 'Nedwick'
 	messages.push(response1.result.message, {
 		role: 'user',
-		content: `Now, I\'d like you to create a concept for a new animal called "${animalName}". Please provide a realistic outline of a made up animal, including its social structures, appearance, habitat, origins and diet.`,
+		content: [
+			`Now, I\'d like you to create a concept for a new animal called "${animalName}".`,
+			'Please provide a realistic outline of a made up animal, including its social structures, appearance, habitat, origins and diet.',
+		].join(' '),
 	})
 	const response2 = await createChatCompletion(llms, {
 		temperature: 1,
@@ -44,19 +46,23 @@ export async function runContextShiftGenerationTest(
 	console.debug({ turn2: response2.result.message.content })
 	const instanceId2 = parseInstanceId(response2.handle.id)
 	expect(instanceId1).toBe(instanceId2)
-	
+
 	messages.push(response2.result.message)
-	
+
 	const elaborateOn = async (field: string) => {
 		messages.push({
 			role: 'user',
-			content: `Elaborate on its ${field}. Afterwards, make sure you end your response with 'OK'.`,
+			content: `Elaborate a bit more on its ${field}. Afterwards, make sure you end your response with 'OK'.`,
 		})
-		const response = await createChatCompletion(llms, {
-			temperature: 1,
-			messages,
-			maxTokens: 1024,
-		}, 60000)
+		const response = await createChatCompletion(
+			llms,
+			{
+				temperature: 1,
+				messages,
+				maxTokens: 1024,
+			},
+			60000,
+		)
 		console.debug({ field, response: response.result.message.content })
 		const instanceId = parseInstanceId(response.handle.id)
 		expect(instanceId1).toBe(instanceId)
@@ -66,7 +72,7 @@ export async function runContextShiftGenerationTest(
 		expect(response.result.message.content).toMatch(new RegExp(animalName, 'i'))
 		messages.push(response.result.message)
 	}
-	
+
 	await elaborateOn('social structures')
 	await elaborateOn('origins')
 	await elaborateOn('habitat')

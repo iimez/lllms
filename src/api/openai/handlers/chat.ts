@@ -265,7 +265,7 @@ export function createChatCompletionHandler(llms: LLMServer) {
 							index: 0,
 							message: {
 								role: 'assistant',
-								content: result.message.content,
+								content: result.message.content || null,
 							},
 							logprobs: null,
 							finish_reason: result.finishReason

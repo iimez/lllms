@@ -233,7 +233,6 @@ export class LLMInstance {
 				newMessages.push(result.message)
 
 				this.contextStateHash = createContextStateHash({
-					systemPrompt: request.systemPrompt,
 					messages: newMessages,
 				})
 

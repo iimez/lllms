@@ -19,24 +19,20 @@ import {
 
 const models: Record<string, LLMOptions> = {
 	test: {
-		task: 'inference',
-		// on llama3 instruct everything but parallel function calls works.
-		url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-		sha256: '1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
+		task: 'text-completion',
+		url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/blob/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
+		sha256: 'c57380038ea85d8bec586ec2af9c91abc2f2b332d41d6cf180581d7bdffb93c1',
 		// on functionary everything but the context shift test works.
 		// url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
 		// sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
 		engine: 'node-llama-cpp',
 		contextSize: 2048,
-		// engineOptions: {
-		// 	gpu: false,
-		// },
 	},
 }
 
-suite('Features', () => {
+suite('features', () => {
 	const llms = new LLMServer({
-		// log: 'debug',
+		log: 'debug',
 		models,
 	})
 
@@ -76,9 +72,53 @@ suite('Features', () => {
 	})
 })
 
+suite('cache', () => {
+	const llms = new LLMServer({
+		// log: 'debug',
+		models: {
+			test: {
+				...models.test,
+				maxInstances: 2,
+			},
+		},
+	})
+	beforeAll(async () => {
+		await llms.start()
+	})
+	afterAll(async () => {
+		await llms.stop()
+	})
+
+	test('reuse context on stateless requests', async () => {
+		await runContextReuseTest(llms)
+	})
+	test('no leak when handling multiple sessions', async () => {
+		await runContextLeakTest(llms)
+	})
+
+})
+
+suite('context shift', () => {
+	const llms = new LLMServer({
+		models,
+	})
+	beforeAll(async () => {
+		await llms.start()
+	})
+	afterAll(async () => {
+		await llms.stop()
+	})
+	test('input that exceeds context size', async () => {
+		await runContextShiftIngestionTest(llms)
+	})
+	test('context shift during generation', async () => {
+		await runContextShiftGenerationTest(llms)
+	})
+})
+
 suite('ingest', () => {
 	const llms = new LLMServer({
-		log: 'debug',
+		// log: 'debug',
 		models,
 	})
 	beforeAll(async () => {
@@ -110,36 +150,5 @@ suite('ingest', () => {
 		console.debug({
 			res: res.message.content,
 		})
-	})
-})
-
-suite('context', () => {
-	const llms = new LLMServer({
-		// log: 'debug',
-		models: {
-			test: {
-				...models.test,
-				maxInstances: 2,
-			},
-		},
-	})
-	beforeAll(async () => {
-		await llms.start()
-	})
-	afterAll(async () => {
-		await llms.stop()
-	})
-
-	test('reuse context on stateless requests', async () => {
-		await runContextReuseTest(llms)
-	})
-	test('no leak when handling multiple sessions', async () => {
-		await runContextLeakTest(llms)
-	})
-	test('input that exceeds context size', async () => {
-		await runContextShiftIngestionTest(llms)
-	})
-	test('context shift during generation', async () => {
-		await runContextShiftGenerationTest(llms)
 	})
 })

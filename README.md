@@ -36,10 +36,10 @@ serveLLMs({
   // Where to cache models to. Defaults to `~/.cache/lllms`
   // modelsPath: '/path/to/models',
   models: {
-    // Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-
+    // Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-\.
     // Required are `task`, `engine`, `url` and/or `file`.
     'phi3-mini-4k': {
-      task: 'inference', // Use 'inference' or 'embedding'
+      task: 'text-completion', // Use 'text-completion' or 'embedding'
       engine: 'node-llama-cpp', // Choose between node-llama-cpp or gpt4all as bindings.
       // Model weights may be specified by file and/or url.
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
@@ -52,9 +52,16 @@ serveLLMs({
       // When to download and verify models weights. Defaults to 'on-demand'.
       // "blocking" = download on startup, "async" = download on startup but don't block.
       prepare: 'on-demand',
-      // Whether a chat session should be preloaded when a new instance is created
-      // currently only takes "chat" as a value, which will ingest system prompt and function call docs.
-      preload: 'chat',
+      // What should be preloaded in context, for text completion models.
+      preload: {
+        // a chat session, with optional leading system messages.
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant.',
+          },
+        ],
+      },
       // Use these to control resource usage.
       contextSize: 4096, // Maximum context size. Will be determined automatically if not set.
       maxInstances: 2, // How many active sessions you wanna be able to cache at the same time.
@@ -62,7 +69,7 @@ serveLLMs({
       ttl: 300, // Idle sessions will be disposed after this many seconds.
       // Set defaults for completions. These can be overridden per request.
       // If unset, default values depend on the engine.
-      systemPrompt: 'You are a helpful assistant.',
+      // systemPrompt: 'You are a helpful assistant.',
       completionDefaults: {
         temperature: 1,
       //   maxTokens: 100,
@@ -83,8 +90,8 @@ serveLLMs({
       },
       // Available options and their defaults are engine specific.
       engineOptions: {
-        // GPU will be used automatically, but models can be forced to always run on gpu by
-        // setting `gpu` to true. Usually better to leave it unset. See limitations.
+        // GPU will be used automatically if available.
+        // Only one model can use the gpu at a time.
         // gpu: true,
         // batchSize: 512,
         cpuThreads: 4,
@@ -210,7 +217,7 @@ System role messages are supported only as the first message in a chat completio
 Note that the current context cache implementation only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
 
 ##### Function Calling
-Parallel function calls are working with node-llama-cpp + [functionary models](https://functionary.meetkai.com/). Other models, like llama3 instruct, also work with function calling (but no parallel calls). `tool_choice` can currently not be controlled and will always be `auto`.
+Only available when using node-llama-cpp and models that support it, like [functionary models](https://functionary.meetkai.com/) and Llama3 instruct. `tool_choice` can currently not be controlled and will always be `auto`. GBNF grammars cannot be used together with function calling.
 
 #### TODO / Roadmap
 
@@ -238,7 +245,7 @@ Not in any particular order:
 - [x] Support preloading instances with context, like a long system message or few shot examples
 - [ ] Document function call handler usage
 - [ ] Nicer grammar api / loading
-- [ ] Tests for request cancellation and timeouts
+- [ ] Better support for cancellation and timeouts
 - [ ] Improve tests for embeddings
 - [ ] A mock engine implementing for testing and examples / Allow user to customize engine implementations
 - [ ] Logprobs support
@@ -253,6 +260,7 @@ If you know how to fill in any of the above checkboxes or have additional ideas 
 
 #### Possible Future Goals
 
+- Add whisper
 - Create a separate HTTP API thats independent of the OpenAI spec.
 - Add a clientside library (React hooks?) for use of this independent API.
 - Provide a CLI. (Launch a server via `lllms serve config.json|js`? Something to manage models on disk?)

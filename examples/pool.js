@@ -22,10 +22,11 @@ const pool = new LLMPool(
 		concurrency: 2,
 		models: {
 			'phi3-mini-4k': {
+				task: 'text-completion',
 				// note that this path needs to be absolute and the file needs to be downloaded beforehand.
 				file: path.resolve(
 					os.homedir(),
-					'.cache/lllms/Phi-3-mini-4k-instruct.Q4_0.gguf',
+					'.cache/lllms/gpt4all.io/Phi-3-mini-4k-instruct.Q4_0.gguf',
 				),
 				engine: 'gpt4all',
 				minInstances: 1, // setting this to something greater 0 will load the model on pool.init()

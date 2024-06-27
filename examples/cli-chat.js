@@ -14,9 +14,7 @@ const pool = new LLMPool(
 			'phi3-mini-4k': {
 				task: 'text-completion',
 				prepare: 'blocking',
-				// preload: 'chat',
 				minInstances: 1,
-				// preload: 
 				// note that this file needs to be downloaded manually when using the pool directly.
 				// setting this to 1 will load the model on pool.init(), otherwise it will be loaded on-demand
 				file: path.resolve(

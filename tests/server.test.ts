@@ -11,7 +11,7 @@ const testConfig: LLMServerOptions = {
 	models: {
 		[testModel]: {
 			url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
-			task: 'inference',
+			task: 'text-completion',
 			engine: 'gpt4all',
 			minInstances: 1,
 		},

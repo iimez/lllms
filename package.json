@@ -1,6 +1,6 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.5",
+	"version": "1.0.0-beta.6",
 	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",

@@ -208,41 +208,32 @@ export async function processChatCompletion(
 ): Promise<EngineChatCompletionResult> {
 	let session = instance.activeChatSession
 	if (!session || resetContext) {
-		// let systemPrompt = request.systemPrompt ?? config.systemPrompt
-		// // allow overriding system prompt via initial message.
-		// if (request.messages[0].role === 'system') {
-		// 	systemPrompt = request.messages[0].content
-		// }
 		let messages = createChatMessageArray(request.messages)
 		let systemPrompt
 		if (messages[0].role === 'system') {
 			systemPrompt = messages[0].content
 			messages = messages.slice(1)
 		}
+		// drop last user message
+		if (messages[messages.length - 1].role === 'user') {
+			messages = messages.slice(0, -1)
+		}
+
 		session = await instance.createChatSession({
 			systemPrompt,
 			messages,
 		})
 	}
 
-	// const conversationMessages = createChatMessageArray(request.messages)
-	const conversationMessages = session.messages.filter(
+	const conversationMessages = createChatMessageArray(request.messages).filter(
 		(m) => m.role !== 'system',
 	)
-	let input: CompletionInput
 
-	if (resetContext) {
-		// if we have reset context, we need to input the chat history,
-		// passing in the array will reingest the conversation, then prompt for the tailing user message
-		input = conversationMessages
-	} else {
-		// otherwise just prompt with last user message
-		const lastMessage = conversationMessages[conversationMessages.length - 1]
-		if (lastMessage.role !== 'user') {
-			throw new Error('Last message must be from user.')
-		}
-		input = lastMessage.content
+	const lastMessage = conversationMessages[conversationMessages.length - 1]
+	if (lastMessage.role !== 'user') {
+		throw new Error('Last message must be from user.')
 	}
+	const input: CompletionInput= lastMessage.content
 
 	let finishReason: CompletionFinishReason = 'eogToken'
 	let suffixToRemove: string | undefined

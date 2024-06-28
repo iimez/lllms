@@ -18,25 +18,6 @@ const serverOptions: StandaloneServerOptions = {
 			engine: 'gpt4all',
 			task: 'embedding',
 		},
-		'phi-3-mini-128k': {
-			url: 'https://huggingface.co/QuantFactory/Phi-3-mini-128k-instruct-GGUF/resolve/main/Phi-3-mini-128k-instruct.Q4_0.gguf',
-			engine: 'node-llama-cpp',
-			task: 'text-completion',
-			prepare: 'blocking',
-			preload: {
-				// documentFunctions: true,
-				messages: [
-					{
-						role: 'user',
-						content: 'What is the meaning of life?',
-					},
-					{
-						role: 'assistant',
-						content: 'The meaning of life is 41.',
-					},
-				],
-			}
-		},
 		'llama3-8b': {
 			url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 			sha256: '1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
@@ -44,9 +25,6 @@ const serverOptions: StandaloneServerOptions = {
 			engine: 'node-llama-cpp',
 			task: 'text-completion',
 			prepare: 'async',
-			engineOptions: {
-				gpu: 'metal',
-			}
 			// systemPrompt: 'Only answer in json format',
 			// completionDefaults: {
 			// 	grammar: 'json_object',

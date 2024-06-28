@@ -54,7 +54,7 @@ serveLLMs({
       prepare: 'on-demand',
       // What should be preloaded in context, for text completion models.
       preload: {
-        // a chat session, with optional leading system messages.
+        // a chat session, with optional leading system message.
         messages: [
           {
             role: 'system',

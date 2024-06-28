@@ -1,7 +1,7 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 
 import { LLMServer } from '#lllms/server.js'
-import { LLMOptions } from '#lllms/types/index.js'
+import { ChatMessage, LLMOptions } from '#lllms/types/index.js'
 import {
 	runStopTriggerTest,
 	runTokenBiasTest,
@@ -16,6 +16,7 @@ import {
 	runParallelFunctionCallTest,
 	runGrammarTest,
 } from './lib/index.js'
+import { createChatCompletion } from '../util.js'
 
 const models: Record<string, LLMOptions> = {
 	test: {
@@ -95,7 +96,84 @@ suite('cache', () => {
 	test('no leak when handling multiple sessions', async () => {
 		await runContextLeakTest(llms)
 	})
+})
 
+suite('preload', () => {
+	const preloadedMessages: ChatMessage[] = [
+		{
+			role: 'system',
+			content: 'You are an advanced mathematician.',
+		},
+		{
+			role: 'user',
+			content: 'Whats 2+2?',
+		},
+		{
+			role: 'assistant',
+			content: "It's 5!",
+		},
+	]
+	const llms = new LLMServer({
+		models: {
+			test: {
+				url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+				task: 'text-completion',
+				sha256:
+					'1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
+				engine: 'node-llama-cpp',
+				prepare: 'blocking',
+				maxInstances: 2,
+				preload: {
+					messages: preloadedMessages,
+				},
+			},
+		},
+	})
+
+	beforeAll(async () => {
+		await llms.start()
+	})
+	afterAll(async () => {
+		await llms.stop()
+	})
+	test('should utilize preloaded messages', async () => {
+		const chat = await createChatCompletion(llms, {
+			model: 'test',
+			messages: [
+				...preloadedMessages,
+				{
+					role: 'user',
+					content: 'Are you sure?',
+				},
+			],
+		})
+		// console.debug({
+		// 	response: chat.result.message.content,
+		// 	inputTokens: chat.result.promptTokens,
+		// })
+		expect(chat.result.promptTokens).toBe(8)
+	})
+
+	test('should not utilize preloaded messages', async () => {
+		const chat = await createChatCompletion(llms, {
+			model: 'test',
+			messages: [
+				{
+					role: 'system',
+					content: 'You are an advanced mathematician.',
+				},
+				{
+					role: 'user',
+					content: 'Whats 2+2?',
+				},
+			],
+		})
+		// console.debug({
+		// 	response: chat.result.message.content,
+		// 	inputTokens: chat.result.promptTokens,
+		// })
+		expect(chat.result.promptTokens).toBe(27)
+	})
 })
 
 suite('context shift', () => {

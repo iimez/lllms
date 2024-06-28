@@ -51,7 +51,8 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	constructor(opts: LLMPoolOptions, prepareInstance?: PrepareInstanceCallback) {
 		super()
 		if (opts.log) {
-			this.log = typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
+			this.log =
+				typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
 		} else {
 			this.log = createLogger(LogLevels.warn)
 		}
@@ -154,8 +155,13 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			const modelInstanceCount = Object.values(this.instances).filter(
 				(i) => i.model === instance.model,
 			).length
-			const minInstanceCount = this.config.models[instance.model].minInstances ?? 0
-			if (modelInstanceCount > minInstanceCount && instanceAge > instance.ttl && instance.status === 'idle') {
+			const minInstanceCount =
+				this.config.models[instance.model].minInstances ?? 0
+			if (
+				modelInstanceCount > minInstanceCount &&
+				instanceAge > instance.ttl &&
+				instance.status === 'idle'
+			) {
 				this.log(LogLevels.info, 'Auto disposing instance', {
 					instance: instance.id,
 				})
@@ -311,6 +317,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					const newInstance = await this.spawnInstance(request.model, {
 						emit: false,
 					})
+					newInstance.lock(request)
 					resolve(newInstance)
 					return
 				}
@@ -328,6 +335,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					const newInstance = await this.spawnInstance(request.model, {
 						emit: false,
 					})
+					newInstance.lock(request)
 					resolve(newInstance)
 				}
 			}
@@ -476,11 +484,12 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				}
 			}
 		}
-		
+
 		// before starting to wait, make sure sure we're not stuck with an error'd instance (and wait forever)
 		// currently instances only enter error state if prepareInstance throws an error
 		const errorInstance = Object.values(this.instances).find(
-			(instance) => instance.model === request.model && instance.status === 'error',
+			(instance) =>
+				instance.model === request.model && instance.status === 'error',
 		)
 		if (errorInstance) {
 			throw new Error('Instance is in error state')
@@ -504,7 +513,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			return instance
 		}
 	}
-	
+
 	private getRequestSequence() {
 		if (this.requestSequence > 999999) {
 			this.requestSequence = 0
@@ -513,7 +522,10 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	}
 
 	// requests an language model instance from the pool
-	async requestInstance(incomingRequest: IncomingLLMRequest, signal?: AbortSignal): Promise<LLMInstanceHandle> {
+	async requestInstance(
+		incomingRequest: IncomingLLMRequest,
+		signal?: AbortSignal,
+	): Promise<LLMInstanceHandle> {
 		const requestSequence = this.getRequestSequence()
 		const request = {
 			...incomingRequest,
@@ -567,7 +579,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				})
 			})
 		}
-		
+
 		return {
 			instance,
 			release: releaseInstance,

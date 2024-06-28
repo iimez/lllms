@@ -12,7 +12,12 @@ import {
 } from '#lllms/types/index.js'
 import type { EngineInstance } from '#lllms/engines/index.js'
 import { createContextStateHash } from '#lllms/lib/createContextStateHash.js'
-import { LogLevels, Logger, createLogger, withLogMeta } from '#lllms/lib/logger.js'
+import {
+	LogLevels,
+	Logger,
+	createLogger,
+	withLogMeta,
+} from '#lllms/lib/logger.js'
 import { elapsedMillis, mergeAbortSignals } from '#lllms/lib/util.js'
 
 const idAlphabet =
@@ -44,7 +49,10 @@ export class LLMInstance {
 	private llm: EngineInstance | null = null
 	private currentRequest: LLMRequest | null = null
 
-	constructor(engine: LLMEngine, { logger, gpu, ...options }: LLMInstanceOptions) {
+	constructor(
+		engine: LLMEngine,
+		{ logger, gpu, ...options }: LLMInstanceOptions,
+	) {
 		this.id = options.id + ':' + generateId(8)
 		this.engine = engine
 		this.config = options
@@ -95,6 +103,13 @@ export class LLMInstance {
 				signal,
 			)
 			this.status = 'idle'
+			if (this.config.preload) {
+				if ('messages' in this.config.preload) {
+					this.contextStateHash = createContextStateHash({
+						messages: this.config.preload.messages,
+					})
+				}
+			}
 			this.logger(LogLevels.debug, 'Instance loaded', {
 				elapsed: elapsedMillis(loadBegin),
 			})
@@ -149,14 +164,14 @@ export class LLMInstance {
 		const incomingStateHash = createContextStateHash(request, true)
 		return this.contextStateHash === incomingStateHash
 	}
-	
+
 	matchesRequirements(request: LLMRequest) {
 		const mustGpu = this.config.engineOptions?.gpu === true
 		const modelMatches = this.model === request.model
 		const gpuMatches = mustGpu ? this.gpu : true
 		return modelMatches && gpuMatches
 	}
-	
+
 	createChatCompletion(request: ChatCompletionRequest) {
 		if (!request.messages) {
 			throw new Error('Messages are required for chat completions.')
@@ -172,7 +187,7 @@ export class LLMInstance {
 		const cancel = () => {
 			cancelController.abort()
 		}
-		
+
 		// TODO
 		// - start completion immediately
 		// - return completion object, remove process method
@@ -184,9 +199,7 @@ export class LLMInstance {
 			cancel,
 			process: async (opts?: CompletionProcessingOptions) => {
 				// setting up signals
-				const abortSignals = [
-					cancelController.signal,
-				]
+				const abortSignals = [cancelController.signal]
 				const timeoutController = new AbortController()
 				let timeout: NodeJS.Timeout | undefined
 				if (opts?.timeout) {
@@ -288,7 +301,7 @@ export class LLMInstance {
 			},
 		}
 	}
-	
+
 	async createEmbeddings(request: EmbeddingsRequest) {
 		if (!request.input) {
 			throw new Error('Input is required for embeddings.')
@@ -300,7 +313,7 @@ export class LLMInstance {
 			embedding: id,
 		})
 		embeddingLogger(LogLevels.verbose, 'Creating embedding')
-		
+
 		const processingBegin = process.hrtime.bigint()
 		const result = await this.engine.processEmbeddings(
 			this.llm,

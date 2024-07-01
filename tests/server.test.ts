@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import request from 'supertest'
 import express, { Express } from 'express'
-import { LLMServerOptions, LLMServer } from '#lllms/server.js'
+import { ModelServer, ModelServerOptions } from '#lllms/server.js'
 import { createExpressMiddleware } from '#lllms/http.js'
 
 const testModel = 'phi3-mini-4k'
 
-const testConfig: LLMServerOptions = {
+const testConfig: ModelServerOptions = {
 	concurrency: 1,
 	models: {
 		[testModel]: {
@@ -20,10 +20,10 @@ const testConfig: LLMServerOptions = {
 
 describe('Express App', () => {
 	let app: Express
-	let llmServer: LLMServer
+	let llmServer: ModelServer
 
 	beforeAll(async () => {
-		llmServer = new LLMServer(testConfig)
+		llmServer = new ModelServer(testConfig)
 		app = express()
 		app.use(express.json(), createExpressMiddleware(llmServer))
 	})

@@ -1,7 +1,7 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import { Server } from 'node:http'
 import OpenAI from 'openai'
-import { serveLLMs } from '#lllms/http.js'
+import { startHTTPServer } from '#lllms/http.js'
 
 const chatModel = 'chat'
 const embeddingsModel = 'text-embed'
@@ -206,7 +206,7 @@ suite('OpenAI API (node-llama-cpp)', () => {
 	})
 
 	beforeAll(async () => {
-		server = await serveLLMs({
+		server = await startHTTPServer({
 			// log: 'debug',
 			listen: { port: 3000 },
 			concurrency: 2,
@@ -252,7 +252,7 @@ suite('OpenAI API (gpt4all)', () => {
 	})
 
 	beforeAll(async () => {
-		server = await serveLLMs({
+		server = await startHTTPServer({
 			// log: 'debug',
 			listen: { port: 3001 },
 			concurrency: 2,

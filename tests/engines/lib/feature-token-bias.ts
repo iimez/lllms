@@ -1,8 +1,8 @@
 import { expect } from 'vitest'
-import { LLMServer } from '#lllms/server.js'
+import { ModelServer } from '#lllms/server.js'
 import { createChatCompletion } from '../../util.js'
 
-export async function runTokenBiasTest(llms: LLMServer) {
+export async function runTokenBiasTest(llms: ModelServer) {
 	const unbiasedChat = await createChatCompletion(llms, {
 		messages: [
 			{

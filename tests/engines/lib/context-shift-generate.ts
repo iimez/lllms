@@ -1,11 +1,11 @@
-import { suite, it, expect, beforeAll, afterAll } from 'vitest'
-import { LLMServer } from '#lllms/server.js'
-import { ChatMessage, ChatCompletionRequest } from '#lllms/types/index.js'
+import { expect } from 'vitest'
+import { ModelServer } from '#lllms/server.js'
+import { ChatMessage } from '#lllms/types/index.js'
 import { createChatCompletion, parseInstanceId } from '../../util.js'
 
 // conversation that tests behavior when context window is exceeded while the model is generating text
 export async function runContextShiftGenerationTest(
-	llms: LLMServer,
+	llms: ModelServer,
 	model: string = 'test',
 ) {
 	// Turn 1: Tell the model a fact to remember so we can later make sure that a shift occured.
@@ -26,7 +26,7 @@ export async function runContextShiftGenerationTest(
 		messages,
 		stop: ['OK'],
 	})
-	const instanceId1 = parseInstanceId(response1.handle.id)
+	const instanceId1 = parseInstanceId(response1.task.id)
 
 	// Turn 2: Ask the model to start generating text about an animal with a specific name
 	// The animal name will later be used to check if the context shift messed up the output.
@@ -44,7 +44,7 @@ export async function runContextShiftGenerationTest(
 		maxTokens: 1024,
 	})
 	console.debug({ turn2: response2.result.message.content })
-	const instanceId2 = parseInstanceId(response2.handle.id)
+	const instanceId2 = parseInstanceId(response2.task.id)
 	expect(instanceId1).toBe(instanceId2)
 
 	messages.push(response2.result.message)
@@ -64,7 +64,7 @@ export async function runContextShiftGenerationTest(
 			60000,
 		)
 		console.debug({ field, response: response.result.message.content })
-		const instanceId = parseInstanceId(response.handle.id)
+		const instanceId = parseInstanceId(response.task.id)
 		expect(instanceId1).toBe(instanceId)
 		// make sure the model gave proper output throughout its elaboration
 		expect(response.result.message.content?.substring(-6)).toMatch(/OK/i)

@@ -1,16 +1,18 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import type { SchemaObject } from 'ajv'
-import type { LLMServer } from '#lllms/server.js'
+import type { ModelServer } from '#lllms/server.js'
 import {
 	ChatCompletionRequest,
-	FunctionDefinition,
+	ToolDefinition,
 	ChatMessage,
-	FunctionDefinitionParams,
+	ToolCallResultMessage,
+	UserMessage,
+	AssistantMessage,
+	SystemMessage,
 } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
-import { finishReasons } from '../finishReasons.js'
+import { finishReasonMap, messageRoleMap } from '../enums.js'
 
 interface OpenAIChatCompletionParams
 	extends Omit<OpenAI.ChatCompletionCreateParamsStreaming, 'stream'> {
@@ -26,7 +28,7 @@ interface OpenAIChatCompletionChunk extends OpenAI.ChatCompletionChunk {
 
 // v1/chat/completions
 // https://platform.openai.com/docs/api-reference/chat/create
-export function createChatCompletionHandler(llms: LLMServer) {
+export function createChatCompletionHandler(llms: ModelServer) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
 		let args: OpenAIChatCompletionParams
 
@@ -43,13 +45,13 @@ export function createChatCompletionHandler(llms: LLMServer) {
 		// TODO ajv schema validation?
 		if (!args.model || !args.messages) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
-			res.end(JSON.stringify({ error: 'Invalid request' }))
+			res.end(JSON.stringify({ error: 'Invalid request (need at least model and messages)' }))
 			return
 		}
 
-		if (!llms.getModelConfig(args.model)) {
+		if (!llms.modelExists(args.model)) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
-			res.end(JSON.stringify({ error: 'Invalid model' }))
+			res.end(JSON.stringify({ error: 'Model does not exist' }))
 			return
 		}
 
@@ -97,9 +99,9 @@ export function createChatCompletionHandler(llms: LLMServer) {
 				}
 			}
 
-			let completionFunctions:
-				| Record<string, FunctionDefinition>
-				| undefined = undefined
+			let completionTools:
+				| Record<string, ToolDefinition>
+				| undefined
 
 			if (args.tools) {
 				const functionTools = args.tools
@@ -112,11 +114,11 @@ export function createChatCompletionHandler(llms: LLMServer) {
 						}
 					})
 				if (functionTools.length) {
-					if (!completionFunctions) {
-						completionFunctions = {}
+					if (!completionTools) {
+						completionTools = {}
 					}
 					for (const tool of functionTools) {
-						completionFunctions[tool.name] = {
+						completionTools[tool.name] = {
 							description: tool.description,
 							parameters: tool.parameters,
 						}
@@ -126,10 +128,40 @@ export function createChatCompletionHandler(llms: LLMServer) {
 
 			const completionReq = omitEmptyValues<ChatCompletionRequest>({
 				model: args.model,
-				// TODO support multimodal image content array
-				messages: args.messages.filter((m) => {
-					return typeof m.content === 'string'
-				}) as ChatMessage[],
+				messages: args.messages.map((msg) => {
+					const role = messageRoleMap[msg.role]
+					let content: ChatMessage['content']
+					if (Array.isArray(msg.content)) {
+						content = msg.content.map((part) => {
+							if (typeof part === 'string') {
+								return {
+									type: 'text',
+									text: part,
+								}
+							}
+							if (part.type === 'image_url') {
+								return {
+									type: 'image',
+									url: part.image_url.url,
+								}
+							}
+							return part
+						})
+					} else {
+						content = msg.content || ''
+					}
+					if (role === 'tool' && 'tool_call_id' in msg) {
+						return {
+							role,
+							content,
+							callId: msg.tool_call_id,
+						} as ToolCallResultMessage
+					}
+					return {
+						role,
+						content,
+					} as UserMessage | AssistantMessage | SystemMessage
+				}),
 				temperature: args.temperature ? args.temperature : undefined,
 				stream: args.stream ? Boolean(args.stream) : false,
 				maxTokens: args.max_tokens ? args.max_tokens : undefined,
@@ -144,7 +176,7 @@ export function createChatCompletionHandler(llms: LLMServer) {
 				topP: args.top_p ? args.top_p : undefined,
 				tokenBias: args.logit_bias ? args.logit_bias : undefined,
 				grammar: completionGrammar,
-				functions: completionFunctions,
+				tools: completionTools,
 				// additional non-spec params
 				repeatPenaltyNum: args.repeat_penalty_num
 					? args.repeat_penalty_num
@@ -156,20 +188,19 @@ export function createChatCompletionHandler(llms: LLMServer) {
 				completionReq,
 				controller.signal,
 			)
-			const completion = instance.createChatCompletion(completionReq)
-
+			
 			if (ssePing) {
 				clearInterval(ssePing)
 			}
-			const result = await completion.process({
+			const task = instance.processChatCompletionTask(completionReq, {
 				signal: controller.signal,
 				onChunk: (chunk) => {
 					if (args.stream) {
 						const chunkData: OpenAIChatCompletionChunk = {
-							id: completion.id,
+							id: task.id,
 							object: 'chat.completion.chunk',
-							model: completion.model,
-							created: Math.floor(completion.createdAt.getTime() / 1000),
+							model: task.model,
+							created: Math.floor(task.createdAt.getTime() / 1000),
 							choices: [
 								{
 									index: 0,
@@ -186,16 +217,20 @@ export function createChatCompletionHandler(llms: LLMServer) {
 					}
 				},
 			})
+
+			const result = await task.result
+
 			release()
 
 			if (args.stream) {
-				if (result.finishReason === 'functionCall') {
-					// currently not possible to stream function calls, so "faking" the stream here to make the openai client happy
+				if (result.finishReason === 'toolCalls') {
+					// currently not possible to stream function calls
+					// imitating a stream here by sending two chunks. makes it work with the openai client
 					const streamedToolCallChunk: OpenAIChatCompletionChunk = {
-						id: completion.id,
+						id: task.id,
 						object: 'chat.completion.chunk',
-						model: completion.model,
-						created: Math.floor(completion.createdAt.getTime() / 1000),
+						model: task.model,
+						created: Math.floor(task.createdAt.getTime() / 1000),
 						choices: [
 							{
 								index: 0,
@@ -205,14 +240,14 @@ export function createChatCompletionHandler(llms: LLMServer) {
 								},
 								logprobs: null,
 								finish_reason: result.finishReason
-									? finishReasons[result.finishReason]
+									? finishReasonMap[result.finishReason]
 									: 'stop',
 							},
 						],
 					}
 
 					const toolCalls: OpenAI.ChatCompletionChunk.Choice.Delta.ToolCall[] =
-						result.message.functionCalls!.map((call, index) => {
+						result.message.toolCalls!.map((call, index) => {
 							return {
 								index,
 								id: call.id,
@@ -228,10 +263,10 @@ export function createChatCompletionHandler(llms: LLMServer) {
 				}
 				if (args.stream_options?.include_usage) {
 					const finalChunk: OpenAIChatCompletionChunk = {
-						id: completion.id,
+						id: task.id,
 						object: 'chat.completion.chunk',
-						model: completion.model,
-						created: Math.floor(completion.createdAt.getTime() / 1000),
+						model: task.model,
+						created: Math.floor(task.createdAt.getTime() / 1000),
 						system_fingerprint: instance.fingerprint,
 						choices: [
 							{
@@ -239,7 +274,7 @@ export function createChatCompletionHandler(llms: LLMServer) {
 								delta: {},
 								logprobs: null,
 								finish_reason: result.finishReason
-									? finishReasons[result.finishReason]
+									? finishReasonMap[result.finishReason]
 									: 'stop',
 							},
 						],
@@ -255,10 +290,10 @@ export function createChatCompletionHandler(llms: LLMServer) {
 				res.end()
 			} else {
 				const response: OpenAI.ChatCompletion = {
-					id: completion.id,
-					model: completion.model,
+					id: task.id,
+					model: task.model,
 					object: 'chat.completion',
-					created: Math.floor(completion.createdAt.getTime() / 1000),
+					created: Math.floor(task.createdAt.getTime() / 1000),
 					system_fingerprint: instance.fingerprint,
 					choices: [
 						{
@@ -269,7 +304,7 @@ export function createChatCompletionHandler(llms: LLMServer) {
 							},
 							logprobs: null,
 							finish_reason: result.finishReason
-								? finishReasons[result.finishReason]
+								? finishReasonMap[result.finishReason]
 								: 'stop',
 						},
 					],
@@ -280,11 +315,11 @@ export function createChatCompletionHandler(llms: LLMServer) {
 					},
 				}
 				if (
-					'functionCalls' in result.message &&
-					result.message.functionCalls?.length
+					'toolCalls' in result.message &&
+					result.message.toolCalls?.length
 				) {
 					response.choices[0].message.tool_calls =
-						result.message.functionCalls.map((call) => {
+						result.message.toolCalls.map((call) => {
 							return {
 								id: call.id,
 								type: 'function',

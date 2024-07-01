@@ -11,9 +11,21 @@ export const LogLevels = {
 export type LogLevel = keyof typeof LogLevels
 export type Logger = (level: LogLevel, message: string, meta?: any) => void
 
-export function withLogMeta(logger: Logger, meta: any) {
-	return (level: LogLevel, message: string, extraMeta: any = {}) => {
+export function withLogMeta(logger: Logger, meta: object) {
+	return (level: LogLevel, message: string, extraMeta: object = {}) => {
 		logger(level, message, { ...meta, ...extraMeta })
+	}
+}
+
+export function createSublogger(
+	minLevelOrLogger: LogLevel | Logger = LogLevels.warn,
+) {
+	if (minLevelOrLogger) {
+		return typeof minLevelOrLogger === 'string'
+			? createLogger(minLevelOrLogger)
+			: minLevelOrLogger
+	} else {
+		return createLogger(LogLevels.warn)
 	}
 }
 
@@ -21,7 +33,7 @@ export function createLogger(minLevel: LogLevel) {
 	const levels = Object.keys(LogLevels).reverse()
 	const minLevelIndex = levels.indexOf(minLevel)
 
-	return function (level: LogLevel, message: string, meta?: any) {
+	return function log(level: LogLevel, message: string, meta?: any) {
 		const levelIndex = levels.indexOf(level)
 		if (levelIndex >= minLevelIndex) {
 			const formattedMessage = formatMessage(level, message, meta)
@@ -72,15 +84,19 @@ function formatMessage(level: LogLevel, message: string, meta: any = {}) {
 
 	if (meta?.instance) {
 		messageStr += ' ' + chalk.magenta(meta.instance)
+	} else if (meta?.model) {
+		messageStr += ' ' + chalk.magenta(meta.model)
+	}
+
+	if (meta?.task) {
+		messageStr += ' ' + chalk.green(meta.task)
 	}
 
 	messageStr += ' ' + message
 
 	if (meta) {
-		const { instance, sequence, model, elapsed, error, ...otherData } = meta
-		if (model) {
-			messageStr += ' ' + chalk.green(meta.model)
-		}
+		const { instance, sequence, model, task, elapsed, error, ...otherData } =
+			meta
 		if (elapsed) {
 			if (elapsed < 1000) {
 				messageStr += ' ' + chalk.magenta(`+${elapsed.toFixed(2)}ms`)
@@ -89,11 +105,7 @@ function formatMessage(level: LogLevel, message: string, meta: any = {}) {
 			}
 		}
 		if (Object.keys(otherData).length > 0) {
-			messageStr +=
-				' ' +
-				JSON.stringify(otherData, null, 2)
-					.replace(/\n/g, ' ')
-					.replace(/\s+/g, ' ')
+			messageStr += ' ' + JSON.stringify(otherData, null, 2)
 		}
 	}
 	return messageStr

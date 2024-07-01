@@ -1,9 +1,9 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import express from 'express'
-import { LLMPool } from '#lllms/pool.js'
-import { LLMServer } from '#lllms/server.js'
+import { ModelPool } from '#lllms/pool.js'
+import { ModelServer } from '#lllms/server.js'
 
-export function createAPIMiddleware(server: LLMServer) {
+export function createAPIMiddleware(server: ModelServer) {
 	const router = express.Router()
 	
 	router.use((req, res, next) => {

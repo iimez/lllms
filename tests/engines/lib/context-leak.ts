@@ -1,11 +1,11 @@
 import { expect } from 'vitest'
-import { LLMServer } from '#lllms/server.js'
+import { ModelServer } from '#lllms/server.js'
 import { ChatMessage } from '#lllms/types/index.js'
 import { createChatCompletion, parseInstanceId } from '../../util.js'
 
 // conversation that tests whether reused instances leak their context
 export async function runContextLeakTest(
-	llms: LLMServer,
+	llms: ModelServer,
 	model: string = 'test',
 ) {
 	const messagesA: ChatMessage[] = [
@@ -22,7 +22,7 @@ export async function runContextLeakTest(
 		maxTokens: 10,
 		stop: ['OK'],
 	})
-	const instanceIdA1 = parseInstanceId(responseA1.handle.id)
+	const instanceIdA1 = parseInstanceId(responseA1.task.id)
 	// console.debug({ responseA1: responseA1.result.message.content })
 	const responseB1 = await createChatCompletion(llms, {
 		stop: ['\n'],
@@ -32,7 +32,7 @@ export async function runContextLeakTest(
 		],
 	})
 	// console.debug({ responseB1: responseB1.result.message.content })
-	const instanceIdB1 = parseInstanceId(responseB1.handle.id)
+	const instanceIdB1 = parseInstanceId(responseB1.task.id)
 	// assert the unrelated request B1 is handled by the idle instance
 	expect(instanceIdA1).not.toBe(instanceIdB1)
 	// assert request B1 did not have the correct context
@@ -47,7 +47,7 @@ export async function runContextLeakTest(
 		messages: messagesA,
 		maxTokens: 100,
 	})
-	const instanceIdA2 = parseInstanceId(responseA2.handle.id)
+	const instanceIdA2 = parseInstanceId(responseA2.task.id)
 	// assert follow up turn is handled by the same instance
 	expect(instanceIdA1).toBe(instanceIdA2)
 	// assert request A2 does not have the correct context

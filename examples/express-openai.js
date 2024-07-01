@@ -1,14 +1,14 @@
 import http from 'node:http'
 import express from 'express'
 import OpenAI from 'openai'
-import { LLMServer } from '../dist/server.js'
+import { ModelServer } from '../dist/server.js'
 import { createExpressMiddleware } from '../dist/http.js'
 
 // Demonstration of using the LLMServer + Express middleware to serve an OpenAI API.
 
 // Create a server with a single model, limiting to 2 instances that can run concurrently.
 // Models will be downloaded on-demand or during LLMServer.start() if minInstances > 0.
-const llms = new LLMServer({
+const llms = new ModelServer({
 	// Default model path is ~/.cache/lllms.
 	// modelsPath: path.resolve(os.homedir(), '.cache/models'),
 	concurrency: 2,

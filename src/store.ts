@@ -1,99 +1,189 @@
-import { promises as fs, existsSync, statSync } from 'node:fs'
-import path from 'node:path'
+import { promises as fs, existsSync } from 'node:fs'
 import PQueue from 'p-queue'
-import { ModelDownloader, createModelDownloader } from 'node-llama-cpp'
-import { FormattedStatus } from 'ipull'
-import { LLMConfig } from '#lllms/types/index.js'
-import { GGUFMeta, readGGUFMetaFromFile } from '#lllms/lib/gguf.js'
-import { calcFileChecksums } from '#lllms/lib/calcFileChecksums.js'
-import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
+import {
+	FileDownloadProgress,
+	ModelConfig,
+	ModelEngine,
+} from '#lllms/types/index.js'
+import {
+	Logger,
+	LogLevels,
+	LogLevel,
+	createSublogger,
+} from '#lllms/lib/logger.js'
+import { mergeAbortSignals } from '#lllms/lib/util.js'
 
-interface DownloadTask {
-	status: 'pending' | 'processing' | 'completed' | 'error'
-	model: string
-	handle: ModelDownloader
-	progress: FormattedStatus | null
+interface ModelFile {
+	size: number
 }
 
-interface LLMMeta {
-	gguf: Omit<GGUFMeta, 'tokenizer'>
-	checksums?: Record<string, string>
+export interface StoredModel extends ModelConfig {
+	meta?: unknown
+	downloads?: Map<string, DownloadTracker>
+	files?: Map<string, ModelFile>
+	status: 'unloaded' | 'preparing' | 'ready' | 'error'
 }
 
-export interface LLMStoreModelConfig extends LLMConfig {
-	meta?: LLMMeta
-}
-
-export interface LLMMStoreOptions {
-	modelsPath: string,
-	models: Record<string, LLMConfig>,
+export interface ModelStoreOptions {
+	modelsPath: string
+	models: Record<string, ModelConfig>
+	prepareConcurrency?: number
 	log?: Logger | LogLevel
 }
 
-export class LLMStore {
-	downloadQueue: PQueue
-	downloadTasks: DownloadTask[] = []
+export class ModelStore {
+	prepareQueue: PQueue
+	prepareController: AbortController
 	modelsPath: string
-	models: Record<string, LLMStoreModelConfig> = {}
+	models: Record<string, StoredModel> = {}
+	engines?: Record<string, ModelEngine>
+
 	private log: Logger
 
-	constructor(
-		options: LLMMStoreOptions,
-	) {
-		if (options.log) {
-			this.log = typeof options.log === 'string' ? createLogger(options.log) : options.log
-		} else {
-			this.log = createLogger(LogLevels.warn)
-		}
-		this.downloadQueue = new PQueue({
-			concurrency: 1,
+	constructor(options: ModelStoreOptions) {
+		this.prepareController = new AbortController()
+		this.log = createSublogger(options.log)
+		this.prepareQueue = new PQueue({
+			concurrency: options.prepareConcurrency ?? 2,
 		})
 		this.modelsPath = options.modelsPath
-		this.models = options.models
+		this.models = Object.fromEntries(
+			Object.entries(options.models).map(([modelId, model]) => [
+				modelId,
+				{
+					...model,
+					status: 'unloaded',
+				},
+			]),
+		)
 	}
 
-	async init() {
+	async init(engines: Record<string, ModelEngine>) {
+		this.engines = engines
 		if (!existsSync(this.modelsPath)) {
 			await fs.mkdir(this.modelsPath, { recursive: true })
 		}
-		
+
+		const blockingPromises = []
 		for (const modelId in this.models) {
 			const model = this.models[modelId]
-			if (model.prepare === 'blocking') {
-				await this.prepareModel(modelId)
+			if (model.prepare === 'blocking' || model.minInstances > 0) {
+				blockingPromises.push(this.prepareModel(modelId))
 			} else if (model.prepare === 'async') {
 				this.prepareModel(modelId)
 			}
 		}
+		await Promise.all(blockingPromises)
+	}
+
+	dispose() {
+		this.prepareController.abort()
+	}
+
+	private onDownloadProgress(
+		modelId: string,
+		progress: { file: string; loadedBytes: number; totalBytes: number },
+	) {
+		const model = this.models[modelId]
+		if (!model.downloads) {
+			model.downloads = new Map()
+		}
+		if (progress.totalBytes && progress.totalBytes === progress.loadedBytes) {
+			model.downloads.delete(progress.file)
+		} else if (model.downloads.has(progress.file)) {
+			const tracker = model.downloads.get(progress.file)!
+			tracker.pushProgress(progress)
+		} else {
+			const tracker = new DownloadTracker(5000)
+			tracker.pushProgress(progress)
+			model.downloads.set(progress.file, tracker)
+		}
+	}
+
+	// makes sure all required files for the model exist and are valid
+	// checking model checksums and reading metadata is model + engine specific and can be slow
+	async prepareModel(modelId: string, signal?: AbortSignal) {
+		const model = this.models[modelId]
+		if (!this.engines) {
+			throw new Error('Engines not initialized - did you call init()?')
+		}
+		model.status = 'preparing'
+		const engine = this.engines[model.engine]
+		this.log(LogLevels.info, `Preparing model`, {
+			model: modelId,
+			task: model.task,
+		})
+
+		await this.prepareQueue.add(async () => {
+			if (!('prepareModel' in engine)) {
+				model.status = 'ready'
+				return model
+			}
+			const logProgressInterval = setInterval(() => {
+				const progress = Array.from(model.downloads?.values() ?? [])
+					.map((tracker) => tracker.getStatus())
+					.reduce(
+						(acc, status) => {
+							acc.loadedBytes += status?.loadedBytes || 0
+							acc.totalBytes += status?.totalBytes || 0
+							return acc
+						},
+						{ loadedBytes: 0, totalBytes: 0 },
+					)
+				if (progress.totalBytes) {
+					const percent = (progress.loadedBytes / progress.totalBytes) * 100
+					this.log(LogLevels.info, `downloading ${Math.round(percent)}%`, {
+						model: modelId,
+					})
+				}
+			}, 10000)
+			try {
+				const modelMeta = await engine.prepareModel(
+					{ config: model, log: this.log },
+					(progress) => {
+						this.onDownloadProgress(model.id, progress)
+					},
+					mergeAbortSignals([signal, this.prepareController.signal]),
+				)
+				model.meta = modelMeta
+				model.status = 'ready'
+			} catch (error) {
+				this.log(LogLevels.error, `Error preparing model`, {
+					model: modelId,
+					error: error,
+				})
+				model.status = 'error'
+			} finally {
+				clearInterval(logProgressInterval)
+			}
+			return model
+		})
 	}
 
 	getStatus() {
-		const downloadStatus = Object.fromEntries(
-			this.downloadTasks.map((task) => [
-				task.model,
-				{
-					status: task.status,
-					totalBytes: task.handle.totalSize,
-					downloadedBytes: task.handle.downloadedSize,
-					progress: task.progress ? {
-						percentage: task.progress.percentage,
-						speed: task.progress.speed,
-						formattedSpeed: task.progress.formattedSpeed,
-						timeLeft: task.progress.timeLeft,
-						formatTimeLeft: task.progress.formatTimeLeft,
-					} : null,
-				},
-			]),
-		)
-
-		const modelStatus = Object.fromEntries(
+		const formatFloat = (num?: number) => parseFloat(num?.toFixed(2) || '0')
+		const storeStatusInfo = Object.fromEntries(
 			Object.entries(this.models).map(([modelId, model]) => {
-				let fileSize = 0
-				let lastModified = ''
-				if (existsSync(model.file)) {
-					const stat = statSync(model.file)
-					fileSize = stat.size
-					lastModified = new Date(stat.mtimeMs).toISOString()
+				let downloads: any = undefined
+				if (model.downloads) {
+					downloads = [...model.downloads].reduce<any>(
+						(acc, [key, download]) => {
+							const status = download.getStatus()
+							const latestState =
+								download.progressBuffer[download.progressBuffer.length - 1]
+							// console.log('latestState', latestState)
+							acc.push({
+								file: key,
+								...status,
+								percent: formatFloat(status?.percent),
+								speed: formatFloat(status?.speed),
+								eta: formatFloat(status?.eta),
+								// latest: latestState,
+							})
+							return acc
+						},
+						[],
+					)
 				}
 				return [
 					modelId,
@@ -102,163 +192,72 @@ export class LLMStore {
 						engineOptions: model.engineOptions,
 						minInstances: model.minInstances,
 						maxInstances: model.maxInstances,
-						source: {
-							url: model.url,
-							file: model.file,
-							size: fileSize,
-							lastModified,
-							checksums: model.meta?.checksums,
-							gguf: model.meta?.gguf,
-							download: downloadStatus[modelId],
-						},
+						status: model.status,
+						downloads,
 					},
 				]
 			}),
 		)
+		return storeStatusInfo
+	}
+}
 
-		return modelStatus
+type ProgressState = {
+	loadedBytes: number
+	totalBytes: number
+	timestamp: number // in milliseconds
+}
+
+type DownloadStatus = {
+	percent: number
+	speed: number
+	eta: number
+	loadedBytes: number
+	totalBytes: number
+}
+
+class DownloadTracker {
+	progressBuffer: ProgressState[] = []
+	private timeWindow: number
+
+	constructor(timeWindow: number = 1000) {
+		this.timeWindow = timeWindow
 	}
 
-	// TODO pull out (file: string, checksums: Record<string, string>) => Promise<Meta>
-	// any split metadata reading logic
-	async validateModel(modelId: string) {
-		const model = this.models[modelId]
-		const ggufMeta = await readGGUFMetaFromFile(model.file)
+	pushProgress({ loadedBytes, totalBytes }: FileDownloadProgress): void {
+		const timestamp = Date.now()
+		this.progressBuffer.push({ loadedBytes, totalBytes, timestamp })
+		this.cleanup()
+	}
 
-		if (model.md5) {
-			const fileChecksums = await calcFileChecksums(model.file, ['md5'])
-			if (fileChecksums.md5 !== model.md5) {
-				throw new Error(`MD5 checksum mismatch for ${modelId} - expected ${model.md5} got ${fileChecksums.md5}`)
-			}
-		}
+	private cleanup(): void {
+		const cutoffTime = Date.now() - this.timeWindow
+		this.progressBuffer = this.progressBuffer.filter(
+			(item) => item.timestamp >= cutoffTime,
+		)
+	}
 
-		if (model.sha256) {
-			const fileChecksums = await calcFileChecksums(model.file, ['sha256'])
-			if (fileChecksums.sha256 !== model.sha256) {
-				throw new Error(`SHA256 checksum mismatch for ${modelId} - expected ${model.sha256} got ${fileChecksums.sha256}`)
-			}
+	getStatus(): DownloadStatus | null {
+		if (this.progressBuffer.length < 2) {
+			return null // Not enough data to calculate speed and ETA
 		}
 
-		let checksums: Record<string, string> | undefined
-		const calcChecksums = false
-		if (calcChecksums) {
-			if (!model.sha256 && !model.md5) {
-				checksums = await calcFileChecksums(model.file, ['md5', 'sha256'])
-			} else {
-				checksums = {}
-				if (model.md5) {
-					checksums.md5 = model.md5
-				}
-				if (model.sha256) {
-					checksums.sha256 = model.sha256
-				}
-			}
-		}
-		
-		const gguf = ggufMeta
-		if (gguf.tokenizer?.ggml) {
-			delete gguf.tokenizer.ggml.merges
-			delete gguf.tokenizer.ggml.tokens
-			delete gguf.tokenizer.ggml.scores
-			delete gguf.tokenizer.ggml.token_type
-		}
+		const latestState = this.progressBuffer[this.progressBuffer.length - 1]
+		const previousState = this.progressBuffer[0] // oldest state within the time window
+
+		const bytesLoaded = latestState.loadedBytes - previousState.loadedBytes
+		const timeElapsed = latestState.timestamp - previousState.timestamp // in milliseconds
+
+		const speed = bytesLoaded / (timeElapsed / 1000) // convert ms to seconds
+		const remainingBytes = latestState.totalBytes - latestState.loadedBytes
+		const eta = remainingBytes / speed
 
 		return {
-			gguf,
-			checksums,
-		}
-	}
-
-	async prepareModel(modelId: string, signal?: AbortSignal) {
-		const model = this.models[modelId]
-		this.log(LogLevels.info, `Preparing model`, { model: modelId })
-		// make sure the model files exists, download if possible.
-		if (!existsSync(model.file) && model.url) {
-			await this.downloadModel(modelId, signal)
-		}
-		if (!existsSync(model.file)) {
-			throw new Error(`Model file not found: ${model.file}`)
-		}
-		// read some model metadata and verify checksums
-		if (!model.meta) { // TODO could more explicitly signify "this model/file has already been validated"
-			model.meta = await this.validateModel(modelId)
-		}
-	}
-
-	async downloadModel(modelId: string, signal?: AbortSignal) {
-		const model = this.models[modelId]
-
-		if (!model.url) {
-			throw new Error(`Model ${modelId} does not have a URL`)
-		}
-		// if the model is already being downloaded, wait for it to complete
-		const existingTask = this.downloadTasks.find((t) => t.model === modelId)
-		if (existingTask) {
-			return new Promise<void>((resolve, reject) => {
-				const onCompleted = (task: DownloadTask) => {
-					if (task.model === modelId) {
-						if (task.status === 'error') {
-							reject(new Error(`Download failed for ${modelId}`))
-						} else {
-							this.downloadQueue.off('completed', onCompleted)
-							resolve()
-						}
-					}
-				}
-				this.downloadQueue.on('completed', onCompleted)
-			})
-		}
-
-		this.log(LogLevels.info, `Downloading ${modelId}`, {
-			url: model.url,
-			file: model.file,
-		})
-		// otherwise, start a new download
-		const task: DownloadTask = {
-			model: modelId,
-			status: 'pending',
-			progress: null,
-			handle: await createModelDownloader({
-				modelUrl: model.url,
-				dirPath: path.dirname(model.file),
-				fileName: path.basename(model.file),
-				deleteTempFileOnCancel: false,
-				onProgress: (status) => {}, // this does not seem to be called
-			}),
-		}
-		// @ts-ignore .. but setting onProgress will allow for this to be called
-		task.handle._onDownloadProgress = (status: FormattedStatus) => {
-			task.progress = status
-		}
-		
-		const logInterval = setInterval(() => {
-			if (!task.progress) {
-				return
-			}
-			const percentage = task.progress.percentage.toFixed(2)
-			const speed = task.progress.formattedSpeed
-			const eta = task.progress.formatTimeLeft
-			this.log(LogLevels.info, `Downloading ${modelId}: ${percentage}% at ${speed} - ETA: ${eta}`)
-		}, 60000)
-
-		if (signal) {
-			signal.addEventListener('abort', () => {
-				// task.handle.close()
-			})
-		}
-		this.downloadTasks.push(task)
-		try {
-			await this.downloadQueue.add(async () => {
-				task.status = 'processing'
-				await task.handle.download({ signal })
-				task.status = 'completed'
-				return task
-			})
-		} catch (err) {
-			task.status = 'error'
-		} finally {
-			this.downloadTasks = this.downloadTasks.filter((t) => t !== task)
-			clearInterval(logInterval)
+			speed,
+			eta,
+			percent: latestState.loadedBytes / latestState.totalBytes,
+			loadedBytes: latestState.loadedBytes,
+			totalBytes: latestState.totalBytes,
 		}
 	}
 }

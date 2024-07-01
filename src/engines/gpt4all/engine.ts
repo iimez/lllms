@@ -1,4 +1,5 @@
 import path from 'node:path'
+import fs from 'node:fs'
 import {
 	loadModel,
 	createCompletion,
@@ -6,69 +7,144 @@ import {
 	InferenceModel,
 	LoadModelOptions,
 	CompletionInput,
-	ChatMessage as GPT4AllChatMessage,
 	EmbeddingModel,
+	DEFAULT_MODEL_LIST_URL,
+	ModelConfig as GPT4AllModelConfig,
 } from 'gpt4all'
 import {
-	EngineCompletionContext,
-	EngineChatCompletionContext,
+	EngineTextCompletionArgs,
+	EngineChatCompletionArgs,
 	EngineChatCompletionResult,
-	EngineCompletionResult,
+	EngineTextCompletionResult,
 	CompletionFinishReason,
 	EngineContext,
 	EngineOptionsBase,
-	EngineEmbeddingContext,
-	EngineEmbeddingsResult,
-	ChatMessage,
+	EngineEmbeddingArgs,
+	EngineEmbeddingResult,
+	FileDownloadProgress,
+	ModelConfig,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
+import { calculateFileChecksum } from '#lllms/lib/calculateFileChecksum.js'
+import { downloadLargeFile } from '#lllms/lib/downloadLargeFile.js'
+import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
+import { createChatMessageArray } from './util.js'
 
-export interface GPT4AllOptions extends EngineOptionsBase {}
+export interface GPT4AllEngineOptions extends EngineOptionsBase {}
+export type GPT4AllInstance = InferenceModel | EmbeddingModel
 
-function createChatMessageArray(messages: ChatMessage[]): GPT4AllChatMessage[] {
-	const chatMessages: GPT4AllChatMessage[] = []
-	let systemPrompt: string | undefined
-	for (const message of messages) {
-		// if (sharedRoles.includes(message.role)) {
-		if (message.role === 'user' || message.role === 'assistant') {
-			chatMessages.push({
-				role: message.role,
-				content: message.content,
-			})
-		} else if (message.role === 'system') {
-			if (systemPrompt) {
-				systemPrompt += '\n\n' + message.content
-			} else {
-				systemPrompt = message.content
-			}
-		}
-	}
-	if (systemPrompt) {
-		chatMessages.unshift({
-			role: 'system',
-			content: systemPrompt,
-		})
-	}
-	return chatMessages
+export interface GPT4AllModelMeta {
+	url: string
+	md5sum: string
+	filename: string
+	promptTemplate: string
+	systemPrompt: string
+	filesize: number
+	ramrequired: number
 }
 
-export async function loadInstance(
-	{ config, log }: EngineContext<GPT4AllOptions>,
+// interface GPT4AllModelConfig {
+// }
+
+function checkModelExists(config: ModelConfig<GPT4AllEngineOptions>) {
+	if (!fs.existsSync(config.location)) {
+		return false
+	}
+	return true
+}
+
+async function verifyModelFile(location: string, md5: string) {
+	const fileHash = await calculateFileChecksum(location, 'md5')
+	if (fileHash !== md5) {
+		throw new Error(
+			`Model md5 checksum mismatch: expected ${md5} got ${fileHash} for ${location}`,
+		)
+	}
+}
+
+export const autoGpu = true
+
+export async function prepareModel(
+	{ config, log }: EngineContext<GPT4AllModelMeta, GPT4AllEngineOptions>,
+	onProgress?: (progress: FileDownloadProgress) => void,
 	signal?: AbortSignal,
 ) {
-	log(LogLevels.info, `Load GPT4All model ${config.file}`)
+	fs.mkdirSync(path.dirname(config.location), { recursive: true })
+	const clearFileLock = await acquireFileLock(config.location, signal)
+	if (signal?.aborted) {
+		return
+	}
+	log(LogLevels.info, `Preparing gpt4all model at ${config.location}`, {
+		model: config.id,
+	})
+	let modelMeta: GPT4AllModelMeta | undefined
+	let modelList: GPT4AllModelMeta[]
+	const modelMetaPath = path.join(path.dirname(config.location), 'models.json')
+	if (!fs.existsSync(modelMetaPath)) {
+		const res = await fetch(DEFAULT_MODEL_LIST_URL)
+		modelList = (await res.json()) as GPT4AllModelMeta[]
+		fs.writeFileSync(modelMetaPath, JSON.stringify(modelList, null, 2))
+	} else {
+		modelList = JSON.parse(fs.readFileSync(modelMetaPath, 'utf-8'))
+	}
+	const foundModelMeta = modelList.find(
+		(item) => {
+			if (config.md5 && item.md5sum) {
+				return item.md5sum === config.md5
+			}
+			if (config.url && item.url) {
+				return item.url === config.url
+			}
+			return item.filename === path.basename(config.location)
+		},
+	)
+	if (foundModelMeta) {
+		modelMeta = foundModelMeta
+	}
 
+	if (!checkModelExists(config)) {
+		if (!config.url) {
+			throw new Error(`Cannot download "${config.id}" - no URL configured`)
+		}
+		if (signal?.aborted) {
+			return
+		}
+		await downloadLargeFile({
+			url: config.url,
+			file: config.location,
+			onProgress,
+			signal,
+		})
+	}
+
+	if (!signal?.aborted) {
+		if (config.md5) {
+			await verifyModelFile(config.location, config.md5)
+		} else if (modelMeta?.md5sum) {
+			await verifyModelFile(config.location, modelMeta.md5sum)
+		}
+	}
+	clearFileLock()
+	return modelMeta
+}
+
+export async function createInstance(
+	{ config, log }: EngineContext<GPT4AllModelMeta, GPT4AllEngineOptions>,
+	signal?: AbortSignal,
+) {
+	log(LogLevels.info, `Load GPT4All model ${config.location}`)
 	const loadOpts: LoadModelOptions = {
-		modelPath: path.dirname(config.file),
+		modelPath: path.dirname(config.location),
 		// file: config.file,
-		// allowDownload: false,
+		modelConfigFile: path.dirname(config.location) + '/models.json',
+		allowDownload: false,
 		device: config.engineOptions?.gpu ? 'gpu' : 'cpu',
 		ngl: config.engineOptions?.gpuLayers ?? 100,
 		nCtx: config.contextSize ?? 2048,
 		// verbose: true,
 		// signal?: // TODO no way to cancel load
 	}
-	
+
 	let modelType: 'inference' | 'embedding'
 	if (config.task === 'text-completion') {
 		modelType = 'inference'
@@ -78,14 +154,14 @@ export async function loadInstance(
 		throw new Error(`Unsupported task type: ${config.task}`)
 	}
 
-	const instance = await loadModel(path.basename(config.file), {
+	const instance = await loadModel(path.basename(config.location), {
 		...loadOpts,
 		type: modelType,
 	})
 	if (config.engineOptions?.cpuThreads) {
 		instance.llm.setThreadCount(config.engineOptions.cpuThreads)
 	}
-	
+
 	if (config.preload && 'generate' in instance) {
 		if ('messages' in config.preload) {
 			let messages = createChatMessageArray(config.preload.messages)
@@ -112,17 +188,20 @@ export async function loadInstance(
 	return instance
 }
 
-export async function disposeInstance(instance: InferenceModel) {
+export async function disposeInstance(instance: GPT4AllInstance) {
 	return instance.dispose()
 }
 
-export async function processCompletion(
-	instance: InferenceModel,
-	{ request, config, onChunk }: EngineCompletionContext<GPT4AllOptions>,
+export async function processTextCompletionTask(
+	{ request, config, onChunk }: EngineTextCompletionArgs<GPT4AllEngineOptions>,
+	instance: GPT4AllInstance,
 	signal?: AbortSignal,
-): Promise<EngineCompletionResult> {
+): Promise<EngineTextCompletionResult> {
+	if (!('generate' in instance)) {
+		throw new Error('Instance does not support text completion.')
+	}
 	if (!request.prompt) {
-		throw new Error('Prompt is required for completion.')
+		throw new Error('Prompt is required for text completion.')
 	}
 
 	let finishReason: CompletionFinishReason = 'eogToken'
@@ -130,7 +209,8 @@ export async function processCompletion(
 
 	const defaults = config.completionDefaults ?? {}
 	const stopTriggers = request.stop ?? defaults.stop ?? []
-	const includesStopTriggers = (text: string) => stopTriggers.find((t) => text.includes(t))
+	const includesStopTriggers = (text: string) =>
+		stopTriggers.find((t) => text.includes(t))
 	const result = await instance.generate(request.prompt, {
 		// @ts-ignore
 		special: true, // allows passing in raw prompt (including <|start|> etc.)
@@ -196,16 +276,19 @@ export async function processCompletion(
 	}
 }
 
-export async function processChatCompletion(
-	instance: InferenceModel,
+export async function processChatCompletionTask(
 	{
 		request,
 		config,
 		resetContext,
 		onChunk,
-	}: EngineChatCompletionContext<GPT4AllOptions>,
+	}: EngineChatCompletionArgs<GPT4AllEngineOptions>,
+	instance: GPT4AllInstance,
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
+	if (!('createChatSession' in instance)) {
+		throw new Error('Instance does not support chat completion.')
+	}
 	let session = instance.activeChatSession
 	if (!session || resetContext) {
 		let messages = createChatMessageArray(request.messages)
@@ -233,14 +316,15 @@ export async function processChatCompletion(
 	if (lastMessage.role !== 'user') {
 		throw new Error('Last message must be from user.')
 	}
-	const input: CompletionInput= lastMessage.content
+	const input: CompletionInput = lastMessage.content
 
 	let finishReason: CompletionFinishReason = 'eogToken'
 	let suffixToRemove: string | undefined
 
 	const defaults = config.completionDefaults ?? {}
 	const stopTriggers = request.stop ?? defaults.stop ?? []
-	const includesStopTriggers = (text: string) => stopTriggers.find((t) => text.includes(t))
+	const includesStopTriggers = (text: string) =>
+		stopTriggers.find((t) => text.includes(t))
 	const result = await createCompletion(session, input, {
 		temperature: request.temperature ?? defaults.temperature,
 		nPredict: request.maxTokens ?? defaults.maxTokens,
@@ -267,7 +351,7 @@ export async function processChatCompletion(
 			return !signal?.aborted
 		},
 		// @ts-ignore
-		onResponseTokens: ({tokenIds, text}) => {
+		onResponseTokens: ({ tokenIds, text }) => {
 			const matchingTrigger = includesStopTriggers(text)
 			if (matchingTrigger) {
 				finishReason = 'stopTrigger'
@@ -306,11 +390,17 @@ export async function processChatCompletion(
 	}
 }
 
-export async function processEmbeddings(
-	instance: EmbeddingModel,
-	{ request, config }: EngineEmbeddingContext<GPT4AllOptions>,
+export async function processEmbeddingTask(
+	{ request, config }: EngineEmbeddingArgs<GPT4AllEngineOptions>,
+	instance: GPT4AllInstance,
 	signal?: AbortSignal,
-): Promise<EngineEmbeddingsResult> {
+): Promise<EngineEmbeddingResult> {
+	if (!('embed' in instance)) {
+		throw new Error('Instance does not support embedding.')
+	}
+	if (!request.input) {
+		throw new Error('Input is required for embedding.')
+	}
 	const texts: string[] = []
 	if (typeof request.input === 'string') {
 		texts.push(request.input)

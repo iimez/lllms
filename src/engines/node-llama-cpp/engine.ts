@@ -1,3 +1,5 @@
+import path from 'node:path'
+import fs from 'node:fs'
 import { nanoid } from 'nanoid'
 import {
 	getLlama,
@@ -7,47 +9,63 @@ import {
 	LlamaContext,
 	LlamaCompletion,
 	LlamaLogLevel,
+	LlamaChatResponseFunctionCall,
 	TokenBias,
 	Token,
 	LlamaContextSequence,
-	Llama,
 	LlamaGrammar,
 	ChatHistoryItem,
 	LlamaChatResponse,
 	ChatModelResponse,
-	LlamaChatResponseFunctionCall,
 	LlamaEmbeddingContext,
 	defineChatSessionFunction,
 	GbnfJsonSchema,
 	ChatSessionModelFunction,
-	LlamaTextJSON,
+	createModelDownloader,
+	readGgufFileInfo,
+	GgufFileInfo,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 import {
 	EngineChatCompletionResult,
-	EngineCompletionResult,
-	EngineCompletionContext,
-	EngineChatCompletionContext,
+	EngineTextCompletionResult,
+	EngineTextCompletionArgs,
+	EngineChatCompletionArgs,
 	EngineContext,
 	EngineOptionsBase,
-	FunctionDefinition,
-	FunctionCallResultMessage,
+	ToolDefinition,
+	ToolCallResultMessage,
 	AssistantMessage,
-	EngineEmbeddingContext,
-	EngineEmbeddingsResult,
-	CompletionFinishReason,
-	ChatMessage,
+	EngineEmbeddingArgs,
+	EngineEmbeddingResult,
+	FileDownloadProgress,
+	ModelConfig,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
+import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
+import { calculateFileChecksum } from '#lllms/lib/calculateFileChecksum.js'
+import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
+import {
+	createSeed,
+	createChatMessageArray,
+	addFunctionCallToChatHistory,
+	mapFinishReason,
+	prepareGrammars,
+	readGrammarFiles,
+} from './util.js'
+import {
+	LlamaChatResult,
+} from './types.js'
 
 // https://github.com/withcatai/node-llama-cpp/pull/105
 // https://github.com/withcatai/node-llama-cpp/discussions/109
 
-export interface LlamaCppOptions extends EngineOptionsBase {
+export interface NodeLlamaCppEngineOptions extends EngineOptionsBase {
 	memLock?: boolean
+	grammarsPath?: string
 }
 
-interface LlamaCppInstance {
+export interface NodeLlamaCppInstance {
 	model: LlamaModel
 	context: LlamaContext
 	chat?: LlamaChat
@@ -58,59 +76,83 @@ interface LlamaCppInstance {
 	embeddingContext?: LlamaEmbeddingContext
 }
 
-interface LlamaChatResult {
-	responseText: string | null
-	functionCalls?: LlamaChatResponseFunctionCall<any>[]
-	stopReason: LlamaChatResponse['metadata']['stopReason']
+export interface NodeLlamaCppModelMeta {
+	gguf: GgufFileInfo
 }
 
-function prepareGrammars(llama: Llama, grammarConfig: Record<string, string>) {
-	const grammars: Record<string, LlamaGrammar> = {}
-	for (const key in grammarConfig) {
-		const grammar = new LlamaGrammar(llama, {
-			grammar: grammarConfig[key],
-			// printGrammar: true,
-		})
-		grammars[key] = grammar
+function checkModelExists(config: ModelConfig<NodeLlamaCppEngineOptions>) {
+	if (!fs.existsSync(config.location)) {
+		return false
 	}
-	return grammars
+	return true
 }
 
-function createChatMessageArray(messages: ChatMessage[]): ChatHistoryItem[] {
-	const items: ChatHistoryItem[] = []
-	let systemPrompt: string | undefined
-	for (const message of messages) {
-		if (message.role === 'user') {
-			items.push({
-				type: 'user',
-				text: message.content,
-			})
-		} else if (message.role === 'assistant') {
-			items.push({
-				type: 'model',
-				response: [message.content],
-			})
-		} else if (message.role === 'system') {
-			if (systemPrompt) {
-				systemPrompt += '\n\n' + message.content
-			} else {
-				systemPrompt = message.content
-			}
+export const autoGpu = true
+
+export async function prepareModel(
+	{ config, log }: EngineContext<NodeLlamaCppModelMeta, NodeLlamaCppEngineOptions>,
+	onProgress?: (progress: FileDownloadProgress) => void,
+	signal?: AbortSignal,
+) {
+	fs.mkdirSync(path.dirname(config.location), { recursive: true })
+	const clearFileLock = await acquireFileLock(config.location, signal)
+	log(LogLevels.info, `Preparing node-llama-cpp model at ${config.location}`, {
+		model: config.id,
+	})
+	if (!checkModelExists(config)) {
+		if (!config.url) {
+			throw new Error(`Cannot download "${config.id}" - no URL configured`)
+		}
+		log(LogLevels.info, `Downloading ${config.id}`, {
+			url: config.url,
+			file: config.file,
+			location: config.location,
+		})
+		const downloader = await createModelDownloader({
+			modelUrl: config.url,
+			dirPath: path.dirname(config.location),
+			fileName: path.basename(config.location),
+			deleteTempFileOnCancel: false,
+			onProgress: (status) => {
+				if (onProgress) {
+					onProgress({
+						file: config.location,
+						loadedBytes: status.downloadedSize,
+						totalBytes: status.totalSize,
+					})
+				}
+			},
+		})
+		await downloader.download()
+	}
+
+	if (config.sha256) {
+		const fileHash = await calculateFileChecksum(config.location, 'sha256')
+		if (fileHash !== config.sha256) {
+			throw new Error(
+				`Model sha256 checksum mismatch: expected ${config.sha256} got ${fileHash} for ${config.location}`,
+			)
 		}
 	}
-
-	if (systemPrompt) {
-		items.unshift({
-			type: 'system',
-			text: systemPrompt,
-		})
+	const gguf = await readGgufFileInfo(config.location, {
+		signal,
+		ignoreKeys: [
+			'gguf.tokenizer.ggml.merges',
+			'gguf.tokenizer.ggml.tokens',
+			'gguf.tokenizer.ggml.scores',
+			'gguf.tokenizer.ggml.token_type',
+		],
+	})
+	clearFileLock()
+	return {
+		gguf,
 	}
-
-	return items
 }
 
-export async function loadInstance(
-	{ config, log }: EngineContext<LlamaCppOptions>,
+const defaultGrammarsPath = path.dirname(new URL(import.meta.url).pathname) + '/grammars'
+
+export async function createInstance(
+	{ config, log }: EngineContext<NodeLlamaCppModelMeta, NodeLlamaCppEngineOptions>,
 	signal?: AbortSignal,
 ) {
 	log(LogLevels.debug, 'Load Llama model', config.engineOptions)
@@ -137,23 +179,26 @@ export async function loadInstance(
 			}
 		},
 	})
-
+	
+	// load GBNF grammars from file
+	const grammarsPath = config.engineOptions?.grammarsPath ?? defaultGrammarsPath
+	const loadedGrammars = readGrammarFiles(grammarsPath)
 	let grammars: Record<string, LlamaGrammar> = {}
-	if (config.grammars) {
-		grammars = prepareGrammars(llama, config.grammars)
+	if (Object.keys(loadedGrammars).length) {
+		grammars = prepareGrammars(llama, loadedGrammars)
 	}
 
-	const model = await llama.loadModel({
-		modelPath: config.file, // full model absolute path
+	const llamaModel = await llama.loadModel({
+		modelPath: config.location, // full model absolute path
 		loadSignal: signal,
 		useMlock: config.engineOptions?.memLock ?? false,
 		gpuLayers: config.engineOptions?.gpuLayers,
 		// onLoadProgress: (percent) => {}
 	})
 
-	const context = await model.createContext({
+	const context = await llamaModel.createContext({
 		sequences: 1,
-		seed: createSeed(0, 1000000),
+		seed: config.completionDefaults?.seed ?? createSeed(0, 1000000),
 		threads: config.engineOptions?.cpuThreads,
 		batchSize: config.engineOptions?.batchSize,
 		contextSize: config.contextSize,
@@ -165,8 +210,8 @@ export async function loadInstance(
 		createSignal: signal,
 	})
 
-	const instance: LlamaCppInstance = {
-		model,
+	const instance: NodeLlamaCppInstance = {
+		model: llamaModel,
 		context,
 		grammars,
 		chat: undefined,
@@ -184,10 +229,10 @@ export async function loadInstance(
 			})
 
 			let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
-			if (config.functions && Object.keys(config.functions).length > 0) {
+			if (config.tools && Object.keys(config.tools).length > 0) {
 				inputFunctions = {}
-				for (const functionName in config.functions) {
-					const functionDef = config.functions[functionName]
+				for (const functionName in config.tools) {
+					const functionDef = config.tools[functionName]
 					inputFunctions[functionName] = defineChatSessionFunction({
 						description: functionDef.description,
 						params: functionDef.parameters as GbnfJsonSchema,
@@ -201,7 +246,7 @@ export async function loadInstance(
 				{
 					initialUserPrompt: '',
 					functions: inputFunctions,
-					documentFunctionParams: config.preload.documentFunctions,
+					documentFunctionParams: config.preload.documentTools,
 				},
 			)
 
@@ -231,74 +276,23 @@ export async function loadInstance(
 	return instance
 }
 
-export async function disposeInstance(instance: LlamaCppInstance) {
+export async function disposeInstance(instance: NodeLlamaCppInstance) {
 	instance.model.dispose()
 }
 
-function createSeed(min: number, max: number) {
-	min = Math.ceil(min)
-	max = Math.floor(max)
-	return Math.floor(Math.random() * (max - min)) + min
-}
-
-function addFunctionCallToChatHistory({
-	chatHistory,
-	functionName,
-	functionDescription,
-	callParams,
-	callResult,
-	rawCall,
-}: {
-	chatHistory: ChatHistoryItem[]
-	functionName: string
-	functionDescription?: string
-	callParams: any
-	callResult: any
-	rawCall?: LlamaTextJSON
-}) {
-	const newChatHistory = chatHistory.slice()
-	if (
-		newChatHistory.length === 0 ||
-		newChatHistory[newChatHistory.length - 1].type !== 'model'
-	)
-		newChatHistory.push({
-			type: 'model',
-			response: [],
-		})
-
-	const lastModelResponseItem = newChatHistory[
-		newChatHistory.length - 1
-	] as ChatModelResponse
-	const newLastModelResponseItem = { ...lastModelResponseItem }
-	newChatHistory[newChatHistory.length - 1] = newLastModelResponseItem
-
-	const modelResponse = newLastModelResponseItem.response.slice()
-	newLastModelResponseItem.response = modelResponse
-
-	modelResponse.push({
-		type: 'functionCall',
-		name: functionName,
-		description: functionDescription,
-		params: callParams,
-		result: callResult,
-		rawCall,
-	})
-
-	return newChatHistory
-}
-
-export async function processChatCompletion(
-	instance: LlamaCppInstance,
+export async function processChatCompletionTask(
 	{
 		request,
 		config,
 		resetContext,
 		log,
 		onChunk,
-	}: EngineChatCompletionContext<LlamaCppOptions>,
+	}: EngineChatCompletionArgs<NodeLlamaCppEngineOptions>,
+	instance: NodeLlamaCppInstance,
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
 	if (!instance.chat || resetContext) {
+		log(LogLevels.debug, 'Recreating chat context', { resetContext, willDisposeChat: !!instance.chat })
 		// if context reset is requested, dispose the chat instance
 		if (instance.chat) {
 			await instance.chat.dispose()
@@ -340,39 +334,43 @@ export async function processChatCompletion(
 	}
 
 	// setting up available function definitions
-	const functionDefinitions: Record<string, FunctionDefinition> = {
-		...config.functions,
-		...request.functions,
+	const toolDefinitions: Record<string, ToolDefinition> = {
+		...config.tools,
+		...request.tools,
 	}
 
 	// see if the user submitted any function call results
 	const resolvedFunctionCalls = []
 	const functionCallResultMessages = request.messages.filter(
-		(m) => m.role === 'function',
-	) as FunctionCallResultMessage[]
+		(m) => m.role === 'tool',
+	) as ToolCallResultMessage[]
 	for (const message of functionCallResultMessages) {
-		if (instance.pendingFunctionCalls[message.callId]) {
-			log(LogLevels.debug, 'Resolving pending function call', message)
-			const functionCall = instance.pendingFunctionCalls[message.callId]
-			const functionDef = functionDefinitions[functionCall.functionName]
-			resolvedFunctionCalls.push({
-				name: functionCall.functionName,
-				description: functionDef?.description,
-				params: functionCall.params,
-				result: message.content,
-				raw:
-					functionCall.raw +
-					instance.chat.chatWrapper.generateFunctionCallResult(
-						functionCall.functionName,
-						functionCall.params,
-						message.content,
-					),
-			})
-			delete instance.pendingFunctionCalls[message.callId]
-		} else {
-			log(LogLevels.warn, 'Pending function call not found', message)
+		if (!instance.pendingFunctionCalls[message.callId]) {
+			log(LogLevels.warn, `Received function result for non-existing call id "${message.callId}`)
+			continue
 		}
+		log(LogLevels.debug, 'Resolving pending function call', {
+			id: message.callId,
+			result: message.content,
+		})
+		const functionCall = instance.pendingFunctionCalls[message.callId]
+		const functionDef = toolDefinitions[functionCall.functionName]
+		resolvedFunctionCalls.push({
+			name: functionCall.functionName,
+			description: functionDef?.description,
+			params: functionCall.params,
+			result: message.content,
+			raw:
+				functionCall.raw +
+				instance.chat.chatWrapper.generateFunctionCallResult(
+					functionCall.functionName,
+					functionCall.params,
+					message.content,
+				),
+		})
+		delete instance.pendingFunctionCalls[message.callId]
 	}
+	// if we resolved any results, add them to history
 	if (resolvedFunctionCalls.length) {
 		instance.chatHistory.push({
 			type: 'model',
@@ -386,14 +384,13 @@ export async function processChatCompletion(
 	}
 
 	// add the new user message to the chat history
-	let newUserMessage: string | undefined
 	const lastMessage = request.messages[request.messages.length - 1]
-	if (lastMessage.role === 'user') {
-		newUserMessage = lastMessage.content
-		if (newUserMessage) {
+	if (lastMessage.role === 'user' && lastMessage.content) {
+		const newUserText = flattenMessageTextContent(lastMessage.content)
+		if (newUserText) {
 			instance.chatHistory.push({
 				type: 'user',
-				text: newUserMessage,
+				text: newUserText,
 			})
 		}
 	}
@@ -409,10 +406,10 @@ export async function processChatCompletion(
 			throw new Error(`Grammar "${request.grammar}" not found.`)
 		}
 		inputGrammar = instance.grammars[request.grammar]
-	} else if (Object.keys(functionDefinitions).length > 0) {
+	} else if (Object.keys(toolDefinitions).length > 0) {
 		inputFunctions = {}
-		for (const functionName in functionDefinitions) {
-			const functionDef = functionDefinitions[functionName]
+		for (const functionName in toolDefinitions) {
+			const functionDef = toolDefinitions[functionName]
 			inputFunctions[functionName] = defineChatSessionFunction({
 				description: functionDef.description,
 				params: functionDef.parameters as GbnfJsonSchema,
@@ -420,7 +417,6 @@ export async function processChatCompletion(
 			}) as ChatSessionModelFunction
 		}
 	}
-
 	const defaults = config.completionDefaults ?? {}
 	let lastEvaluation: LlamaChatResponse['lastEvaluation'] | undefined =
 		instance.lastEvaluation
@@ -462,7 +458,7 @@ export async function processChatCompletion(
 		  }
 		: {
 				grammar: inputGrammar,
-		}
+		  }
 
 	while (true) {
 		const {
@@ -512,7 +508,7 @@ export async function processChatCompletion(
 			// find leading immediately evokable function calls (=have a handler)
 			const evokableFunctionCalls = []
 			for (const functionCall of functionCalls) {
-				const functionDef = functionDefinitions[functionCall.functionName]
+				const functionDef = toolDefinitions[functionCall.functionName]
 				if (functionDef.handler) {
 					evokableFunctionCalls.push(functionCall)
 				} else {
@@ -523,7 +519,7 @@ export async function processChatCompletion(
 			// resolve their results.
 			const results = await Promise.all(
 				evokableFunctionCalls.map(async (functionCall) => {
-					const functionDef = functionDefinitions[functionCall.functionName]
+					const functionDef = toolDefinitions[functionCall.functionName]
 					if (!functionDef) {
 						throw new Error(
 							`The model tried to call undefined function "${functionCall.functionName}"`,
@@ -533,9 +529,9 @@ export async function processChatCompletion(
 						functionCall.params,
 					)
 					log(LogLevels.debug, 'Function handler resolved', {
-						functionName: functionCall.functionName,
-						functionParams: functionCall.params,
-						functionResult: functionCallResult,
+						function: functionCall.functionName,
+						args: functionCall.params,
+						result: functionCallResult,
 					})
 					return {
 						functionDef,
@@ -613,15 +609,31 @@ export async function processChatCompletion(
 		// as is, these may never resolve
 		const pendingFunctionCalls = completionResult.functionCalls.filter(
 			(call) => {
-				const functionDef = functionDefinitions[call.functionName]
+				const functionDef = toolDefinitions[call.functionName]
 				return !functionDef.handler
 			},
 		)
+		
+		// TODO write a test that triggers this?
+		const tailingFunctionCalls = completionResult.functionCalls.filter(
+			(call) => {
+				const functionDef = toolDefinitions[call.functionName]
+				return functionDef.handler
+			},
+		)
+		if (tailingFunctionCalls.length) {
+			console.debug(tailingFunctionCalls)
+			log(LogLevels.warn, 'Tailing function calls not resolved')
+		}
 
-		assistantMessage.functionCalls = pendingFunctionCalls.map((call) => {
+		assistantMessage.toolCalls = pendingFunctionCalls.map((call) => {
 			const callId = nanoid()
 			instance.pendingFunctionCalls[callId] = call
-			log(LogLevels.debug, 'Adding pending function call result', call)
+			log(LogLevels.debug, 'Saving pending tool call', {
+				id: callId,
+				function: call.functionName,
+				args: call.params,
+			})
 			return {
 				id: callId,
 				name: call.functionName,
@@ -644,28 +656,18 @@ export async function processChatCompletion(
 	}
 }
 
-function mapFinishReason(
-	nodeLlamaCppFinishReason: string,
-): CompletionFinishReason {
-	switch (nodeLlamaCppFinishReason) {
-		case 'functionCalls':
-			return 'functionCall'
-		case 'stopGenerationTrigger':
-			return 'stopTrigger'
-		case 'customStopTrigger':
-			return 'stopTrigger'
-		default:
-			return nodeLlamaCppFinishReason as CompletionFinishReason
-	}
-}
-
-export async function processCompletion(
-	instance: LlamaCppInstance,
-	{ request, config, log, onChunk }: EngineCompletionContext<LlamaCppOptions>,
+export async function processTextCompletionTask(
+	{
+		request,
+		config,
+		log,
+		onChunk,
+	}: EngineTextCompletionArgs<NodeLlamaCppEngineOptions>,
+	instance: NodeLlamaCppInstance,
 	signal?: AbortSignal,
-): Promise<EngineCompletionResult> {
+): Promise<EngineTextCompletionResult> {
 	if (!request.prompt) {
-		throw new Error('Prompt is required for completion.')
+		throw new Error('Prompt is required for text completion.')
 	}
 
 	let contextSequence: LlamaContextSequence
@@ -680,7 +682,7 @@ export async function processCompletion(
 		await instance.context.dispose()
 		instance.context = await instance.model.createContext({
 			createSignal: signal,
-			seed: request.seed ?? config.completionDefaults?.seed, // || createSeed(0, 1000000),
+			seed: request.seed ?? config.completionDefaults?.seed ?? createSeed(0, 1000000),
 			threads: config.engineOptions?.cpuThreads,
 			batchSize: config.engineOptions?.batchSize,
 		})
@@ -738,11 +740,14 @@ export async function processCompletion(
 	}
 }
 
-export async function processEmbeddings(
-	instance: LlamaCppInstance,
-	{ request, config }: EngineEmbeddingContext<LlamaCppOptions>,
+export async function processEmbeddingTask(
+	{ request, config }: EngineEmbeddingArgs<NodeLlamaCppEngineOptions>,
+	instance: NodeLlamaCppInstance,
 	signal?: AbortSignal,
-): Promise<EngineEmbeddingsResult> {
+): Promise<EngineEmbeddingResult> {
+	if (!request.input) {
+		throw new Error('Input is required for embedding.')
+	}
 	const texts: string[] = []
 	if (typeof request.input === 'string') {
 		texts.push(request.input)
@@ -754,8 +759,7 @@ export async function processEmbeddings(
 	}
 
 	if (!instance.embeddingContext) {
-		// console.debug('creating embed context')
-		instance.embeddingContext = await instance.model.createEmbeddingContext()
+		instance.embeddingContext = await instance.model.createEmbeddingContext({ createSignal: signal })
 	}
 
 	const embeddings: Float32Array[] = []
@@ -768,6 +772,9 @@ export async function processEmbeddings(
 			tokenizedInput,
 		)
 		embeddings.push(new Float32Array(embedding.vector))
+		if (signal?.aborted) {
+			break
+		}
 	}
 
 	return {

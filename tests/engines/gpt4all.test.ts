@@ -1,15 +1,14 @@
 import { suite, it, test, beforeAll, afterAll, expect } from 'vitest'
-import { LLMServer } from '#lllms/server.js'
-import { ChatCompletionRequest, ChatMessage, LLMOptions } from '#lllms/types/index.js'
+import { ModelServer } from '#lllms/server.js'
+import { ChatCompletionRequest, ChatMessage, ModelOptions } from '#lllms/types/index.js'
 import {
 	runContextLeakTest,
 	runContextReuseTest,
 	runStopTriggerTest,
 	runSystemMessageTest,
 } from './lib/index.js'
-import { createChatCompletion } from '../util.js'
 
-const models: Record<string, LLMOptions> = {
+const models: Record<string, ModelOptions> = {
 	test: {
 		task: 'text-completion',
 		url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
@@ -22,7 +21,7 @@ const models: Record<string, LLMOptions> = {
 }
 
 suite('features', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		// log: 'debug',
 		models,
 	})
@@ -44,7 +43,7 @@ suite('features', () => {
 })
 
 suite('cache', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		// log: 'debug',
 		models,
 	})
@@ -81,7 +80,7 @@ suite('preload', () => {
 			content: "It's 5!",
 		},
 	]
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		models: {
 			test: {
 				task: 'text-completion',

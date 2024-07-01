@@ -1,15 +1,15 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import { EmbeddingsRequest } from '#lllms/types/index.js'
+import { EmbeddingRequest } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
-import { LLMServer } from '#lllms/server.js'
+import { ModelServer } from '#lllms/server.js'
 
 type OpenAIEmbeddingsParams = OpenAI.EmbeddingCreateParams
 
 // v1/embeddings
 // https://platform.openai.com/docs/api-reference/embeddings
-export function createEmbeddingsHandler(llms: LLMServer) {
+export function createEmbeddingsHandler(llms: ModelServer) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
 		let args: OpenAIEmbeddingsParams
 
@@ -29,7 +29,7 @@ export function createEmbeddingsHandler(llms: LLMServer) {
 			res.end(JSON.stringify({ error: 'Invalid request' }))
 			return
 		}
-		if (!llms.getModelConfig(args.model)) {
+		if (!llms.modelExists(args.model)) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
@@ -54,7 +54,7 @@ export function createEmbeddingsHandler(llms: LLMServer) {
 				throw new Error('Input must be a string')
 			}
 
-			const embeddingsReq = omitEmptyValues<EmbeddingsRequest>({
+			const embeddingsReq = omitEmptyValues<EmbeddingRequest>({
 				model: args.model,
 				input: args.input as string,
 			})
@@ -63,12 +63,12 @@ export function createEmbeddingsHandler(llms: LLMServer) {
 				embeddingsReq,
 				controller.signal,
 			)
-			const result = await instance.createEmbeddings(embeddingsReq)
-
+			const task = instance.processEmbeddingTask(embeddingsReq)
+			const result = await task.result
 			release()
 
 			const response: OpenAI.CreateEmbeddingResponse = {
-				model: instance.model,
+				model: instance.modelId,
 				object: 'list',
 				data: result.embeddings.map((embedding, index) => ({
 					embedding: Array.from(embedding),

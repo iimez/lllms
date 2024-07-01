@@ -1,4 +1,3 @@
-
 export function elapsedMillis(since: bigint): number {
 	const now = process.hrtime.bigint()
 	return Number(now - BigInt(since)) / 1e6
@@ -12,22 +11,33 @@ export function omitEmptyValues<T extends Record<string, any>>(dict: T): T {
 	) as T
 }
 
-export function formatBytes(bytes: number, decimals = 2): string {
-	if (bytes === 0) return '0 Bytes'
-	const k = 1024
-	const dm = decimals < 0 ? 0 : decimals
-	const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
-	const i = Math.floor(Math.log(bytes) / Math.log(k))
-	return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
-}
-
-export function mergeAbortSignals(signals: AbortSignal[]): AbortSignal {
+export function mergeAbortSignals(
+	signals: Array<AbortSignal | undefined>,
+): AbortSignal {
 	const controller = new AbortController()
 	const onAbort = () => {
 		controller.abort()
 	}
 	for (const signal of signals) {
-		signal.addEventListener('abort', onAbort)
+		if (signal) {
+			signal.addEventListener('abort', onAbort)
+		}
 	}
 	return controller.signal
+}
+
+export function printActiveHandles() {
+	// @ts-ignore
+	const activeHandles = process._getActiveHandles()
+	console.log('Active Handles:', activeHandles.length)
+	activeHandles.forEach((handle: any, index: number) => {
+		console.log(`Handle ${index + 1}:`, handle.constructor.name)
+	})
+
+	// @ts-ignore
+	const activeRequests = process._getActiveRequests()
+	console.log('Active Requests:', activeRequests.length)
+	activeRequests.forEach((request: any, index: number) => {
+		console.log(`Request ${index + 1}:`, request.constructor.name)
+	})
 }

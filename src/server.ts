@@ -1,162 +1,228 @@
 import os from 'node:os'
 import path from 'node:path'
-import { LLMPool } from '#lllms/pool.js'
-import { LLMInstance } from '#lllms/instance.js'
+import { builtInEngineList } from '#lllms/engines/index.js'
+import { ModelPool } from '#lllms/pool.js'
+import { ModelInstance } from '#lllms/instance.js'
+import { ModelStore, StoredModel } from '#lllms/store.js'
 import {
-	LLMOptions,
-	LLMConfig,
-	IncomingLLMRequest,
+	ModelOptions,
+	ModelConfig,
+	IncomingRequest,
 	CompletionProcessingOptions,
 	ChatCompletionRequest,
-	EmbeddingsRequest,
+	EmbeddingRequest,
 	ProcessingOptions,
-	CompletionRequest,
+	TextCompletionRequest,
+	ModelEngine,
+	ImageToTextRequest,
 } from '#lllms/types/index.js'
-import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
-import {
-	validateModelId,
-	resolveModelFile,
-	resolveModelUrl,
-} from '#lllms/lib/models.js'
-import { loadGBNFGrammars } from '#lllms/lib/grammar.js'
-import { LLMStore } from '#lllms/store.js'
+import { Logger, LogLevel, createSublogger, LogLevels } from '#lllms/lib/logger.js'
+import { resolveModelLocation } from '#lllms/lib/resolveModelLocation.js'
+import { validateModelOptions } from '#lllms/lib/validation.js'
 
-export interface LLMServerOptions {
-	models: Record<string, LLMOptions>
+export interface ModelServerOptions {
+	engines?: Record<string, ModelEngine>
+	models: Record<string, ModelOptions>
 	concurrency?: number
 	modelsPath?: string
 	log?: Logger | LogLevel
 }
 
-export function startLLMs(opts: LLMServerOptions) {
-	const server = new LLMServer(opts)
+export function startModelServer(options: ModelServerOptions) {
+	const server = new ModelServer(options)
 	server.start()
 	return server
 }
 
-export class LLMServer {
-	pool: LLMPool
-	store: LLMStore
+export class ModelServer {
+	pool: ModelPool
+	store: ModelStore
+	engines: Record<string, ModelEngine> = {}
 	log: Logger
 
-	constructor(opts: LLMServerOptions) {
-		if (opts.log) {
-			this.log =
-				typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
-		} else {
-			this.log = createLogger(LogLevels.warn)
-		}
+	constructor(options: ModelServerOptions) {
+		this.log = createSublogger(options.log)
 		const modelsPath =
-			opts?.modelsPath || path.resolve(os.homedir(), '.cache/lllms')
+			options?.modelsPath || path.resolve(os.homedir(), '.cache/lllms')
 
-		const dirname = path.dirname(new URL(import.meta.url).pathname)
-		const defaultGrammars = loadGBNFGrammars(path.join(dirname, './grammars'))
-
-		const modelsWithDefaults: Record<string, LLMConfig> = {}
-		for (const modelId in opts.models) {
-			validateModelId(modelId)
-			const modelOptions = opts.models[modelId]
-			if (!modelOptions.file && !modelOptions.url) {
-				throw new Error(`Model ${modelId} must have either file or url`)
-			}
-			const modelUrl = modelOptions.url
-				? resolveModelUrl(modelOptions.url)
-				: undefined
+		const modelsWithDefaults: Record<string, ModelConfig> = {}
+		const usedEngines: Array<{ model: string; engine: string }> = []
+		for (const modelId in options.models) {
+			const modelOptions = options.models[modelId]
+			validateModelOptions(modelId, modelOptions)
+	
 			modelsWithDefaults[modelId] = {
 				id: modelId,
 				minInstances: 0,
 				maxInstances: 1,
 				engineOptions: {},
+				location: resolveModelLocation(modelsPath, modelOptions),
 				...modelOptions,
-				url: modelUrl,
-				file: resolveModelFile(modelsPath, {
-					file: modelOptions.file,
-					url: modelUrl,
-				}),
 			}
-			if (modelOptions.task === 'text-completion') {
-				modelsWithDefaults[modelId].grammars = {
-					...defaultGrammars,
-					...modelOptions.grammars,
-				}
+			usedEngines.push({
+				model: modelId,
+				engine: modelOptions.engine,
+			})
+		}
+
+		const customEngines = Object.keys(options.engines ?? {})
+		for (const ref of usedEngines) {
+			const isBuiltIn = builtInEngineList.includes(ref.engine)
+			const isCustom = customEngines.includes(ref.engine)
+			if (!isBuiltIn && !isCustom) {
+				throw new Error(
+					`Engine "${ref.engine}" used my model "${ref.model}" does not exist`,
+				)
+			}
+			if (isCustom) {
+				this.engines[ref.engine] = options.engines![ref.engine]
 			}
 		}
 
-		this.store = new LLMStore({
+		this.store = new ModelStore({
 			log: this.log,
-			modelsPath,
+			// prepareConcurrency: 2,
 			models: modelsWithDefaults,
+			modelsPath,
 		})
-		this.pool = new LLMPool(
+		this.pool = new ModelPool(
 			{
 				log: this.log,
-				concurrency: opts.concurrency ?? 1,
+				concurrency: options.concurrency ?? 1,
 				models: modelsWithDefaults,
 			},
 			this.prepareInstance.bind(this),
 		)
 	}
 
-	getModelConfig(modelId: string) {
-		return this.pool.config.models[modelId]
+	modelExists(modelId: string) {
+		return !!this.pool.config.models[modelId]
 	}
 
 	async start() {
-		await Promise.all([this.store.init(), this.pool.init()])
+		const engineStartPromises = []
+		// call startEngine on custom engines
+		for (const [key, methods] of Object.entries(this.engines)) {
+			if (methods.start) {
+				engineStartPromises.push(methods.start(this))
+			}
+		}
+		// import built-in engines
+		for (const key of builtInEngineList) {
+			engineStartPromises.push(
+				new Promise(async (resolve, reject) => {
+					try {
+						const engine = await import(`#lllms/engines/${key}/engine.js`)
+						this.engines[key] = engine
+						resolve({
+							key,
+							engine,
+						})
+					} catch (err) {
+						reject(err)
+					}
+				}),
+			)
+		}
+		await Promise.all(engineStartPromises)
+		await Promise.all([
+			this.store.init(this.engines),
+			this.pool.init(this.engines),
+		])
+	}
+	
+	async stop() {
+		this.log(LogLevels.info, 'Stopping model server')
+		// TODO this actually waits until all completions are done.
+		// pool should be able to keep track of all running task and be able to cancel them.
+		this.pool.queue.clear()
+		this.store.dispose()
+		await this.pool.queue.onIdle()
+		await this.pool.dispose()
+		this.log(LogLevels.info, 'Model server stopped')
 	}
 
-	async requestInstance(request: IncomingLLMRequest, signal?: AbortSignal) {
+	async requestInstance(request: IncomingRequest, signal?: AbortSignal) {
 		return this.pool.requestInstance(request, signal)
 	}
 
-	async createChatCompletion(
-		args: ChatCompletionRequest,
-		opts?: CompletionProcessingOptions,
-	) {
-		const lock = await this.requestInstance(args)
-		const handle = lock.instance.createChatCompletion(args)
-		const result = await handle.process(opts)
-		await lock.release()
-		return result
-	}
-
-	async createCompletion(
-		args: CompletionRequest,
-		opts?: CompletionProcessingOptions,
-	) {
-		const lock = await this.requestInstance(args)
-		const handle = lock.instance.createCompletion(args)
-		const result = await handle.process(opts)
-		await lock.release()
-		return result
-	}
-
-	async createEmbeddings(args: EmbeddingsRequest, opts?: ProcessingOptions) {
-		const lock = await this.requestInstance(args)
-		const result = await lock.instance.createEmbeddings(args)
-		await lock.release()
-		return result
-	}
-
 	// gets called by the pool right before a new instance is created
-	private async prepareInstance(instance: LLMInstance, signal?: AbortSignal) {
-		const config = instance.config
-		await this.store.prepareModel(config.id, signal)
+	private async prepareInstance(instance: ModelInstance, signal?: AbortSignal) {
+		const model = instance.config
+		const modelStoreStatus = this.store.models[model.id].status
+		if (modelStoreStatus === 'unloaded') {
+			await this.store.prepareModel(model.id, signal)
+		}
+		if (modelStoreStatus === 'preparing') {
+			const modelReady = new Promise<void>((resolve, reject) => {
+				const onCompleted = async (storeModel: StoredModel) => {
+					if (storeModel.id === model.id) {
+						this.store.prepareQueue.off('completed', onCompleted)
+						if (storeModel.status === 'ready') {
+							resolve()
+						} else {
+							reject()
+						}
+					}
+				}
+				this.store.prepareQueue.on('completed', onCompleted)
+			})
+			await modelReady
+		}
 	}
 
-	async stop() {
-		// TODO this actually waits until all completions are done.
-		this.pool.queue.clear()
-		await this.pool.queue.onIdle()
-		await this.pool.dispose()
+	async processChatCompletionTask(
+		args: ChatCompletionRequest,
+		options?: CompletionProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const task = lock.instance.processChatCompletionTask(args, options)
+		const result = await task.result
+		await lock.release()
+		return result
 	}
+
+	async processTextCompletionTask(
+		args: TextCompletionRequest,
+		options?: CompletionProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const task = lock.instance.processTextCompletionTask(args, options)
+		const result = await task.result
+		await lock.release()
+		return result
+	}
+
+	async processEmbeddingTask(
+		args: EmbeddingRequest,
+		options?: ProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const task = await lock.instance.processEmbeddingTask(args, options)
+		const result = await task.result
+		await lock.release()
+		return result
+	}
+	
+	async processImageToTextTask(
+		args: ImageToTextRequest,
+		options?: ProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const task = await lock.instance.processImageToTextTask(args, options)
+		const result = await task.result
+		await lock.release()
+		return result
+	}
+
+
 
 	getStatus() {
 		const poolStatus = this.pool.getStatus()
-		const modelStoreStatus = this.store.getStatus()
+		const storeStatus = this.store.getStatus()
 		return {
 			pool: poolStatus,
-			models: modelStoreStatus,
+			store: storeStatus,
 		}
 	}
 }

@@ -1,12 +1,12 @@
-import { suite, it, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'node:fs'
-import { LLMServer } from '#lllms/server.js'
+import { expect } from 'vitest'
+import { ModelServer } from '#lllms/server.js'
 import { ChatMessage } from '#lllms/types/index.js'
 import { createChatCompletion } from '../../util.js'
 
 // conversation that tests behavior when context window is exceeded while model is ingesting text
 export async function runContextShiftIngestionTest(
-	llms: LLMServer,
+	llms: ModelServer,
 	model: string = 'test',
 ) {
 	

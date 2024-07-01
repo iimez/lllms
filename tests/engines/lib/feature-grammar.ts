@@ -1,9 +1,9 @@
 import { expect } from 'vitest'
-import { LLMServer } from '#lllms/server.js'
+import { ModelServer } from '#lllms/server.js'
 import { createChatCompletion } from '../../util.js'
 import { ChatMessage } from '#lllms/types/index.js'
 
-export async function runGrammarTest(llms: LLMServer) {
+export async function runGrammarTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',

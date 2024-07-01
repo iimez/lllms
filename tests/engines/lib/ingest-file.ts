@@ -1,11 +1,10 @@
-import { suite, it, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'node:fs'
-import { LLMServer } from '#lllms/server.js'
+import { ModelServer } from '#lllms/server.js'
 import { ChatMessage } from '#lllms/types/index.js'
 import { createChatCompletion } from '../../util.js'
 
 export async function runFileIngestionTest(
-	llms: LLMServer,
+	llms: ModelServer,
 	file: string,
 	prompt: string = 'Whats that?',
 	model: string = 'test',

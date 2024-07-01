@@ -58,3 +58,23 @@ export async function readGGUFMetaFromURL(url: string) {
 	const { metadata, tensorInfos } = ggufMetadata(arrayBuffer)
 	return structureGGUFMeta(metadata)
 }
+
+// see node-llama-cpp src/gguf/utils/normalizeGgufDownloadUrl.ts
+export function normalizeGGUFDownloadUrl(url: string) {
+	const parsedUrl = new URL(url)
+	if (parsedUrl.hostname === 'huggingface.co') {
+		const pathnameParts = parsedUrl.pathname.split('/')
+		if (pathnameParts.length > 3) {
+			const newUrl = new URL(url)
+			if (pathnameParts[3] === 'blob' || pathnameParts[3] === 'raw') {
+				pathnameParts[3] = 'resolve'
+			}
+			newUrl.pathname = pathnameParts.join('/')
+			if (newUrl.searchParams.get('download') !== 'true') {
+				newUrl.searchParams.set('download', 'true')
+			}
+			return newUrl.href
+		}
+	}
+	return url
+}

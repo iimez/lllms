@@ -1,7 +1,7 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.6",
-	"description": "Local Large Language Models. Providing a toolkit to run and host multiple large language models on any machine.",
+	"version": "1.0.0-beta.7",
+	"description": "Local Large Language Models. Providing node.js tools to run or host AI models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
 	"types": "dist/index.d.ts",
@@ -18,28 +18,32 @@
 		"upgrade": "npx npm-check-updates -i",
 		"reinstall": "rimraf ./node_modules ./package-lock.json && npm install",
 		"prebuild": "rimraf ./dist",
-		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json && cp -r src/grammars dist/grammars",
+		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json && cp -r src/engines/node-llama-cpp/grammars dist/engines/node-llama-cpp/grammars",
 		"test": "vitest --run --test-timeout=-1 --pool=forks --maxConcurrency=1",
 		"test:pool": "vitest tests/pool.test.ts --test-timeout=-1 --pool=forks",
 		"test:openai": "vitest tests/openai.test.ts --test-timeout=-1 --pool=forks",
 		"test:gpu": "vitest tests/gpu.test.ts --test-timeout=-1 --pool=forks",
 		"test:gpt4all": "vitest tests/engines/gpt4all.test.ts --test-timeout=-1 --pool=forks",
 		"test:llama": "vitest tests/engines/node-llama-cpp.test.ts --test-timeout=-1 --pool=forks",
+		"test:custom": "vitest tests/engines/custom.test.ts --test-timeout=-1 --pool=forks",
 		"test:server": "vitest tests/server.test.ts --test-timeout=-1 --pool=forks",
 		"prewatch": "rimraf ./dist",
 		"watch": "tsc -w -p tsconfig.release.json",
 		"start": "cross-env NODE_ENV=production node dist/standalone.js"
 	},
 	"keywords": [
-		"llm",
+		"local ai",
 		"inference server",
-		"llm server",
-		"local llm",
+		"model pool",
 		"gpt4all",
 		"node-llama-cpp",
+		"transformers.js",
+		"llama.cpp",
+		"chatbot",
+		"bot",
+		"llm",
 		"ai",
 		"nlp",
-		"openai",
 		"openai api"
 	],
 	"engines": {
@@ -48,21 +52,41 @@
 	"imports": {
 		"#lllms/*": "./dist/*"
 	},
+	"peerDependencies": {
+		"node-llama-cpp": "^3",
+		"gpt4all": "^4",
+		"@xenova/transformers": "github:xenova/transformers.js#v3"
+	},
+	"peerDependenciesMeta": {
+		"node-llama-cpp": {
+			"optional": true
+		},
+		"gpt4all": {
+			"optional": true
+		},
+		"@xenova/transformers": {
+			"optional": true
+		}
+	},
 	"dependencies": {
 		"ajv": "^8.16.0",
 		"chalk": "^5.3.0",
 		"cli-progress": "^3.12.0",
 		"cors": "^2.8.5",
 		"express": "^4.19.2",
-		"gpt4all": "^4.0.0",
 		"hyllama": "^0.2.2",
+		"ipull": "^3.4.2",
 		"is-unicode-supported": "^2.0.0",
 		"nanoid": "^5.0.7",
-		"node-llama-cpp": "^3.0.0-beta.32",
 		"ora": "^8.0.1",
-		"p-queue": "^8.0.1"
+		"p-queue": "^8.0.1",
+		"pretty-bytes": "^6.1.1",
+		"pretty-ms": "^9.0.0"
 	},
 	"devDependencies": {
+		"node-llama-cpp": "^3.0.0-beta.36",
+		"gpt4all": "^4.0.0",
+		"@xenova/transformers": "github:xenova/transformers.js#v3",
 		"@types/cli-progress": "^3.11.5",
 		"@types/cors": "^2.8.17",
 		"@types/express": "^4.17.21",

@@ -1,7 +1,7 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 
-import { LLMServer } from '#lllms/server.js'
-import { ChatMessage, LLMOptions } from '#lllms/types/index.js'
+import { ModelServer } from '#lllms/server.js'
+import { ChatMessage, ModelOptions } from '#lllms/types/index.js'
 import {
 	runStopTriggerTest,
 	runTokenBiasTest,
@@ -18,21 +18,24 @@ import {
 } from './lib/index.js'
 import { createChatCompletion } from '../util.js'
 
-const models: Record<string, LLMOptions> = {
+const models: Record<string, ModelOptions> = {
 	test: {
 		task: 'text-completion',
-		url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/blob/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
-		sha256: 'c57380038ea85d8bec586ec2af9c91abc2f2b332d41d6cf180581d7bdffb93c1',
+		// url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/blob/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
+		// sha256: 'c57380038ea85d8bec586ec2af9c91abc2f2b332d41d6cf180581d7bdffb93c1',
 		// on functionary everything but the context shift test works.
-		// url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
-		// sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
+		url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
+		sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
 		engine: 'node-llama-cpp',
 		contextSize: 2048,
+		engineOptions: {
+			gpu: false,
+		}
 	},
 }
 
 suite('features', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		log: 'debug',
 		models,
 	})
@@ -74,7 +77,7 @@ suite('features', () => {
 })
 
 suite('cache', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		// log: 'debug',
 		models: {
 			test: {
@@ -113,7 +116,7 @@ suite('preload', () => {
 			content: "It's 5!",
 		},
 	]
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		models: {
 			test: {
 				url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
@@ -177,7 +180,7 @@ suite('preload', () => {
 })
 
 suite('context shift', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		models,
 	})
 	beforeAll(async () => {
@@ -195,7 +198,7 @@ suite('context shift', () => {
 })
 
 suite('ingest', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		// log: 'debug',
 		models,
 	})

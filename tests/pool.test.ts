@@ -1,10 +1,10 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
-import { LLMServer } from '#lllms/server.js'
-import { ChatMessage, LLMOptions } from '#lllms/types/index.js'
+import { ModelServer } from '#lllms/server.js'
+import { ModelOptions } from '#lllms/types/index.js'
 import { createChatCompletion } from './util.js'
 
 suite('basic', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		models: {
 			test: {
 				task: 'text-completion',
@@ -61,7 +61,7 @@ suite('basic', () => {
 			],
 		})
 		console.log({
-			id: chat2.handle.id,
+			id: chat2.task.id,
 			response: chat2.result.message.content,
 		})
 	})
@@ -83,7 +83,7 @@ suite('basic', () => {
 		console.log({
 			res: results.map((r) => {
 				return {
-					id: r.handle.id,
+					id: r.task.id,
 					response: r.result.message.content,
 				}
 			}),
@@ -92,7 +92,7 @@ suite('basic', () => {
 })
 
 suite('gpu', () => {
-	const llms = new LLMServer({
+	const llms = new ModelServer({
 		log: 'debug',
 		models: {
 			gpt4all: {

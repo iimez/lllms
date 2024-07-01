@@ -1,10 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import type { LLMServer } from '#lllms/server.js'
-import { CompletionRequest } from '#lllms/types/index.js'
+import type { ModelServer } from '#lllms/server.js'
+import { TextCompletionRequest } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
-import { finishReasons } from '../finishReasons.js'
+import { finishReasonMap } from '../enums.js'
 
 interface OpenAICompletionParams
 	extends Omit<OpenAI.CompletionCreateParamsStreaming, 'stream'> {
@@ -20,7 +20,7 @@ interface OpenAICompletionChunk extends OpenAI.Completions.Completion {
 
 // v1/completions
 // https://platform.openai.com/docs/api-reference/completions/create
-export function createCompletionHandler(llms: LLMServer) {
+export function createCompletionHandler(llms: ModelServer) {
 	return async (req: IncomingMessage, res: ServerResponse) => {
 		let args: OpenAICompletionParams
 
@@ -40,7 +40,7 @@ export function createCompletionHandler(llms: LLMServer) {
 			res.end(JSON.stringify({ error: 'Invalid request' }))
 			return
 		}
-		if (!llms.getModelConfig(args.model)) {
+		if (!llms.modelExists(args.model)) {
 			res.writeHead(400, { 'Content-Type': 'application/json' })
 			res.end(JSON.stringify({ error: 'Invalid model' }))
 			return
@@ -77,7 +77,7 @@ export function createCompletionHandler(llms: LLMServer) {
 				stop = [stop]
 			}
 
-			const completionReq = omitEmptyValues<CompletionRequest>({
+			const completionReq = omitEmptyValues<TextCompletionRequest>({
 				model: args.model,
 				prompt: args.prompt as string,
 				temperature: args.temperature ? args.temperature : undefined,
@@ -105,17 +105,15 @@ export function createCompletionHandler(llms: LLMServer) {
 				completionReq,
 				controller.signal,
 			)
-			const completion = instance.createCompletion(completionReq)
-
-			const result = await completion.process({
+			const task = instance.processTextCompletionTask(completionReq, {
 				signal: controller.signal,
 				onChunk: (chunk) => {
 					if (args.stream) {
 						const chunkData: OpenAICompletionChunk = {
-							id: completion.id,
-							model: completion.model,
+							id: task.id,
+							model: task.model,
 							object: 'text_completion',
-							created: Math.floor(completion.createdAt.getTime() / 1000),
+							created: Math.floor(task.createdAt.getTime() / 1000),
 							choices: [
 								{
 									index: 0,
@@ -130,22 +128,25 @@ export function createCompletionHandler(llms: LLMServer) {
 					}
 				},
 			})
+			const result = await task.result
 			release()
 
 			if (args.stream) {
 				if (args.stream_options?.include_usage) {
 					const finalChunk: OpenAICompletionChunk = {
-						id: completion.id,
-						model: completion.model,
+						id: task.id,
+						model: task.model,
 						object: 'text_completion',
-						created: Math.floor(completion.createdAt.getTime() / 1000),
+						created: Math.floor(task.createdAt.getTime() / 1000),
 						choices: [
 							{
 								index: 0,
 								text: '',
 								logprobs: null,
 								// @ts-ignore
-								finish_reason: finishReasons[result.finishReason],
+								finish_reason: result.finishReason
+									? finishReasonMap[result.finishReason]
+									: 'stop',
 							},
 						],
 					}
@@ -157,10 +158,10 @@ export function createCompletionHandler(llms: LLMServer) {
 				res.end()
 			} else {
 				const response: OpenAI.Completions.Completion = {
-					id: completion.id,
-					model: completion.model,
+					id: task.id,
+					model: task.model,
 					object: 'text_completion',
-					created: Math.floor(completion.createdAt.getTime() / 1000),
+					created: Math.floor(task.createdAt.getTime() / 1000),
 					system_fingerprint: instance.fingerprint,
 					choices: [
 						{
@@ -169,7 +170,7 @@ export function createCompletionHandler(llms: LLMServer) {
 							logprobs: null,
 							// @ts-ignore
 							finish_reason: result.finishReason
-								? finishReasons[result.finishReason]
+								? finishReasonMap[result.finishReason]
 								: 'stop',
 						},
 					],

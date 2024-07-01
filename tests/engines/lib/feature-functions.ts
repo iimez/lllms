@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
-import { LLMServer } from '#lllms/server.js'
-import { ChatMessage, FunctionDefinition } from '#lllms/types/index.js'
+import { ModelServer } from '#lllms/server.js'
+import { ChatMessage, ToolDefinition } from '#lllms/types/index.js'
 import { createChatCompletion } from '../../util.js'
 
 interface GetLocationWeatherParams {
@@ -8,7 +8,7 @@ interface GetLocationWeatherParams {
 	unit?: 'celsius' | 'fahrenheit'
 }
 
-const getLocationWeather: FunctionDefinition<GetLocationWeatherParams> = {
+const getLocationWeather: ToolDefinition<GetLocationWeatherParams> = {
 	description: 'Get the weather in a location',
 	parameters: {
 		type: 'object',
@@ -33,7 +33,7 @@ const getUserLocation = {
 	},
 }
 
-export async function runFunctionCallTest(llms: LLMServer) {
+export async function runFunctionCallTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
@@ -41,16 +41,16 @@ export async function runFunctionCallTest(llms: LLMServer) {
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {
-		functions: {
+		tools: {
 			getUserLocation,
 		},
 		messages,
 	})
-	expect(turn1.result.message.functionCalls).toBeUndefined()
+	expect(turn1.result.message.toolCalls).toBeUndefined()
 	expect(turn1.result.message.content).toMatch(/New York/)
 }
 
-export async function runSequentialFunctionCallTest(llms: LLMServer) {
+export async function runSequentialFunctionCallTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
@@ -58,20 +58,20 @@ export async function runSequentialFunctionCallTest(llms: LLMServer) {
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {
-		functions: {
+		tools: {
 			getUserLocation,
 			getLocationWeather,
 		},
 		messages,
 	})
-	expect(turn1.result.message.functionCalls).toBeDefined()
-	expect(turn1.result.message.functionCalls!.length).toBe(1)
+	expect(turn1.result.message.toolCalls).toBeDefined()
+	expect(turn1.result.message.toolCalls!.length).toBe(1)
 
-	const turn1FunctionCall = turn1.result.message.functionCalls![0]
+	const turn1FunctionCall = turn1.result.message.toolCalls![0]
 	messages.push({
 		callId: turn1FunctionCall.id,
-		role: 'function',
-		name: turn1FunctionCall.name,
+		role: 'tool',
+		// name: turn1FunctionCall.name,
 		content: 'New York today: Cloudy, 21°, low chance of rain.',
 	})
 	const turn2 = await createChatCompletion(llms, {
@@ -85,9 +85,9 @@ interface GetRandomNumberParams {
 	max: number
 }
 
-export async function runParallelFunctionCallTest(llms: LLMServer) {
+export async function runParallelFunctionCallTest(llms: ModelServer) {
 	const generatedNumbers: number[] = []
-	const getRandomNumber: FunctionDefinition<GetRandomNumberParams> = {
+	const getRandomNumber: ToolDefinition<GetRandomNumberParams> = {
 		description: 'Generate a random integer in given range',
 		parameters: {
 			type: 'object',
@@ -109,7 +109,7 @@ export async function runParallelFunctionCallTest(llms: LLMServer) {
 	}
 
 	const turn1 = await createChatCompletion(llms, {
-		functions: { getRandomNumber },
+		tools: { getRandomNumber },
 		messages: [
 			{
 				role: 'user',

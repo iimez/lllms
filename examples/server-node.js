@@ -1,7 +1,7 @@
 import http from 'node:http'
-import { startLLMs } from '../dist/index.js'
+import { startModelServer } from '../dist/index.js'
 
-const llms = startLLMs({
+const llms = await startModelServer({
 	log: 'info',
 	concurrency: 2,
 	models: {
@@ -13,9 +13,6 @@ const llms = startLLMs({
 		},
 	},
 })
-llms.pool.on('ready', () => {
-	console.log('LLMs ready')
-})
 
 const httpServer = http.createServer((req, res) => {
 	if (req.url === '/chat' && req.method === 'POST') {
@@ -25,12 +22,9 @@ const httpServer = http.createServer((req, res) => {
 		})
 		req.on('end', async () => {
 			const req = JSON.parse(body)
-			const { instance, release } = await llms.requestInstance(req)
-			const completion = instance.createChatCompletion(req)
-			const result = await completion.process()
-			release()
+			const completion = await llms.processChatCompletionTask(req)
 			res.writeHead(200, { 'Content-Type': 'application/json' })
-			res.end(JSON.stringify(result, null, 2))
+			res.end(JSON.stringify(completion, null, 2))
 		})
 	} else {
 		res.writeHead(404, { 'Content-Type': 'text/plain' })

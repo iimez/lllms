@@ -1,72 +1,70 @@
 import PQueue from 'p-queue'
 import EventEmitter3 from 'eventemitter3'
-import { engines } from '#lllms/engines/index.js'
-import { LLMInstance } from '#lllms/instance.js'
+// import { engines } from '#lllms/engines/index.js'
+import { ModelInstance } from '#lllms/instance.js'
 import {
-	LLMConfig,
-	IncomingLLMRequest,
-	LLMRequest,
+	ModelConfig,
+	IncomingRequest,
+	ModelInstanceRequest,
+	ModelEngine,
 } from '#lllms/types/index.js'
-import { Logger, LogLevels, createLogger, LogLevel } from '#lllms/lib/logger.js'
+import { Logger, LogLevels, createSublogger, LogLevel } from '#lllms/lib/logger.js'
 
-export interface LLMInstanceHandle {
-	instance: LLMInstance
+export interface ModelInstanceHandle {
+	instance: ModelInstance
 	release: () => Promise<void>
 }
 
-interface LLMTask {
-	instance: LLMInstance
-	request: LLMRequest
+interface ModelTask {
+	instance: ModelInstance
+	request: ModelInstanceRequest
 }
 
-type PrepareInstanceCallback = (
-	instance: LLMInstance,
+type PrepareModelInstanceCallback = (
+	instance: ModelInstance,
 	signal?: AbortSignal,
 ) => Promise<void>
 
-interface LLMPoolConfig {
+interface ModelPoolConfig {
 	concurrency: number
-	models: Record<string, LLMConfig>
+	models: Record<string, ModelConfig>
 }
 
-export interface LLMPoolOptions {
+export interface ModelPoolOptions {
 	concurrency?: number
-	models: Record<string, LLMConfig>
+	models: Record<string, ModelConfig>
 	log?: Logger | LogLevel
 }
 
-type LLMPoolEvent = 'ready' | 'spawn' | 'release'
+type ModelPoolEvent = 'ready' | 'spawn' | 'release'
 
-export class LLMPool extends EventEmitter3<LLMPoolEvent> {
+
+export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	queue: PQueue
-	config: LLMPoolConfig
-	instances: Record<string, LLMInstance>
+	config: ModelPoolConfig
+	instances: Record<string, ModelInstance>
+	private engines?: Record<string, ModelEngine>
 	private evictionInterval?: NodeJS.Timeout
 	private log: Logger
 	private requestSequence: number = 0
 	private waitingRequests: number = 0 // TODO should keep requests around so connections can be canceled on dispose?
 	private gpuLock: boolean = false // TODO could derive this from "is there any instance that has gpu=true"
-	private prepareInstance?: PrepareInstanceCallback
+	private prepareInstance?: PrepareModelInstanceCallback
 
-	constructor(opts: LLMPoolOptions, prepareInstance?: PrepareInstanceCallback) {
+	constructor(options: ModelPoolOptions, prepareInstance?: PrepareModelInstanceCallback) {
 		super()
-		if (opts.log) {
-			this.log =
-				typeof opts.log === 'string' ? createLogger(opts.log) : opts.log
-		} else {
-			this.log = createLogger(LogLevels.warn)
-		}
-		const models: Record<string, LLMConfig> = {}
-		for (const id in opts.models) {
-			const modelConfig = opts.models[id]
+		this.log = createSublogger(options.log)
+		const models: Record<string, ModelConfig> = {}
+		for (const id in options.models) {
+			const modelConfig = options.models[id]
 			models[id] = {
 				...modelConfig,
 				id: modelConfig.id ?? id,
-			}
+			}			
 		}
-		const config: LLMPoolConfig = {
+		const config: ModelPoolConfig = {
 			concurrency: 1,
-			...opts,
+			...options,
 			models,
 		}
 		this.queue = new PQueue({
@@ -78,9 +76,10 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	}
 
 	// start up pool, creating instances and loading models
-	async init() {
+	async init(engines: Record<string, ModelEngine>) {
 		const initPromises = []
 		const modelConfigs = this.config.models
+		this.engines = engines
 
 		// making sure id is set.
 		for (const modelId in modelConfigs) {
@@ -120,7 +119,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	}
 
 	// see if the minInstances for a models are spawned. if not, spawn them.
-	ensureModelInstances(model: LLMConfig) {
+	ensureModelInstances(model: ModelConfig) {
 		const spawnPromises = []
 		const instanceCount = model.minInstances ?? 0
 		for (let i = 0; i < instanceCount; i++) {
@@ -153,10 +152,10 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			const instance = this.instances[key]
 			const instanceAge = (now - instance.lastUsed) / 1000
 			const modelInstanceCount = Object.values(this.instances).filter(
-				(i) => i.model === instance.model,
+				(i) => i.modelId === instance.modelId,
 			).length
 			const minInstanceCount =
-				this.config.models[instance.model].minInstances ?? 0
+				this.config.models[instance.modelId].minInstances ?? 0
 			if (
 				modelInstanceCount > minInstanceCount &&
 				instanceAge > instance.ttl &&
@@ -176,7 +175,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		const processingInstances = Object.values(this.instances).filter(
 			(instance) => instance.status === 'busy',
 		)
-		return {
+		const poolStatusInfo = {
 			processing: processingInstances.length,
 			waiting: this.waitingRequests,
 			instances: Object.fromEntries(
@@ -184,19 +183,20 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 					return [
 						key,
 						{
-							model: instance.model,
+							model: instance.modelId,
 							status: instance.status,
 							url: instance.config.url,
 							file: instance.config.file,
 							engine: instance.config.engine,
 							device: instance.gpu ? 'gpu' : 'cpu',
-							context: instance.getContextState(),
+							// context: instance.getContextIdentity(),
 							lastUsed: new Date(instance.lastUsed).toISOString(),
 						},
 					]
 				}),
 			),
 		}
+		return poolStatusInfo
 	}
 
 	// checks if another instance can be spawned for given model
@@ -219,7 +219,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		// see if we're within maxInstances limit
 		const maxInstances = modelConfig.maxInstances ?? 1
 		const currentInstances = Object.values(this.instances).filter(
-			(instance) => instance.model === modelId,
+			(instance) => instance.modelId === modelId,
 		)
 		if (currentInstances.length >= maxInstances) {
 			// this.log(
@@ -234,7 +234,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		return true
 	}
 
-	private async disposeInstance(instance: LLMInstance) {
+	private async disposeInstance(instance: ModelInstance) {
 		this.log(LogLevels.debug, 'Disposing instance', {
 			instance: instance.id,
 		})
@@ -250,23 +250,27 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		modelId: string,
 		options: { signal?: AbortSignal; emit?: boolean } = {},
 	) {
+		if (!this.engines) {
+			throw new Error('Engines not initialized - did you call init()?')
+		}
 		const model = this.config.models[modelId]
+		const engine = this.engines[model.engine]
+		const autoGpuEnabled = !!engine.autoGpu
 
 		// if the model is configured with gpu=auto (or unset), we can use the gpu if its not locked
 		const autoGpu =
 			model.engineOptions?.gpu === undefined ||
 			model.engineOptions?.gpu === 'auto'
-		let useGpu = autoGpu ? !this.gpuLock : false
+		let useGpu = autoGpu ? (autoGpuEnabled && !this.gpuLock) : false
 
 		if (model.engineOptions?.gpu === true) {
 			useGpu = true
 		}
 
-		const engineMethods = engines[model.engine]
-		const instance = new LLMInstance(engineMethods, {
+		const instance = new ModelInstance(engine, {
 			...model,
 			gpu: useGpu,
-			logger: this.log,
+			log: this.log,
 		})
 		this.instances[instance.id] = instance
 
@@ -279,7 +283,10 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			})
 			try {
 				await this.prepareInstance(instance, options?.signal)
+				instance.status = 'idle'
+				// console.debug('after prepareInstance', instance.id)
 			} catch (error) {
+				console.error('Error preparing instance', error)
 				this.log(LogLevels.error, 'Error preparing instance', {
 					model: modelId,
 					instance: instance.id,
@@ -298,16 +305,16 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 
 	// wait to acquire a gpu instance for the given request
 	private acquireGpuInstance(
-		request: LLMRequest,
+		request: ModelInstanceRequest,
 		signal?: AbortSignal,
-	): Promise<LLMInstance> {
+	): Promise<ModelInstance> {
 		return new Promise(async (resolve, reject) => {
 			// if we have an idle gpu instance and the model matches we can lock and return immediately
 			const gpuInstance = Object.values(this.instances).find(
 				(instance) => instance.gpu === true,
 			)!
 			if (gpuInstance.status === 'idle') {
-				if (gpuInstance.model === request.model) {
+				if (gpuInstance.modelId === request.model) {
 					gpuInstance.lock(request)
 					resolve(gpuInstance)
 					return
@@ -324,7 +331,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			}
 
 			// otherwise attach the listener and wait until gpu slot becomes available
-			const listener = async (instance: LLMInstance) => {
+			const listener = async (instance: ModelInstance) => {
 				if (
 					instance.matchesRequirements(request) &&
 					instance.status === 'idle' &&
@@ -351,11 +358,11 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 
 	// wait to acquire an idle instance for the given request
 	private acquireIdleInstance(
-		request: LLMRequest,
+		request: ModelInstanceRequest,
 		signal?: AbortSignal,
-	): Promise<LLMInstance> {
+	): Promise<ModelInstance> {
 		return new Promise((resolve, reject) => {
-			const listener = (instance: LLMInstance) => {
+			const listener = (instance: ModelInstance) => {
 				if (
 					instance.matchesRequirements(request) &&
 					instance.status === 'idle'
@@ -386,7 +393,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 	}
 
 	// acquire an instance for the given request
-	private async acquireInstance(request: LLMRequest, signal?: AbortSignal) {
+	private async acquireInstance(request: ModelInstanceRequest, signal?: AbortSignal) {
 		if ('messages' in request) {
 			// for chat completions first search for an instance that has the messages already ingested and the context ready
 			for (const key in this.instances) {
@@ -466,7 +473,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 				(instance) => instance.gpu === true,
 			)!
 
-			if (gpuInstance.model !== request.model) {
+			if (gpuInstance.modelId !== request.model) {
 				this.log(LogLevels.debug, 'Awaiting GPU instance for', {
 					model: request.model,
 					sequence: request.sequence,
@@ -489,7 +496,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 		// currently instances only enter error state if prepareInstance throws an error
 		const errorInstance = Object.values(this.instances).find(
 			(instance) =>
-				instance.model === request.model && instance.status === 'error',
+				instance.modelId === request.model && instance.status === 'error',
 		)
 		if (errorInstance) {
 			throw new Error('Instance is in error state')
@@ -523,9 +530,9 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 
 	// requests an language model instance from the pool
 	async requestInstance(
-		incomingRequest: IncomingLLMRequest,
+		incomingRequest: IncomingRequest,
 		signal?: AbortSignal,
-	): Promise<LLMInstanceHandle> {
+	): Promise<ModelInstanceHandle> {
 		const requestSequence = this.getRequestSequence()
 		const request = {
 			...incomingRequest,
@@ -536,7 +543,7 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 			throw new Error(`Model not found: ${request.model}`)
 		}
 
-		this.log(LogLevels.info, 'Incoming request for', {
+		this.log(LogLevels.info, 'Incoming request', {
 			model: request.model,
 			sequence: request.sequence,
 		})
@@ -546,10 +553,10 @@ export class LLMPool extends EventEmitter3<LLMPoolEvent> {
 
 		// once instance is acquired & locked, we can pass it on to the caller
 		// the queue task promise will be forwarded as releaseInstance
-		let resolveQueueTask: (value: LLMTask) => void = () => {}
+		let resolveQueueTask: (value: ModelTask) => void = () => {}
 
 		this.queue
-			.add((): Promise<LLMTask> => {
+			.add((): Promise<ModelTask> => {
 				this.waitingRequests--
 				return new Promise((resolve, reject) => {
 					resolveQueueTask = resolve

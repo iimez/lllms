@@ -5,9 +5,9 @@ import cors from 'cors'
 import { createOpenAIRequestHandlers } from '#lllms/api/openai/index.js'
 import { createAPIMiddleware } from '#lllms/api/v1/index.js'
 import { LogLevel } from '#lllms/lib/logger.js'
-import { LLMServer, LLMServerOptions } from '#lllms/server.js'
+import { ModelServer, ModelServerOptions, startModelServer } from '#lllms/server.js'
 
-export function createOpenAIMiddleware(llmServer: LLMServer) {
+export function createOpenAIMiddleware(llmServer: ModelServer) {
 	const router = express.Router()
 	const requestHandlers = createOpenAIRequestHandlers(llmServer)
 	router.get('/v1/models', requestHandlers.models)
@@ -17,7 +17,7 @@ export function createOpenAIMiddleware(llmServer: LLMServer) {
 	return router
 }
 
-export function createExpressMiddleware(llmServer: LLMServer) {
+export function createExpressMiddleware(llmServer: ModelServer) {
 	const router = express.Router()
 	router.get('/', (req, res) => {
 		res.json(llmServer.getStatus())
@@ -27,27 +27,29 @@ export function createExpressMiddleware(llmServer: LLMServer) {
 	return router
 }
 
-export interface StandaloneServerOptions extends LLMServerOptions {
+export interface HTTPServerOptions extends ModelServerOptions {
 	listen?: ListenOptions
 	logLevel?: LogLevel
 }
 
-export async function serveLLMs(options: StandaloneServerOptions) {
+export async function startHTTPServer(
+	options: HTTPServerOptions,
+) {
 	const { listen, ...serverOpts } = options
 	const listenOpts = listen ?? { port: 3000 }
-	const llmServer = new LLMServer(serverOpts)
-	await llmServer.start()
+	const llms = new ModelServer(serverOpts)
+	await llms.start()
 	const app = express()
 	app.use(
 		cors(),
 		express.json({ limit: '50mb' }),
-		createExpressMiddleware(llmServer),
+		createExpressMiddleware(llms),
 	)
 
 	app.set('json spaces', 2)
 	const httpServer = http.createServer(app)
 	httpServer.on('close', () => {
-		llmServer.stop()
+		llms.stop()
 	})
 	await new Promise<void>((resolve) => {
 		httpServer.listen(listenOpts, resolve)

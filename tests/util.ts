@@ -1,5 +1,5 @@
-import { LLMServer } from '#lllms/server.js'
-import { ChatCompletionRequest, CompletionRequest } from '#lllms/types/index.js'
+import type { ModelServer } from '#lllms/server.js'
+import { ChatCompletionRequest, TextCompletionRequest } from '#lllms/types/index.js'
 
 const testDefaults = {
 	model: 'test',
@@ -9,7 +9,7 @@ const testDefaults = {
 const defaultTimeout = 30000
 
 export async function createChatCompletion(
-	server: LLMServer,
+	server: ModelServer,
 	args: Omit<ChatCompletionRequest, 'model'> & { model?: string },
 	timeout = defaultTimeout
 ) {
@@ -18,16 +18,16 @@ export async function createChatCompletion(
 		...args,
 	}
 	const lock = await server.pool.requestInstance(mergedArgs)
-	const handle = lock.instance.createChatCompletion(mergedArgs)
-	const result = await handle.process({ timeout })
+	const task = lock.instance.processChatCompletionTask(mergedArgs, { timeout })
 	const device = lock.instance.gpu ? 'gpu' : 'cpu'
+	const result = await task.result
 	await lock.release()
-	return { handle, result, device }
+	return { task, result, device }
 }
 
 export async function createCompletion(
-	server: LLMServer,
-	args: Omit<CompletionRequest, 'model'> & { model?: string },
+	server: ModelServer,
+	args: Omit<TextCompletionRequest, 'model'> & { model?: string },
 	timeout = defaultTimeout
 ) {
 	const mergedArgs = {
@@ -35,11 +35,11 @@ export async function createCompletion(
 		...args,
 	}
 	const lock = await server.pool.requestInstance(mergedArgs)
-	const handle = lock.instance.createCompletion(mergedArgs)
-	const result = await handle.process({ timeout })
+	const task = lock.instance.processTextCompletionTask(mergedArgs, { timeout })
 	const device = lock.instance.gpu ? 'gpu' : 'cpu'
+	const result = await task.result
 	await lock.release()
-	return { handle, result, device }
+	return { task, result, device }
 }
 
 export function parseInstanceId(completionId: string) {

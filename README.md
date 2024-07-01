@@ -26,12 +26,13 @@ To attach lllms to your existing (express, or any other) web server see [./examp
 
 
 ```js lllms.js
-import { serveLLMs } from 'lllms'
+import { startHTTPServer } from 'lllms'
 
 // Starts a http server for up to two instances of phi3 and exposes them via openai API
-serveLLMs({
-  // Limit how many instances can be used concurrently. If its exceeded, requests
-  // will stall until a model instance is released. Defaults to 1.
+startHTTPServer({
+  // Limit how many instances can be handed out concurrently, to handle requests.
+  // If its exceeded, requests will stall until a model instance is released or created.
+  // Defaults to 1 = handle one request at a time.
   concurrency: 2,
   // Where to cache models to. Defaults to `~/.cache/lllms`
   // modelsPath: '/path/to/models',
@@ -46,15 +47,14 @@ serveLLMs({
       // Abs file path or relative to modelsPath. If it does not exist and a url is configured
       // it will be downloaded to the given location.
       file: 'Phi-3-mini-4k-instruct-q4.gguf',
-      // Checksums are optional and will be verified when preparing the model, if set.
-      // md5: 'cb68b653b24dc432b78b02df76921a54',
-      // sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
       // When to download and verify models weights. Defaults to 'on-demand'.
       // "blocking" = download on startup, "async" = download on startup but don't block.
+      // Note that if minInstances > 0 this setting will behave like "blocking".
       prepare: 'on-demand',
       // What should be preloaded in context, for text completion models.
       preload: {
-        // a chat session, with optional leading system message.
+        // Note that for preloading to be utilized via Openai API, requests must
+        // also have these messages before the user message.
         messages: [
           {
             role: 'system',
@@ -243,13 +243,17 @@ Not in any particular order:
 - [x] Improve node-llama-cpp token usage counts / TokenMeter
 - [x] Reuse download logic from node-llama-cpp to support split ggufs.
 - [x] Support preloading instances with context, like a long system message or few shot examples
-- [ ] Document function call handler usage
-- [ ] Nicer grammar api / loading
-- [ ] Better support for cancellation and timeouts
+- [x] transformers.js engine
+- [x] Support custom engine implementations
+- [x] Make sure nothing clashes if multiple servers/stores are using the same cache directory
+- [ ] See if we can install supported engines as peer deps
+- [ ] Restructure docs, add function call handler usage docs
+- [ ] Rework GPU+device usage / lock (Support multiple models on gpu in cases where its possible)
+- [ ] Support more transformer.js tasks / pipelines
+- [ ] Tests for cancellation and timeouts
 - [ ] Improve tests for embeddings
-- [ ] A mock engine implementing for testing and examples / Allow user to customize engine implementations
 - [ ] Logprobs support
-- [ ] Improve offline support
+- [ ] Improve offline support (cli prepare to download everything ahead of runtime?)
 - [ ] Replace express with tinyhttp?
 - [ ] Script to generate a minimal dummy/testing GGUF https://github.com/ggerganov/llama.cpp/discussions/5038#discussioncomment-8181056
 - [ ] Allow configuring total RAM/VRAM usage (See https://github.com/ggerganov/llama.cpp/issues/4315 Check estimates?)
@@ -260,10 +264,9 @@ If you know how to fill in any of the above checkboxes or have additional ideas 
 
 #### Possible Future Goals
 
-- Add whisper
 - Create a separate HTTP API thats independent of the OpenAI spec.
 - Add a clientside library (React hooks?) for use of this independent API.
-- Provide a CLI. (Launch a server via `lllms serve config.json|js`? Something to manage models on disk?)
+- Provide a CLI. (Launch a server via `lllms serve config.json|js`? `lllms prepare` to download everything needed to disk?)
 - Provide a Docker image. And maybe a Prometheus endpoint.
 
 #### Currently not the Goals
@@ -281,3 +284,4 @@ If you look at this package, you might also want to take a look at these other s
 - [llama.cpp Server](https://github.com/ggerganov/llama.cpp/tree/master/examples/server#llamacpp-http-server) - The official llama.cpp HTTP API.
 - [VLLM](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) - A more production ready solution for hosting large language models.
 - [LM Studio](https://lmstudio.ai/docs/local-server) - Also has a local server.
+- [LocalAI](https://github.com/mudler/LocalAI) - Similar project in go.

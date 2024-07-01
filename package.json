@@ -1,7 +1,7 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.9",
-	"description": "Local Large Language Models. Providing node.js tools to run or host AI models on any machine.",
+	"version": "1.0.0-beta.10",
+	"description": "Local Large Language Models. Providing node.js tools to run and serve AI models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
 	"types": "dist/index.d.ts",

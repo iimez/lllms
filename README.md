@@ -139,7 +139,7 @@ $ curl http://localhost:3000/openai/v1/chat/completions \
 
 #### Engines
 
-Currently the built-in inference engines are `node-llama-cpp`, `gpt4all` and `transformers-js` (highly experimental). You can also provide your own engine implementation. See [./src/engines](./src/engines) for how the built-in engines are implemented and [here](./tests/engines/custom-test.ts) for an example of how to utilize a custom engine to add support for vision / image content part messages to the OpenAI chat completion endpoint. (Or any other consumer of the ModelServer class.) Multiple ModelServers are allowed and can also be nested to create more complex pipelines.
+Currently the built-in inference engines are `node-llama-cpp`, `gpt4all` and `transformers-js` (highly experimental). You can also provide your own engine implementation. See [./src/engines](./src/engines) for how the built-in engines are implemented and [here](./tests/engines/custom.test.ts) for an example of how to utilize a custom engine to add support for vision / image content part messages to the OpenAI chat completion endpoint. (Or any other consumer of the ModelServer class.) Multiple ModelServers are allowed and can also be nested to create more complex pipelines.
 
 #### HTTP API
 

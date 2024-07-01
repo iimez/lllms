@@ -1,6 +1,6 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.7",
+	"version": "1.0.0-beta.9",
 	"description": "Local Large Language Models. Providing node.js tools to run or host AI models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
@@ -53,8 +53,8 @@
 		"#lllms/*": "./dist/*"
 	},
 	"peerDependencies": {
-		"node-llama-cpp": "^3",
-		"gpt4all": "^4",
+		"node-llama-cpp": "3.0.0-beta.36",
+		"gpt4all": "^4.0.0",
 		"@xenova/transformers": "github:xenova/transformers.js#v3"
 	},
 	"peerDependenciesMeta": {

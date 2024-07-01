@@ -109,6 +109,13 @@ export class ModelServer {
 		}
 		// import built-in engines
 		for (const key of builtInEngineList) {
+			// skip unused engines
+			const modelUsingEngine = Object.keys(this.store.models).find(
+				(modelId) => this.store.models[modelId].engine === key,
+			)
+			if (!modelUsingEngine) {
+				continue
+			}
 			engineStartPromises.push(
 				new Promise(async (resolve, reject) => {
 					try {

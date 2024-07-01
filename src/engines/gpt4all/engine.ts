@@ -9,7 +9,6 @@ import {
 	CompletionInput,
 	EmbeddingModel,
 	DEFAULT_MODEL_LIST_URL,
-	ModelConfig as GPT4AllModelConfig,
 } from 'gpt4all'
 import {
 	EngineTextCompletionArgs,

@@ -11,7 +11,6 @@ import {
 	AssistantMessage,
 	ChatMessage,
 	CompletionFinishReason,
-	CompletionChunk,
 	TextCompletionParams,
 	ToolDefinition,
 	TextCompletionPreloadOptions,
@@ -45,6 +44,17 @@ export interface ImageToTextRequest {
 	model: string
 	url?: string
 	file?: string
+	prompt?: string
+	maxTokens?: number
+}
+
+export interface SpeechToTextRequest {
+	model: string
+	url?: string
+	file?: string
+	language?: string
+	prompt?: string
+	maxTokens?: number
 }
 
 export interface ModelRequestMeta {
@@ -55,6 +65,7 @@ export type IncomingRequest =
 	| ChatCompletionRequest
 	| EmbeddingRequest
 	| ImageToTextRequest
+	| SpeechToTextRequest
 export type ModelInstanceRequest = ModelRequestMeta & IncomingRequest
 
 export interface ModelOptionsBase {
@@ -106,6 +117,24 @@ export interface EngineContext<
 	log: Logger
 }
 
+export interface CompletionChunk {
+	tokens: number[]
+	text: string
+}
+
+export interface ProcessingOptions {
+	timeout?: number
+	signal?: AbortSignal
+}
+
+export interface CompletionProcessingOptions extends ProcessingOptions {
+	onChunk?: (chunk: CompletionChunk) => void
+}
+
+export interface SpeechToTextProcessingOptions extends ProcessingOptions {
+	onChunk?: (chunk: { text: string }) => void
+}
+
 export interface EngineTextCompletionArgs<T extends EngineOptionsBase>
 	extends EngineContext<T> {
 	onChunk?: (chunk: CompletionChunk) => void
@@ -120,14 +149,20 @@ export interface EngineChatCompletionArgs<
 	request: ChatCompletionRequest
 }
 
-export interface EngineEmbeddingArgs<T extends EngineOptionsBase>
+export interface EngineEmbeddingArgs<T extends EngineOptionsBase = EngineOptionsBase>
 	extends EngineContext<T> {
 	request: EmbeddingRequest
 }
 
-export interface EngineImageToTextArgs<T extends EngineOptionsBase>
+export interface EngineImageToTextArgs<T extends EngineOptionsBase = EngineOptionsBase>
 	extends EngineContext<T> {
 	request: ImageToTextRequest
+}
+
+export interface EngineSpeechToTextArgs<T extends EngineOptionsBase = EngineOptionsBase>
+	extends EngineContext<T> {
+	request: SpeechToTextRequest
+	onChunk?: (chunk: { text: string }) => void
 }
 
 export interface FileDownloadProgress {
@@ -178,6 +213,11 @@ export interface ModelEngine<
 		instance: TInstance,
 		signal?: AbortSignal,
 	) => Promise<EngineImageToTextResult>
+	processSpeechToTextTask?: (
+		args: EngineSpeechToTextArgs<TOptions>,
+		instance: TInstance,
+		signal?: AbortSignal,
+	) => Promise<EngineSpeechToTextResult>
 }
 
 interface EmbeddingModelOptions extends ModelOptionsBase {
@@ -259,5 +299,9 @@ export interface EngineTextCompletionResult {
 }
 
 export interface EngineImageToTextResult {
+	text: string
+}
+
+export interface EngineSpeechToTextResult {
 	text: string
 }

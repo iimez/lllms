@@ -15,6 +15,8 @@ import {
 	TextCompletionRequest,
 	ModelEngine,
 	ImageToTextRequest,
+	SpeechToTextRequest,
+	SpeechToTextProcessingOptions,
 } from '#lllms/types/index.js'
 import { Logger, LogLevel, createSublogger, LogLevels } from '#lllms/lib/logger.js'
 import { resolveModelLocation } from '#lllms/lib/resolveModelLocation.js'
@@ -71,7 +73,7 @@ export class ModelServer {
 			const isCustom = customEngines.includes(ref.engine)
 			if (!isBuiltIn && !isCustom) {
 				throw new Error(
-					`Engine "${ref.engine}" used my model "${ref.model}" does not exist`,
+					`Engine "${ref.engine}" used by model "${ref.model}" does not exist`,
 				)
 			}
 			if (isCustom) {
@@ -140,13 +142,13 @@ export class ModelServer {
 	
 	async stop() {
 		this.log(LogLevels.info, 'Stopping model server')
-		// TODO this actually waits until all completions are done.
-		// pool should be able to keep track of all running task and be able to cancel them.
+		// TODO pool should be able to keep track of all running task and be able to cancel them.
 		this.pool.queue.clear()
 		this.store.dispose()
-		await this.pool.queue.onIdle()
-		await this.pool.dispose()
-		this.log(LogLevels.info, 'Model server stopped')
+		// need to make sure all tasks are canceled, waiting for idle can make stop hang
+		// await this.pool.queue.onIdle() // would wait until all completions are done
+		await this.pool.dispose() // will crash when there are still running tasks
+		this.log(LogLevels.debug, 'Model server stopped')
 	}
 
 	async requestInstance(request: IncomingRequest, signal?: AbortSignal) {
@@ -205,7 +207,7 @@ export class ModelServer {
 		options?: ProcessingOptions,
 	) {
 		const lock = await this.requestInstance(args)
-		const task = await lock.instance.processEmbeddingTask(args, options)
+		const task = lock.instance.processEmbeddingTask(args, options)
 		const result = await task.result
 		await lock.release()
 		return result
@@ -216,13 +218,22 @@ export class ModelServer {
 		options?: ProcessingOptions,
 	) {
 		const lock = await this.requestInstance(args)
-		const task = await lock.instance.processImageToTextTask(args, options)
+		const task = lock.instance.processImageToTextTask(args, options)
 		const result = await task.result
 		await lock.release()
 		return result
 	}
 
-
+	async processSpeechToTextTask(
+		args: SpeechToTextRequest,
+		options?: SpeechToTextProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const task = lock.instance.processSpeechToTextTask(args, options)
+		const result = await task.result
+		await lock.release()
+		return result
+	}
 
 	getStatus() {
 		const poolStatus = this.pool.getStatus()

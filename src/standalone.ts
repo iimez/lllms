@@ -2,9 +2,10 @@ import type { AddressInfo } from 'node:net'
 import { format as formatURL } from 'node:url'
 import { startHTTPServer, HTTPServerOptions } from '#lllms/http.js'
 import { ChatWithVisionEngine } from '#lllms/lib/custom-engines/ChatWithVision.js'
+import { VoiceFunctionCallEngine } from '#lllms/lib/custom-engines/VoiceFunctionCall.js'
 
 // @ts-ignore
-import { Florence2ForConditionalGeneration } from '@xenova/transformers'
+import { Florence2ForConditionalGeneration, WhisperForConditionalGeneration } from '@xenova/transformers'
 
 // Currently only used for debugging. Do not use.
 const serverOptions: HTTPServerOptions = {
@@ -14,40 +15,48 @@ const serverOptions: HTTPServerOptions = {
 	log: 'debug',
 	concurrency: 2,
 	engines: {
-		'chat-with-vision': new ChatWithVisionEngine({
-			imageToTextModel: 'florence2',
-			chatModel: 'llama3-8b',
-		}),
+		// 'chat-with-vision': new ChatWithVisionEngine({
+		// 	imageToTextModel: 'florence2',
+		// 	chatModel: 'llama3-8b',
+		// }),
+		// 'voice-function-calling': new VoiceFunctionCallEngine({
+		// 	speechToTextModel: 'whisper-base',
+		// 	chatModel: 'functionary',
+		// }),
 	},
 	models: {
-		'gpt4o': {
-			engine: 'chat-with-vision',
-			task: 'text-completion',
-		},
-		florence2: {
-			url: 'https://huggingface.co/onnx-community/Florence-2-large-ft',
+		// 'speech-to-chat': {
+		// 	engine: 'speech-to-chat',
+		// 	task: 'speech-to-text',
+		// },
+		'whisper-base': {
+			url: 'https://huggingface.co/onnx-community/whisper-base',
 			engine: 'transformers-js',
-			task: 'image-to-text',
+			task: 'speech-to-text',
 			prepare: 'async',
 			minInstances: 1,
 			engineOptions: {
-				modelClass: Florence2ForConditionalGeneration,
+				modelClass: WhisperForConditionalGeneration,
 				gpu: false,
 				dtype: {
-					embed_tokens: 'fp16',
-					vision_encoder: 'fp32',
-					encoder_model: 'fp16',
-					decoder_model_merged: 'q4',
+					encoder_model: 'fp32', // 'fp16' works too
+					decoder_model_merged: 'q4', // or 'fp32' ('fp16' is broken)
 				},
 			},
 		},
-		'llama3-8b': {
-			url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-			md5: 'c87ad09e1e4c8f9c35a5fcef52b6f1c9',
-			engine: 'gpt4all',
+		'functionary': {
+			url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
+			sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
+			engine: 'node-llama-cpp',
 			task: 'text-completion',
-			prepare: 'async',
 		},
+		// 'llama3-8b': {
+		// 	url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+		// 	md5: 'c87ad09e1e4c8f9c35a5fcef52b6f1c9',
+		// 	engine: 'gpt4all',
+		// 	task: 'text-completion',
+		// 	prepare: 'async',
+		// },
 		// 'llama3-8b': {
 		// 	url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 		// 	sha256:

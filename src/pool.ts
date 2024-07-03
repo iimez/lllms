@@ -137,7 +137,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	}
 
 	async dispose() {
-		this.log(LogLevels.info, 'Disposing LLMPool')
+		this.log(LogLevels.info, 'Disposing pool')
 		clearInterval(this.evictionInterval)
 		const disposePromises = Object.values(this.instances).map((instance) =>
 			instance.dispose(),

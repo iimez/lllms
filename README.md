@@ -44,7 +44,8 @@ startHTTPServer({
     // Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-\.
     // Required are `task`, `engine`, `url` and/or `file`.
     'phi3-mini-4k': {
-      task: 'text-completion', // Use 'text-completion' or 'embedding'
+      // supported: 'text-completion', 'embedding', 'image-to-text', 'speech-to-text'
+      task: 'text-completion',
       engine: 'node-llama-cpp', // 'node-llama-cpp', 'transformers-js', 'gpt4all'
       // Model weights may be specified by file and/or url.
       url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',

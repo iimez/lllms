@@ -1,11 +1,13 @@
 import path from 'node:path'
 import fs from 'node:fs'
+
 import {
 	EngineContext,
 	EngineOptionsBase,
 	FileDownloadProgress,
 	ModelConfig,
 	EngineImageToTextArgs,
+	EngineSpeechToTextArgs,
 } from '#lllms/types/index.js'
 
 import {
@@ -14,13 +16,17 @@ import {
 	AutoProcessor,
 	AutoTokenizer,
 	RawImage,
+	TextStreamer,
 	// @ts-ignore
 } from '@xenova/transformers'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
+import { decodeAudio } from '#lllms/lib/audio.js'
+
+// TODO types currently hard to fix, until v3 is released with typedefs
 
 export interface TransformersJsEngineOptions extends EngineOptionsBase {
-	modelClass?: any // TODO type this; PreTrainedModel?
+	modelClass?: any
 	dtype: any
 }
 
@@ -52,16 +58,19 @@ function checkModelExists(config: ModelConfig<TransformersJsEngineOptions>) {
 			if (config.engineOptions?.dtype === 'fp32') {
 				const expectedFile = `${config.location}/onnx/encoder_model.onnx`
 				if (!fs.existsSync(expectedFile)) {
-					console.debug('missing', expectedFile)
+					console.debug('missing', config.engineOptions?.dtype, expectedFile)
 					return false
 				}
 			}
 		} else if (typeof config.engineOptions?.dtype === 'object') {
 			for (const fileName in config.engineOptions?.dtype) {
 				const dataType = config.engineOptions?.dtype[fileName]
-				const expectedFile = `${config.location}/onnx/${fileName}_${dataType}.onnx`
+				let expectedFile = `${config.location}/onnx/${fileName}_${dataType}.onnx`
+				if (dataType === 'fp32') {
+					expectedFile = `${config.location}/onnx/${fileName}.onnx`
+				}
 				if (!fs.existsSync(expectedFile)) {
-					console.debug('missing', expectedFile)
+					console.debug('missing', config.engineOptions?.dtype, expectedFile)
 					return false
 				}
 			}
@@ -129,7 +138,8 @@ export async function prepareModel(
 		})
 		const processorDownload = AutoProcessor.from_pretrained(modelId)
 		const tokenizerDownload = AutoTokenizer.from_pretrained(modelId)
-		await Promise.all([modelDownload, processorDownload, tokenizerDownload])
+		const [model, ] = await Promise.all([modelDownload, processorDownload, tokenizerDownload])
+		model.dispose()
 		if (signal?.aborted) {
 			return
 		}
@@ -147,15 +157,10 @@ export async function prepareModel(
 			}
 
 			const targetExists = fs.existsSync(targetFile)
-
 			modelFiles.push({
 				file: targetFile,
 				size: sourceStat.size,
 			})
-			// console.debug({
-			// 	source: sourceFile,
-			// 	target: targetFile,
-			// })
 			if (targetExists) {
 				const targetStat = fs.statSync(targetFile)
 				if (sourceStat.size === targetStat.size) {
@@ -205,21 +210,11 @@ export async function createInstance(
 	if (!modelPath.endsWith('/')) {
 		modelPath += '/'
 	}
-	// console.debug({
-	// 	modelPath,
-	// })
-
-	// const device = config.engineOptions?.gpu ? 'cuda' : 'cpu'
 	const modelPromise = ModelClass.from_pretrained(modelPath, {
-		// dtype: 'fp32',
 		local_files_only: true,
 		cache_dir: '/',
-		dtype: {
-			embed_tokens: 'fp16',
-			vision_encoder: 'fp32',
-			encoder_model: 'fp16',
-			decoder_model_merged: 'q4',
-		},
+		dtype: config.engineOptions?.dtype,
+		device: config.engineOptions?.gpu ? 'gpu' : 'cpu',
 	})
 	const processorPromise = AutoProcessor.from_pretrained(modelPath, {
 		local_files_only: true,
@@ -236,6 +231,12 @@ export async function createInstance(
 		tokenizerPromise,
 	])
 
+	// TODO preload whisper / any speech to text?
+	// await model.generate({
+	// 	input_features: full([1, 80, 3000], 0.0),
+	// 	max_new_tokens: 1,
+	// });
+
 	return {
 		model,
 		processor,
@@ -247,17 +248,11 @@ export async function disposeInstance(instance: TransformersJsInstance) {
 	instance.model.dispose()
 }
 
-// https://github.com/xenova/transformers.js/issues/815
-// https://huggingface.co/microsoft/Florence-2-large-ft
-// https://huggingface.co/onnx-community/Florence-2-large-ft/tree/main
-// https://github.com/xenova/transformers.js/pull/545#issuecomment-2183625876
 export async function processImageToTextTask(
-	{ request }: EngineImageToTextArgs<TransformersJsEngineOptions>,
+	{ request, config, log }: EngineImageToTextArgs<TransformersJsEngineOptions>,
 	instance: TransformersJsInstance,
-	{ config, log }: EngineContext<TransformersJsEngineOptions>,
+	signal?: AbortSignal,
 ) {
-	console.debug('processImageToTextTask', request)
-
 	let image: any
 	if (request.url) {
 		image = await RawImage.fromURL(request.url)
@@ -268,19 +263,75 @@ export async function processImageToTextTask(
 	}
 
 	// Process inputs
-	const prompts = 'Describe with a paragraph what is shown in the image.'
-	const textInputs = instance.tokenizer(prompts)
+	let textInputs = {}
+	if (request.prompt) {
+		textInputs = instance.tokenizer(request.prompt)
+	}
 	const visionInputs = await instance.processor(image)
 	const outputTokens = await instance.model.generate({
 		...textInputs,
 		...visionInputs,
-		max_new_tokens: 100,
+		max_new_tokens: request.maxTokens ?? 128,
+		
 	})
 	const outputText = instance.tokenizer.batch_decode(outputTokens, {
 		skip_special_tokens: true,
 	})
-	// console.debug(generatedText)
 
+	return {
+		text: outputText[0],
+	}
+}
+
+async function readAudioFile(filePath: string) {
+	const WHISPER_SAMPLING_RATE = 16_000
+	const MAX_AUDIO_LENGTH = 30 // seconds
+	const MAX_SAMPLES = WHISPER_SAMPLING_RATE * MAX_AUDIO_LENGTH
+	// Read the file into a buffer
+	const fileBuffer = fs.readFileSync(filePath)
+
+	// Decode the audio data
+	let decodedAudio = await decodeAudio(fileBuffer, WHISPER_SAMPLING_RATE)
+
+	// Trim the audio data if it exceeds MAX_SAMPLES
+	if (decodedAudio.length > MAX_SAMPLES) {
+		decodedAudio = decodedAudio.slice(-MAX_SAMPLES)
+	}
+
+	return decodedAudio
+}
+
+export async function processSpeechToTextTask(
+	{ request, onChunk }: EngineSpeechToTextArgs<TransformersJsEngineOptions>,
+	instance: TransformersJsInstance,
+	signal?: AbortSignal,
+) {
+	const streamer = new TextStreamer(instance.tokenizer, {
+		skip_prompt: true,
+		skip_special_tokens: true,
+		callback_function: (output: any) => {
+			if (onChunk) {
+				onChunk({ text: output })
+			}
+		},
+	})
+	let inputs
+	if (request.file) {
+		const audio = await readAudioFile(request.file)
+		inputs = await instance.processor(audio)
+	}
+
+	const outputs = await instance.model.generate({
+		...inputs,
+		max_new_tokens: request.maxTokens ?? 128,
+		language: request.language ?? 'en',
+		streamer,
+	})
+
+	const outputText = instance.tokenizer.batch_decode(outputs, {
+		skip_special_tokens: true,
+	})
+	
 	return {
 		text: outputText[0],
 	}

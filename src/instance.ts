@@ -11,6 +11,8 @@ import {
 	EmbeddingRequest,
 	ImageToTextRequest,
 	ProcessingOptions,
+	SpeechToTextRequest,
+	SpeechToTextProcessingOptions,
 } from '#lllms/types/index.js'
 import { calculateChatIdentity } from '#lllms/lib/calculateChatIdentity.js'
 import {
@@ -420,6 +422,55 @@ export class ModelInstance {
 				taskLogger(LogLevels.warn, 'ImageToText task timed out')
 			}
 			taskLogger(LogLevels.verbose, 'ImageToText task done', {
+				elapsed: timeElapsed,
+			})
+			return result
+		})
+
+		return {
+			id,
+			model: this.modelId,
+			createdAt: new Date(),
+			cancel: controller.cancel,
+			result,
+		}
+	}
+	
+	processSpeechToTextTask(
+		request: SpeechToTextRequest,
+		options?: SpeechToTextProcessingOptions,
+	) {
+		if (!('processSpeechToTextTask' in this.engine)) {
+			throw new Error(
+				`Engine "${this.config.engine}" does not implement speech to text`,
+			)
+		}
+		this.lastUsed = Date.now()
+		const id = this.generateTaskId()
+		const taskLogger = withLogMeta(this.log, {
+			sequence: this.currentRequest!.sequence,
+			task: id,
+		})
+		const controller = this.createTaskController({
+			timeout: options?.timeout,
+			signal: options?.signal,
+		})
+		const taskBegin = process.hrtime.bigint()
+		const result = this.engine.processSpeechToTextTask!(
+			{
+				request,
+				config: this.config,
+				log: taskLogger,
+			},
+			this.engineInstance,
+			controller.signal,
+		).then((result) => {
+			const timeElapsed = elapsedMillis(taskBegin)
+			controller.complete()
+			if (controller.timeoutSignal.aborted) {
+				taskLogger(LogLevels.warn, 'SpeechToText task timed out')
+			}
+			taskLogger(LogLevels.verbose, 'SpeechToText task done', {
 				elapsed: timeElapsed,
 			})
 			return result

@@ -10,19 +10,6 @@ export type CompletionFinishReason =
 	| 'cancel'
 	| 'timeout'
 
-export interface CompletionChunk {
-	tokens: number[]
-	text: string
-}
-
-export interface ProcessingOptions {
-	timeout?: number
-	signal?: AbortSignal
-}
-
-export interface CompletionProcessingOptions extends ProcessingOptions {
-	onChunk?: (chunk: CompletionChunk) => void
-}
 
 export interface AssistantToolCall {
 	id: string

@@ -16,9 +16,9 @@
 	},
 	"scripts": {
 		"upgrade": "npx npm-check-updates -i",
-		"reinstall": "rimraf ./node_modules ./package-lock.json && npm install",
-		"prebuild": "rimraf ./dist",
-		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json && cp -r src/engines/node-llama-cpp/grammars dist/engines/node-llama-cpp/grammars",
+		"reinstall": "node build.mjs prebuild && npm install",
+		"prebuild": "node build.mjs prebuild",
+		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json && node build.mjs copy-grammars",
 		"test": "vitest --run --test-timeout=-1 --pool=forks --maxConcurrency=1",
 		"test:pool": "vitest tests/pool.test.ts --test-timeout=-1 --pool=forks",
 		"test:openai": "vitest tests/openai.test.ts --test-timeout=-1 --pool=forks",

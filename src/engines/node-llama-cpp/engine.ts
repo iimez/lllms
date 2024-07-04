@@ -56,6 +56,7 @@ import {
 import {
 	LlamaChatResult,
 } from './types.js'
+import { fileURLToPath } from 'node:url'
 
 // https://github.com/withcatai/node-llama-cpp/pull/105
 // https://github.com/withcatai/node-llama-cpp/discussions/109
@@ -149,7 +150,7 @@ export async function prepareModel(
 	}
 }
 
-const defaultGrammarsPath = path.dirname(new URL(import.meta.url).pathname) + '/grammars'
+const defaultGrammarsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grammars');
 
 export async function createInstance(
 	{ config, log }: EngineContext<NodeLlamaCppModelMeta, NodeLlamaCppEngineOptions>,

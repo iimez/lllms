@@ -56,6 +56,7 @@ import {
 import {
 	LlamaChatResult,
 } from './types.js'
+import { fileURLToPath } from 'node:url'
 
 // https://github.com/withcatai/node-llama-cpp/pull/105
 // https://github.com/withcatai/node-llama-cpp/discussions/109

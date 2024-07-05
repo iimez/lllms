@@ -33,11 +33,10 @@ export interface ModelStoreOptions {
 
 export class ModelStore {
 	prepareQueue: PQueue
-	prepareController: AbortController
-	modelsPath: string
 	models: Record<string, StoredModel> = {}
 	engines?: Record<string, ModelEngine>
-
+	private prepareController: AbortController
+	private modelsPath: string
 	private log: Logger
 
 	constructor(options: ModelStoreOptions) {
@@ -105,7 +104,7 @@ export class ModelStore {
 	async prepareModel(modelId: string, signal?: AbortSignal) {
 		const model = this.models[modelId]
 		if (!this.engines) {
-			throw new Error('Engines not initialized - did you call init()?')
+			throw new Error('No engines available - did you call init()?')
 		}
 		model.status = 'preparing'
 		const engine = this.engines[model.engine]
@@ -189,7 +188,7 @@ export class ModelStore {
 					modelId,
 					{
 						engine: model.engine,
-						engineOptions: model.engineOptions,
+						device: model.device,
 						minInstances: model.minInstances,
 						maxInstances: model.maxInstances,
 						status: model.status,

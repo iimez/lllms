@@ -17,19 +17,18 @@ import {
 	EngineTextCompletionResult,
 	CompletionFinishReason,
 	EngineContext,
-	EngineOptionsBase,
 	EngineEmbeddingArgs,
 	EngineEmbeddingResult,
 	FileDownloadProgress,
 	ModelConfig,
+	TextCompletionPreloadOptions,
+	TextCompletionParams,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
-import { calculateFileChecksum } from '#lllms/lib/calculateFileChecksum.js'
 import { downloadLargeFile } from '#lllms/lib/downloadLargeFile.js'
 import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
-import { createChatMessageArray } from './util.js'
+import { createChatMessageArray, verifyModelFile } from './util.js'
 
-export interface GPT4AllEngineOptions extends EngineOptionsBase {}
 export type GPT4AllInstance = InferenceModel | EmbeddingModel
 
 export interface GPT4AllModelMeta {
@@ -42,29 +41,26 @@ export interface GPT4AllModelMeta {
 	ramrequired: number
 }
 
-// interface GPT4AllModelConfig {
-// }
-
-function checkModelExists(config: ModelConfig<GPT4AllEngineOptions>) {
-	if (!fs.existsSync(config.location)) {
-		return false
-	}
-	return true
-}
-
-async function verifyModelFile(location: string, md5: string) {
-	const fileHash = await calculateFileChecksum(location, 'md5')
-	if (fileHash !== md5) {
-		throw new Error(
-			`Model md5 checksum mismatch: expected ${md5} got ${fileHash} for ${location}`,
-		)
+export interface GPT4AllModelConfig extends ModelConfig {
+	location: string
+	md5?: string
+	url?: string
+	contextSize?: number
+	batchSize?: number
+	task: 'text-completion' | 'embedding'
+	preload?: TextCompletionPreloadOptions
+	completionDefaults?: TextCompletionParams
+	device?: {
+		gpu?: boolean | 'auto' | (string & {})
+		gpuLayers?: number
+		cpuThreads?: number
 	}
 }
 
 export const autoGpu = true
 
 export async function prepareModel(
-	{ config, log }: EngineContext<GPT4AllModelMeta, GPT4AllEngineOptions>,
+	{ config, log }: EngineContext<GPT4AllModelConfig>,
 	onProgress?: (progress: FileDownloadProgress) => void,
 	signal?: AbortSignal,
 ) {
@@ -101,7 +97,7 @@ export async function prepareModel(
 		modelMeta = foundModelMeta
 	}
 
-	if (!checkModelExists(config)) {
+	if (!fs.existsSync(config.location)) {
 		if (!config.url) {
 			throw new Error(`Cannot download "${config.id}" - no URL configured`)
 		}
@@ -128,7 +124,7 @@ export async function prepareModel(
 }
 
 export async function createInstance(
-	{ config, log }: EngineContext<GPT4AllModelMeta, GPT4AllEngineOptions>,
+	{ config, log }: EngineContext<GPT4AllModelConfig>,
 	signal?: AbortSignal,
 ) {
 	log(LogLevels.info, `Load GPT4All model ${config.location}`)
@@ -137,8 +133,8 @@ export async function createInstance(
 		// file: config.file,
 		modelConfigFile: path.dirname(config.location) + '/models.json',
 		allowDownload: false,
-		device: config.engineOptions?.gpu ? 'gpu' : 'cpu',
-		ngl: config.engineOptions?.gpuLayers ?? 100,
+		device: config.device?.gpu ? 'gpu' : 'cpu',
+		ngl: config.device?.gpuLayers ?? 100,
 		nCtx: config.contextSize ?? 2048,
 		// verbose: true,
 		// signal?: // TODO no way to cancel load
@@ -157,8 +153,8 @@ export async function createInstance(
 		...loadOpts,
 		type: modelType,
 	})
-	if (config.engineOptions?.cpuThreads) {
-		instance.llm.setThreadCount(config.engineOptions.cpuThreads)
+	if (config.device?.cpuThreads) {
+		instance.llm.setThreadCount(config.device.cpuThreads)
 	}
 
 	if (config.preload && 'generate' in instance) {
@@ -192,7 +188,7 @@ export async function disposeInstance(instance: GPT4AllInstance) {
 }
 
 export async function processTextCompletionTask(
-	{ request, config, onChunk }: EngineTextCompletionArgs<GPT4AllEngineOptions>,
+	{ request, config, onChunk }: EngineTextCompletionArgs<GPT4AllModelConfig>,
 	instance: GPT4AllInstance,
 	signal?: AbortSignal,
 ): Promise<EngineTextCompletionResult> {
@@ -219,9 +215,10 @@ export async function processTextCompletionTask(
 		topP: request.topP ?? defaults.topP,
 		topK: request.topK ?? defaults.topK,
 		minP: request.minP ?? defaults.minP,
-		nBatch: config.engineOptions?.batchSize,
-		// TODO not sure if repeatPenalty interacts with repeatLastN and how it differs from frequency/presencePenalty.
+		nBatch: config?.batchSize,
 		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
+		// repeat penalty is doing something different than both frequency and presence penalty
+		// so not falling back to them here.
 		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // https://github.com/nomic-ai/gpt4all/issues/1952
 		onResponseToken: (tokenId, text) => {
@@ -281,7 +278,7 @@ export async function processChatCompletionTask(
 		config,
 		resetContext,
 		onChunk,
-	}: EngineChatCompletionArgs<GPT4AllEngineOptions>,
+	}: EngineChatCompletionArgs<GPT4AllModelConfig>,
 	instance: GPT4AllInstance,
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
@@ -312,8 +309,8 @@ export async function processChatCompletionTask(
 	)
 
 	const lastMessage = conversationMessages[conversationMessages.length - 1]
-	if (lastMessage.role !== 'user') {
-		throw new Error('Last message must be from user.')
+	if (!(lastMessage.role === 'user' && lastMessage.content)) {
+		throw new Error('Chat completions require a final user message.')
 	}
 	const input: CompletionInput = lastMessage.content
 
@@ -330,7 +327,7 @@ export async function processChatCompletionTask(
 		topP: request.topP ?? defaults.topP,
 		topK: request.topK ?? defaults.topK,
 		minP: request.minP ?? defaults.minP,
-		nBatch: config.engineOptions?.batchSize,
+		nBatch: config.batchSize,
 		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // see https://github.com/nomic-ai/gpt4all/issues/1952
@@ -390,7 +387,7 @@ export async function processChatCompletionTask(
 }
 
 export async function processEmbeddingTask(
-	{ request, config }: EngineEmbeddingArgs<GPT4AllEngineOptions>,
+	{ request, config }: EngineEmbeddingArgs,
 	instance: GPT4AllInstance,
 	signal?: AbortSignal,
 ): Promise<EngineEmbeddingResult> {

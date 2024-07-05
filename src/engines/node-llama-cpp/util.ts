@@ -7,6 +7,7 @@ import {
 	ChatModelResponse,
 	LlamaTextJSON,
 } from 'node-llama-cpp'
+import { getGrammarsFolder } from 'node-llama-cpp/dist/utils/getGrammarsFolder'
 import { CompletionFinishReason, ChatMessage } from '#lllms/types/index.js'
 import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
 import { LlamaChatResult } from './types.js'
@@ -78,21 +79,6 @@ export function addFunctionCallToChatHistory({
 	return newChatHistory
 }
 
-export function prepareGrammars(
-	llama: Llama,
-	grammarConfig: Record<string, string>,
-) {
-	const grammars: Record<string, LlamaGrammar> = {}
-	for (const key in grammarConfig) {
-		const grammar = new LlamaGrammar(llama, {
-			grammar: grammarConfig[key],
-			// printGrammar: true,
-		})
-		grammars[key] = grammar
-	}
-	return grammars
-}
-
 export function createChatMessageArray(
 	messages: ChatMessage[],
 ): ChatHistoryItem[] {
@@ -128,15 +114,19 @@ export function createChatMessageArray(
 	return items
 }
 
-export function readGrammarFiles(grammarsPath: string) {
+export async function readGBNFFiles(directoryPath: string) {
 	const gbnfFiles = fs
-		.readdirSync(grammarsPath)
+		.readdirSync(directoryPath)
 		.filter((f) => f.endsWith('.gbnf'))
-	const grammars: Record<string, string> = {}
-	for (const file of gbnfFiles) {
-		const grammar = fs.readFileSync(path.join(grammarsPath, file), 'utf-8')
-		grammars[file.replace('.gbnf', '')] = grammar
-	}
-	return grammars
+	const fileContents = await Promise.all(
+		gbnfFiles.map((file) =>
+			fs.promises.readFile(path.join(directoryPath, file), 'utf-8'),
+		),
+	)
+	return gbnfFiles.reduce((acc, file, i) => {
+		acc[file.replace('.gbnf', '')] = fileContents[i]
+		return acc
+	}, {} as Record<string, string>)
 }
+
 

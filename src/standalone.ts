@@ -29,19 +29,20 @@ const serverOptions: HTTPServerOptions = {
 		// 	engine: 'speech-to-chat',
 		// 	task: 'speech-to-text',
 		// },
+		
 		'whisper-base': {
 			url: 'https://huggingface.co/onnx-community/whisper-base',
 			engine: 'transformers-js',
 			task: 'speech-to-text',
 			prepare: 'async',
 			minInstances: 1,
-			engineOptions: {
-				modelClass: WhisperForConditionalGeneration,
+			modelClass: WhisperForConditionalGeneration,
+			dtype: {
+				encoder_model: 'fp32', // 'fp16' works too
+				decoder_model_merged: 'q4', // or 'fp32' ('fp16' is broken)
+			},
+			device: {
 				gpu: false,
-				dtype: {
-					encoder_model: 'fp32', // 'fp16' works too
-					decoder_model_merged: 'q4', // or 'fp32' ('fp16' is broken)
-				},
 			},
 		},
 		'functionary': {
@@ -50,6 +51,14 @@ const serverOptions: HTTPServerOptions = {
 			engine: 'node-llama-cpp',
 			task: 'text-completion',
 		},
+		// 'foo': {
+		// 	task:'text-completion2',
+		// 	engine: ''
+		// }
+		// 'foo': {
+		// 	'engine': 'transformers-js',
+		// 	''
+		// },
 		// 'llama3-8b': {
 		// 	url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
 		// 	md5: 'c87ad09e1e4c8f9c35a5fcef52b6f1c9',

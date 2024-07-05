@@ -20,6 +20,14 @@ export async function createChatCompletion(
 	const lock = await server.pool.requestInstance(mergedArgs)
 	const task = lock.instance.processChatCompletionTask(mergedArgs, { timeout })
 	const device = lock.instance.gpu ? 'gpu' : 'cpu'
+	try {
+		await task.result
+	} catch (error) {
+		console.debug('error happened', error.message)
+		console.error('Error in createChatCompletion', error)
+		await lock.release()
+		throw error
+	}
 	const result = await task.result
 	await lock.release()
 	return { task, result, device }

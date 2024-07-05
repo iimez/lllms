@@ -94,6 +94,16 @@ function runOpenAITests(client: OpenAI) {
 		expect(finishReason).toBe('stop')
 	})
 
+	test('embeddings.create', async () => {
+		const res = await client.embeddings.create({
+			model: embeddingsModel,
+			input: 'This is a test.',
+		})
+		expect(res.data).toBeInstanceOf(Array)
+		expect(res.data[0].embedding).toBeInstanceOf(Array)
+		expect(Number.isFinite(res.data[0].embedding[0])).toBe(true)
+	})
+
 	test('response_format json_object / json grammar', async () => {
 		const completion = await client.chat.completions.create({
 			model: chatModel,
@@ -186,16 +196,6 @@ function runOpenAITests(client: OpenAI) {
 		expect(finalResult.usage).toBeDefined()
 		expect(finalResult.usage?.completion_tokens).toBeGreaterThan(0)
 	})
-	
-	test('embeddings.create', async () => {
-		const res = await client.embeddings.create({
-			model: embeddingsModel,
-			input: 'This is a test.',
-		})
-		expect(res.data).toBeInstanceOf(Array)
-		expect(res.data[0].embedding).toBeInstanceOf(Array)
-		expect(Number.isFinite(res.data[0].embedding[0])).toBe(true)
-	})
 }
 
 suite('OpenAI API (node-llama-cpp)', () => {
@@ -217,7 +217,7 @@ suite('OpenAI API (node-llama-cpp)', () => {
 					minInstances: 1,
 					engine: 'node-llama-cpp',
 					task: 'embedding',
-					engineOptions: {
+					device: {
 						gpu: false,
 					}
 				},

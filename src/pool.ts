@@ -1,6 +1,5 @@
 import PQueue from 'p-queue'
 import EventEmitter3 from 'eventemitter3'
-// import { engines } from '#lllms/engines/index.js'
 import { ModelInstance } from '#lllms/instance.js'
 import {
 	ModelConfig,
@@ -8,7 +7,12 @@ import {
 	ModelInstanceRequest,
 	ModelEngine,
 } from '#lllms/types/index.js'
-import { Logger, LogLevels, createSublogger, LogLevel } from '#lllms/lib/logger.js'
+import {
+	Logger,
+	LogLevels,
+	createSublogger,
+	LogLevel,
+} from '#lllms/lib/logger.js'
 
 export interface ModelInstanceHandle {
 	instance: ModelInstance
@@ -38,7 +42,6 @@ export interface ModelPoolOptions {
 
 type ModelPoolEvent = 'ready' | 'spawn' | 'release'
 
-
 export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	queue: PQueue
 	config: ModelPoolConfig
@@ -51,7 +54,10 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	private gpuLock: boolean = false // TODO could derive this from "is there any instance that has gpu=true"
 	private prepareInstance?: PrepareModelInstanceCallback
 
-	constructor(options: ModelPoolOptions, prepareInstance?: PrepareModelInstanceCallback) {
+	constructor(
+		options: ModelPoolOptions,
+		prepareInstance?: PrepareModelInstanceCallback,
+	) {
 		super()
 		this.log = createSublogger(options.log)
 		const models: Record<string, ModelConfig> = {}
@@ -60,7 +66,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			models[id] = {
 				...modelConfig,
 				id: modelConfig.id ?? id,
-			}			
+			}
 		}
 		const config: ModelPoolConfig = {
 			concurrency: 1,
@@ -92,7 +98,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		// prioritize initializing the first model defined that has gpu=true
 		// so lock cant be acquired first by another model that has gpu=auto/undefined
 		const firstGpuModel = Object.entries(modelConfigs).find(
-			([id, config]) => config.engineOptions?.gpu === true,
+			([id, config]) => config.device?.gpu === true,
 		)
 		if (firstGpuModel) {
 			const modelConfig = modelConfigs[firstGpuModel[0]]
@@ -185,11 +191,9 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 						{
 							model: instance.modelId,
 							status: instance.status,
-							url: instance.config.url,
-							file: instance.config.file,
 							engine: instance.config.engine,
 							device: instance.gpu ? 'gpu' : 'cpu',
-							// context: instance.getContextIdentity(),
+							contextState: instance.getContextStateIdentity(),
 							lastUsed: new Date(instance.lastUsed).toISOString(),
 						},
 					]
@@ -204,16 +208,14 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		const modelConfig = this.config.models[modelId]
 		// if the model is configured with gpu=true, interpret that as "it MUST run on gpu"
 		// and prevent spawning more instances if the gpu is already locked.
-		const requiresGpu = modelConfig.engineOptions?.gpu === true
+		const requiresGpu = modelConfig.device?.gpu === true
 		if (requiresGpu && this.gpuLock) {
-			// TODO check if we are allowed to shut down the locking instance
-			// this.log(
-			// 	LogLevels.debug,
-			// 	'Denied spawning instance because of GPU lock',
-			// 	{
-			// 		model: modelId,
-			// 	},
-			// )
+			// TODO check if we are allowed to shut down the locking instance?
+			this.log(
+				LogLevels.debug,
+				'Cannot spawn new instance: model requires gpu, but its locked',
+				{ model: modelId },
+			)
 			return false
 		}
 		// see if we're within maxInstances limit
@@ -222,13 +224,11 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			(instance) => instance.modelId === modelId,
 		)
 		if (currentInstances.length >= maxInstances) {
-			// this.log(
-			// 	LogLevels.debug,
-			// 	'Denied spawning instance because of maxInstances',
-			// 	{
-			// 		model: modelId,
-			// 	},
-			// )
+			this.log(
+				LogLevels.debug,
+				'Cannot spawn new instance: maxInstances reached',
+				{ model: modelId, curent: currentInstances.length, max: maxInstances },
+			)
 			return false
 		}
 		return true
@@ -251,7 +251,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		options: { signal?: AbortSignal; emit?: boolean } = {},
 	) {
 		if (!this.engines) {
-			throw new Error('Engines not initialized - did you call init()?')
+			throw new Error('No engines available - did you call init()?')
 		}
 		const model = this.config.models[modelId]
 		const engine = this.engines[model.engine]
@@ -259,11 +259,10 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 
 		// if the model is configured with gpu=auto (or unset), we can use the gpu if its not locked
 		const autoGpu =
-			model.engineOptions?.gpu === undefined ||
-			model.engineOptions?.gpu === 'auto'
-		let useGpu = autoGpu ? (autoGpuEnabled && !this.gpuLock) : false
+			model.device?.gpu === undefined || model.device?.gpu === 'auto'
+		let useGpu = autoGpu ? autoGpuEnabled && !this.gpuLock : false
 
-		if (model.engineOptions?.gpu === true) {
+		if (model.device?.gpu === true) {
 			useGpu = true
 		}
 
@@ -382,6 +381,9 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			}
 			this.on('spawn', listener)
 			this.on('release', listener)
+			setInterval(() => {
+				console.debug(this.instances)
+			}, 10000)
 			if (signal) {
 				signal.addEventListener('abort', () => {
 					this.off('release', listener)
@@ -393,7 +395,10 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	}
 
 	// acquire an instance for the given request
-	private async acquireInstance(request: ModelInstanceRequest, signal?: AbortSignal) {
+	private async acquireInstance(
+		request: ModelInstanceRequest,
+		signal?: AbortSignal,
+	) {
 		if ('messages' in request) {
 			// for chat completions first search for an instance that has the messages already ingested and the context ready
 			for (const key in this.instances) {
@@ -426,10 +431,14 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 				instance.status === 'idle' &&
 				!instance.hasContextState()
 			) {
-				this.log(LogLevels.debug, 'Reusing instance with no context state', {
-					instance: instance.id,
-					sequence: request.sequence,
-				})
+				this.log(
+					LogLevels.debug,
+					'Reusing idle instance without context state',
+					{
+						instance: instance.id,
+						sequence: request.sequence,
+					},
+				)
 				instance.lock(request)
 				return instance
 			}
@@ -466,8 +475,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			return lruInstance
 		}
 
-		const requiresGpu =
-			this.config.models[request.model].engineOptions?.gpu === true
+		const requiresGpu = this.config.models[request.model].device?.gpu === true
 		if (requiresGpu && this.gpuLock) {
 			const gpuInstance = Object.values(this.instances).find(
 				(instance) => instance.gpu === true,
@@ -503,7 +511,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		}
 
 		// wait until an instance of our model is released or spawned
-		this.log(LogLevels.debug, 'Awaiting idle instance for', {
+		this.log(LogLevels.debug, 'Awaiting idle instance', {
 			model: request.model,
 			sequence: request.sequence,
 		})

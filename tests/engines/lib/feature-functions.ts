@@ -78,6 +78,7 @@ export async function runSequentialFunctionCallTest(llms: ModelServer) {
 		messages,
 	})
 	expect(turn2.result.message.content).toMatch(/cloudy/)
+
 }
 
 interface GetRandomNumberParams {

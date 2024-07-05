@@ -24,6 +24,6 @@ export async function runContextShiftIngestionTest(
 	})
 	expect(response1.result.message.content?.substring(-6)).toMatch(/OK/i)
 	// TODO get instance from llms and check what happened
-	console.debug({ response1: response1.result.message.content })
+	// console.debug({ response1: response1.result.message.content })
 
 }

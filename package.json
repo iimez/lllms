@@ -1,6 +1,6 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.11",
+	"version": "1.0.0-beta.12",
 	"description": "Local Large Language Models. Providing node.js tools to run and serve AI models on any machine.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
@@ -18,7 +18,7 @@
 		"upgrade": "npx npm-check-updates -i",
 		"reinstall": "node build.mjs prebuild && npm install",
 		"prebuild": "node build.mjs prebuild",
-		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json && node build.mjs copy-grammars",
+		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json",
 		"test": "vitest --run --test-timeout=-1 --pool=forks --maxConcurrency=1",
 		"test:pool": "vitest tests/pool.test.ts --test-timeout=-1 --pool=forks",
 		"test:openai": "vitest tests/openai.test.ts --test-timeout=-1 --pool=forks",

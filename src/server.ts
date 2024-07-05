@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { builtInEngineList } from '#lllms/engines/index.js'
+import { builtInEngineNames } from '#lllms/engines/index.js'
 import { ModelPool } from '#lllms/pool.js'
 import { ModelInstance } from '#lllms/instance.js'
 import { ModelStore, StoredModel } from '#lllms/store.js'
@@ -17,6 +17,9 @@ import {
 	ImageToTextRequest,
 	SpeechToTextRequest,
 	SpeechToTextProcessingOptions,
+	BuiltInModelOptions,
+	CustomEngineModelOptions,
+	ModelConfigBase,
 } from '#lllms/types/index.js'
 import { Logger, LogLevel, createSublogger, LogLevels } from '#lllms/lib/logger.js'
 import { resolveModelLocation } from '#lllms/lib/resolveModelLocation.js'
@@ -47,19 +50,30 @@ export class ModelServer {
 		const modelsPath =
 			options?.modelsPath || path.resolve(os.homedir(), '.cache/lllms')
 
-		const modelsWithDefaults: Record<string, ModelConfig> = {}
+		const modelsWithDefaults: Record<string, ModelConfigBase> = {}
 		const usedEngines: Array<{ model: string; engine: string }> = []
 		for (const modelId in options.models) {
 			const modelOptions = options.models[modelId]
-			validateModelOptions(modelId, modelOptions)
-	
-			modelsWithDefaults[modelId] = {
-				id: modelId,
-				minInstances: 0,
-				maxInstances: 1,
-				engineOptions: {},
-				location: resolveModelLocation(modelsPath, modelOptions),
-				...modelOptions,
+			const isBuiltIn = builtInEngineNames.includes(modelOptions.engine)
+			if (isBuiltIn) {
+				const builtInModelOptions = modelOptions as BuiltInModelOptions;
+				// can validate and resolve location if built-in
+				validateModelOptions(modelId, builtInModelOptions)
+				modelsWithDefaults[modelId] = {
+					id: modelId,
+					minInstances: 0,
+					maxInstances: 1,
+					location: resolveModelLocation(modelsPath, builtInModelOptions),
+					...builtInModelOptions,
+				}
+			} else {
+				const customEngineOptions = modelOptions as CustomEngineModelOptions
+				modelsWithDefaults[modelId] = {
+					id: modelId,
+					minInstances: 0,
+					maxInstances: 1,
+					...customEngineOptions,
+				}
 			}
 			usedEngines.push({
 				model: modelId,
@@ -69,7 +83,7 @@ export class ModelServer {
 
 		const customEngines = Object.keys(options.engines ?? {})
 		for (const ref of usedEngines) {
-			const isBuiltIn = builtInEngineList.includes(ref.engine)
+			const isBuiltIn = builtInEngineNames.includes(ref.engine)
 			const isCustom = customEngines.includes(ref.engine)
 			if (!isBuiltIn && !isCustom) {
 				throw new Error(
@@ -110,7 +124,7 @@ export class ModelServer {
 			}
 		}
 		// import built-in engines
-		for (const key of builtInEngineList) {
+		for (const key of builtInEngineNames) {
 			// skip unused engines
 			const modelUsingEngine = Object.keys(this.store.models).find(
 				(modelId) => this.store.models[modelId].engine === key,

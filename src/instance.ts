@@ -1,5 +1,4 @@
 import crypto from 'node:crypto'
-import { existsSync } from 'node:fs'
 import { customAlphabet } from 'nanoid'
 import {
 	TextCompletionRequest,
@@ -76,7 +75,7 @@ export class ModelInstance {
 		this.log(LogLevels.info, 'Initializing new instance', {
 			model: this.modelId,
 			engine: this.config.engine,
-			engineOptions: this.config.engineOptions,
+			device: this.config.device,
 			hasGpuLock: this.gpu,
 		})
 	}
@@ -103,8 +102,8 @@ export class ModelInstance {
 					}),
 					config: {
 						...this.config,
-						engineOptions: {
-							...this.config.engineOptions,
+						device: {
+							...this.config.device,
 							gpu: this.gpu,
 						},
 					},
@@ -175,7 +174,7 @@ export class ModelInstance {
 	}
 
 	matchesRequirements(request: ModelInstanceRequest) {
-		const mustGpu = this.config.engineOptions?.gpu === true
+		const mustGpu = this.config.device?.gpu === true
 		const modelMatches = this.modelId === request.model
 		const gpuMatches = mustGpu ? this.gpu : true
 		return modelMatches && gpuMatches
@@ -269,6 +268,11 @@ export class ModelInstance {
 				elapsed: elapsedTime,
 			})
 			return result
+		}).catch((error) => {
+			taskLogger(LogLevels.error, 'Task failed - ', {
+				error,
+			})
+			throw error
 		})
 		return {
 			id,
@@ -327,6 +331,11 @@ export class ModelInstance {
 				elapsed: elapsedTime,
 			})
 			return result
+		}).catch((error) => {
+			taskLogger(LogLevels.error, 'Task failed - ', {
+				error,
+			})
+			throw error
 		})
 		return {
 			id,
@@ -376,6 +385,11 @@ export class ModelInstance {
 				elapsed: timeElapsed,
 			})
 			return result
+		}).catch((error) => {
+			taskLogger(LogLevels.error, 'Task failed - ', {
+				error,
+			})
+			throw error
 		})
 
 		return {
@@ -425,6 +439,11 @@ export class ModelInstance {
 				elapsed: timeElapsed,
 			})
 			return result
+		}).catch((error) => {
+			taskLogger(LogLevels.error, 'Task failed - ', {
+				error,
+			})
+			throw error
 		})
 
 		return {
@@ -474,6 +493,11 @@ export class ModelInstance {
 				elapsed: timeElapsed,
 			})
 			return result
+		}).catch((error) => {
+			taskLogger(LogLevels.error, 'Task failed - ', {
+				error,
+			})
+			throw error
 		})
 
 		return {

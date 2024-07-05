@@ -1,5 +1,5 @@
-import { ModelOptions } from "#lllms/types/index.js"
-import { builtInEngineList } from '#lllms/engines/index.js'
+import { BuiltInModelOptions } from '#lllms/types/index.js'
+import { builtInEngineNames } from '#lllms/engines/index.js'
 
 const modelIdPattern = /^[a-zA-Z0-9_\-\.]+$/
 export function validateModelId(id: string) {
@@ -10,14 +10,19 @@ export function validateModelId(id: string) {
 	}
 }
 
-export function validateModelOptions(id: string, modelOptions: ModelOptions) {
+export function validateModelOptions(
+	id: string,
+	modelOptions: BuiltInModelOptions,
+) {
 	validateModelId(id)
 	if (!modelOptions.engine) {
 		throw new Error(`Model "${id}" must have an engine`)
 	}
 	const isSourceMissing =
-		!modelOptions.file && !modelOptions.url && !modelOptions.location
-	if (builtInEngineList.includes(modelOptions.engine) && isSourceMissing) {
+		!('file' in modelOptions && modelOptions.file) &&
+		!modelOptions.url &&
+		!modelOptions.location
+	if (builtInEngineNames.includes(modelOptions.engine) && isSourceMissing) {
 		throw new Error(`Model "${id}" must have either file or url`)
 	}
 	if (!modelOptions.task) {

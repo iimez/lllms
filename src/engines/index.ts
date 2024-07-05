@@ -1,9 +1,9 @@
 import type { ModelPool } from '#lllms/pool.js'
 import type { ModelStore } from '#lllms/store.js'
-import { ModelEngine, EngineStartContext } from '#lllms/types/index.js'
-export type { NodeLlamaCppEngineOptions } from './node-llama-cpp/engine.js'
-export type { GPT4AllEngineOptions } from './gpt4all/engine.js'
-export type { TransformersJsEngineOptions } from './transformers-js/engine.js'
+import { ModelEngine, EngineStartContext, ModelOptions, BuiltInModelOptions } from '#lllms/types/index.js'
+// export type { NodeLlamaCppEngineOptions } from './node-llama-cpp/engine.js'
+// export type { GPT4AllEngineOptions } from './gpt4all/engine.js'
+// export type { TransformersJsEngineOptions } from './transformers-js/engine.js'
 
 export const BuiltInEngines = {
 	gpt4all: 'gpt4all',
@@ -11,10 +11,11 @@ export const BuiltInEngines = {
 	transformersJs: 'transformers-js',
 } as const
 
-export const builtInEngineList: string[] = [
+export type BuiltInEngineName = typeof BuiltInEngines[keyof typeof BuiltInEngines];
+
+export const builtInEngineNames: string[] = [
 	...Object.values(BuiltInEngines),
 ] as const
-export type BuiltInEngineName = keyof typeof BuiltInEngines
 
 export class CustomEngine implements ModelEngine {
 	pool!: ModelPool

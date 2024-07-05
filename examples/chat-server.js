@@ -1,5 +1,7 @@
 import http from 'node:http'
-import { startModelServer } from '../dist/index.js'
+import { startModelServer } from '#lllms/index.js'
+
+// A minimal chat server using the ModelServer.
 
 const llms = await startModelServer({
 	log: 'info',

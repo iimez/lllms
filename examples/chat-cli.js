@@ -1,6 +1,6 @@
 import readline from 'node:readline'
 import chalk from 'chalk'
-import { ModelServer } from '../dist/index.js'
+import { ModelServer } from '#lllms/index.js'
 
 // A command-line chat example using the ModelServer.
 
@@ -9,14 +9,10 @@ const llms = new ModelServer({
 	models: {
 		'dolphin': {
 			task: 'text-completion',
-			prepare: 'blocking',
 			minInstances: 1,
 			url: 'https://huggingface.co/QuantFactory/dolphin-2.9-llama3-8b-GGUF/blob/main/dolphin-2.9-llama3-8b.Q4_K_M.gguf',
 			engine: 'node-llama-cpp',
-			engineOptions: {
-				// debug: true,
-				gpu: false,
-			},
+			// device: { gpu: false },
 		},
 	},
 })

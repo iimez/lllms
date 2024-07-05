@@ -1,0 +1,8 @@
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+item ::= "{" space item-name-kv "," space item-age-kv "}" space
+item-age ::= ([0-9] | ([1-8] [0-9] | [9] [0-9]) | "1" ([0-4] [0-9] | [5] "0")) space
+item-age-kv ::= "\"age\"" space ":" space item-age
+item-name ::= "\"" char{1,100} "\"" space
+item-name-kv ::= "\"name\"" space ":" space item-name
+root ::= "[" space item ("," space item){9,99} "]" space
+space ::= | " " | "\n" [ \t]{0,20}

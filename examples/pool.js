@@ -1,12 +1,11 @@
 import os from 'node:os'
 import path from 'node:path'
 import chalk from 'chalk'
-import { ModelPool } from '../dist/index.js'
-import { elapsedMillis } from '../dist/lib/util.js'
-import { createLogger } from '../dist/lib/logger.js'
-import * as GPT4AllEngine from '../dist/engines/gpt4all/engine.js'
+import { ModelPool } from '#lllms/index.js'
+import { elapsedMillis } from '#lllms/lib/util.js'
+import * as GPT4AllEngine from '#lllms/engines/gpt4all/engine.js'
 
-// Complete multiple prompts concurrently using LLMPool.
+// Complete multiple prompts concurrently using ModelPool.
 
 async function onPrepareInstance(instance) {
 	// can be used to set up the instance before it's used.

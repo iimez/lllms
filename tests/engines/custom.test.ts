@@ -37,15 +37,15 @@ suite('chat with vision', () => {
 				url: 'https://huggingface.co/onnx-community/Florence-2-large-ft',
 				engine: 'transformers-js',
 				task: 'image-to-text',
-				engineOptions: {
-					modelClass: Florence2ForConditionalGeneration,
+				modelClass: Florence2ForConditionalGeneration,
+				dtype: {
+					embed_tokens: 'fp16',
+					vision_encoder: 'fp32',
+					encoder_model: 'fp16',
+					decoder_model_merged: 'q4',
+				},
+				device: {
 					gpu: false,
-					dtype: {
-						embed_tokens: 'fp16',
-						vision_encoder: 'fp32',
-						encoder_model: 'fp16',
-						decoder_model_merged: 'q4',
-					},
 				},
 			},
 			'vision-at-home': {
@@ -132,13 +132,13 @@ suite('voice functions', () => {
 				task: 'speech-to-text',
 				prepare: 'async',
 				minInstances: 1,
-				engineOptions: {
-					modelClass: WhisperForConditionalGeneration,
+				modelClass: WhisperForConditionalGeneration,
+				dtype: {
+					encoder_model: 'fp32', // 'fp16' works too
+					decoder_model_merged: 'q4', // or 'fp32' ('fp16' is broken)
+				},
+				device: {
 					gpu: false,
-					dtype: {
-						encoder_model: 'fp32', // 'fp16' works too
-						decoder_model_merged: 'q4', // or 'fp32' ('fp16' is broken)
-					},
 				},
 			},
 			'functionary': {

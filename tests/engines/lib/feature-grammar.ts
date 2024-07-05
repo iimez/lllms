@@ -3,7 +3,7 @@ import { ModelServer } from '#lllms/server.js'
 import { createChatCompletion } from '../../util.js'
 import { ChatMessage } from '#lllms/types/index.js'
 
-export async function runGrammarTest(llms: ModelServer) {
+export async function runJsonGrammarTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
@@ -36,4 +36,26 @@ export async function runGrammarTest(llms: ModelServer) {
 	// })
 	expect(turn2.result.message.content).toContain(firstCat)
 	
+}
+
+export async function runCustomGrammarTest(llms: ModelServer) {
+	const messages: ChatMessage[] = [
+		{
+			role: 'user',
+			content: 'I REQUIRE CATS, IN STRUCTURED DATA! Please not too many!',
+		},
+	]
+	const turn1 = await createChatCompletion(llms, {
+		grammar: 'test',
+		messages,
+		maxTokens: 512,
+	})
+	// console.debug({
+	// 	turn1: turn1.result.message.content,
+	// })
+	expect(turn1.result.message.content).toBeTruthy()
+	const data = JSON.parse(turn1.result.message.content!)
+	expect(data).toBeInstanceOf(Array)
+	expect(data[0].name).toBeTruthy()
+	expect(data[0].age).toBeDefined()
 }

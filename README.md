@@ -1,220 +1,111 @@
 ## lllms
 
-Local Large Language Models for node.js. Simple tools to build complex AI applications on localhost. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all). And [transformers.js](https://github.com/xenova/transformers.js/)!
+Local Large Language Models for node.js. Simple tools to build complex AI applications on localhost. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all). And [transformers.js](https://github.com/xenova/transformers.js/) using [ONNX](https://github.com/microsoft/onnxruntime/tree/main/js#onnxruntime-node)!
 
-Prioritizing ease of use (DX and deployment) and nice APIs. For other approaches see [here](#related-solutions).
+Including a model resource pool and an optional HTTP API server. Model file management is abstracted away completely. Useful for small-scale chatbots, local assistants, or any applications where private+offline is critical. Prioritizing ease of use (DX and deployment) and nice APIs. For other approaches check out some [similar projects](#related-solutions).
 
-⚠️ This package is currently in beta. Some APIs may change. Feel free to report any issues you encounter.
+⚠️ This package is currently in beta. Some APIs may change. Things may break. Feel free to report any issues you encounter.
 
 ### Features
 
 - Configure as many models as you want, download and cache them on demand to `~/.cache/lllms`. Or provide them as abs file paths.
-- Adjust the pools `concurrency`, and the models `maxInstances`, `ttl` and `contextSize` to fit your usecase. Can be tuned to either use no resources when idle or to always keep a model ready with context loaded.
+- Adjust the pool `concurrency`, and the models `maxInstances`, `ttl` and `contextSize` to fit your usecase.
+- Can be tuned to either use no resources when idle or to always keep a model ready with context preloaded.
 - A chat session cache that will effectively reuse context across multiple turns or stateless requests.
-- OpenAI spec API endpoints. See [#progress](#progress) for compatibility. 
+- OpenAI spec API endpoints. See [HTTP API docs](./docs/http-api.md) for details. 
 - BYO web server or use the provided express server and middleware.
-- Or don't use a web server and instead use the ModelServer directly within your node.js application.
-- Have as many ModelServers running as you want, they can share the same cache directory.
-- Use [custom engines](#engines) to combine multiple models (or do RAG) behind the scenes.
+- Or don't use a web server and instead use the JS APIs directly within your node.js application.
+- Have as many ModelServers running as you want, they can share the same cache directory. (Multiple processes can as well)
+- Use the [ModelPool](./src/model-pool.ts) class directly for a lowerlevel transaction-like API to manage model instances.
+- Use [custom engines](./docs/engines.md#custom-engines) to combine multiple models (or do RAG) behind the scenes.
 
 ### Usage
 
-#### JavaScript APIs
+Example with minimal configuration:
 
-More details on the usage of `ModelServer` and the underlying `ModelPool` class can be found in [./examples/cli-chat](./examples/cli-chat.js) and [./examples/pool](./examples/pool.js).
+```ts basic.ts
+import { ModelServer } from 'lllms'
 
-To attach lllms to your existing (express, or any other) web server see [./examples/express-openai](./examples/express-openai.js) and [./examples/server-node](./examples/server-node.js). See [./src/http.ts](./src/http.ts) for more ways to integrate with existing HTTP servers.
-
-For function calling support see the test [here](./tests/engines/lib/feature-functions.ts).
-
-A one liner to start a server with a single model:
-```js lllms.js
-import { startHTTPServer } from 'lllms'
-
-// Starts a http server for up to two instances of phi3 and serves them
-// via openai API. It's only thin wrapper around the ModelServer class.
-startHTTPServer({
-  // Limit how many instances can be handed out concurrently, to handle
-  // incoming requests. If its exceeded, requests will stall until a model
-  // is available. Defaults to 1 = handle one request at a time.
-  concurrency: 2,
-  // Where to cache models to disk. Defaults to `~/.cache/lllms`
-  // modelsPath: '/path/to/models',
+const llms = new ModelServer({
+  log: 'info',
   models: {
-    // Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-\.
-    // Required are `task`, `engine`, `url` and/or `file`.
-    'phi3-mini-4k': {
-      // supported: 'text-completion', 'embedding', 'image-to-text', 'speech-to-text'
-      task: 'text-completion',
-      engine: 'node-llama-cpp', // 'node-llama-cpp', 'transformers-js', 'gpt4all'
-      // Model weights may be specified by file and/or url.
-      url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
-      // File path may be absolute or relative to modelsPath.
-      // If it does not exist and a url is configured it will be downloaded here.
-      file: 'Phi-3-mini-4k-instruct-q4.gguf',
-      // When to download and verify models weights.
-      // Defaults to 'on-demand' = download on first request.
-      // - 'blocking' = dont start before its downloaded
-      // - 'async' = startup and download in background
-      // Note that if minInstances > 0 is the same as "blocking"
-      prepare: 'on-demand',
-      // What should be preloaded in context, for text completion models.
-      preload: {
-        // Note that for preloading to be utilized, requests must
-        // also have these leading messages before the user message.
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a helpful assistant.',
-          },
-        ],
-      },
-      // Use these to control resource usage.
-      contextSize: 4096, // Maximum context size. Will be determined automatically if not set.
-      maxInstances: 2, // How many active sessions you wanna be able to cache at the same time.
-      minInstances: 1, // To always keep at least one instance ready. Defaults to 0.
-      ttl: 300, // Idle sessions will be disposed after this many seconds.
-      // Set defaults for completions. These can be overridden per request.
-      // If unset, default values depend on the engine.
-      completionDefaults: {
-        temperature: 1,
-      },
-      // Available options and their defaults are engine specific.
-      engineOptions: {
-        // GPU will be used automatically if available.
-        // Only one model can use the gpu at a time.
-        // gpu: true,
-        // batchSize: 512,
-        cpuThreads: 4,
-        // memLock: true, // Only supported for node-llama-cpp.
-      },
+    'my-model': { // Identifiers can use a-zA-Z0-9_:\-\.
+      // Required are `task`, `engine`, `url` and/or `file`.
+      task: 'text-completion', // text-completion models can be used for chat and text generation tasks
+      engine: 'node-llama-cpp', // don't forget to `npm install node-llama-cpp@beta`
+      url: 'https://huggingface.co/QuantFactory/dolphin-2.9-llama3-8b-GGUF/blob/main/dolphin-2.9-llama3-8b.Q4_K_M.gguf',
     },
   },
-  // HTTP listen options. If you don't need a web server, use startLLMs or `new LLMServer()`
-  // directly instead of `serveLLMs`. Apart from `listen` they take the same configuration.
-  listen: {
-    port: 3000,
+})
+await llms.start()
+const result = await llms.processChatCompletionTask({
+  model: 'my-model',
+  messages: [
+    { 
+      role: 'user',
+      content: 'Quick! I need you to precisely estimate the number of times the letter "r" appears in the word "strawberry"!'
+    },
+  ],
+})
+console.debug(result)
+llms.stop()
+```
+
+Or, to start an OAI compatible HTTP server with two concurrent instances of the same model:
+
+```ts http-api.ts
+import { startHTTPServer } from 'lllms'
+import OpenAI from 'openai'
+
+const httpServer = await startHTTPServer({
+	listen: { port: 3000 }, // apart from `listen` options are identical to ModelServer
+	log: 'info',
+  models: {
+    'dolphin': {
+      task: 'text-completion',
+      engine: 'node-llama-cpp',
+      url: 'https://huggingface.co/QuantFactory/dolphin-2.9-llama3-8b-GGUF/blob/main/dolphin-2.9-llama3-8b.Q4_K_M.gguf',
+    },
   },
 })
-// During download requests to a model will stall to get processed once the model is ready.
-// http://localhost:3000 will serve a JSON of the current state of the server.
-```
-```sh
-$ curl http://localhost:3000/openai/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-      "model": "phi3-mini-4k",
-      "messages": [
-          {
-              "role": "user",
-              "content": "lets count to 10"
-          }
-      ]
-  }'
-```
-```json
-{
-  "id": "phi3-mini-4k:z5SBqZhf-jBO59uI8",
-  "model": "phi3-mini-4k",
-  "object": "chat.completion",
-  "created": 1714292409,
-  "system_fingerprint": "0159c68a067a360e4be3e285d3e309440c070734",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "Sure, let's count to 10 together:\n\n1. One\n2. Two\n3. Three\n4. Four\n5. Five\n6. Six\n7. Seven\n8. Eight\n9. Nine\n10. Ten\n\nWe have now reached the number 10!"
-      },
-      "logprobs": null,
-      "finish_reason": "stop"
-    }
-  ],
-  "usage": {
-    "prompt_tokens": 6,
-    "completion_tokens": 69,
-    "total_tokens": 75
-  }
+
+const client = new OpenAI({
+  baseURL: 'http://localhost:3000/openai/v1/',
+  apiKey: 'yes',
+})
+const completion = await client.beta.chat.completions.stream({
+	stream_options: { include_usage: true },
+	model: 'dolphin',
+	messages: [
+		{ role: 'user', content: 'lets count to 10, but only whisper every second number' },
+	],
+})
+for await (const chunk of completion) {
+	if (chunk.choices[0]?.delta?.content) {
+		process.stdout.write(chunk.choices[0].delta.content)
+	}
 }
+httpServer.close()
 ```
 
-#### Engines
-
-Currently the built-in inference engines are `node-llama-cpp`, `gpt4all` and `transformers-js` (highly experimental). You can also provide your own engine implementation. See [./src/engines](./src/engines) for how the built-in engines are implemented and [here](./tests/engines/custom.test.ts) for an example of how to utilize a custom engine to add support for vision / image content part messages to the OpenAI chat completion endpoint. (Or any other consumer of the ModelServer class.) Multiple ModelServers are allowed and can also be nested to create more complex pipelines.
-
-#### HTTP API
-
-Note that the API is currently not secure (ie the HTTP API is probably DoS-able, only minimal input validation). Misconfiguration or misuse can lead to process crashes or high memory usage. There are no additional safeguards in place and node.js memory limits will not apply. You should not host this on a public server without additional protections.
-
-On the packaged server there is only one additional HTTP endpoint that is not part of the OpenAI API at `/openai/v1`.
-
-- `GET /` - Prints info about spawned instances, available models and ongoing downloads.
-
-### Progress
-
-#### OpenAI API Support
-
-| Endpoints           | gpt4all | node-llama-cpp |
-| ------------------- | ------- | -------------- |
-| v1/chat/completions | ✅      | ✅             |
-| v1/completions      | ✅      | ✅             |
-| v1/embeddings       | ✅      | ✅             |
-| v1/models           | ✅      | ✅             |
-
-| Spec params         | gpt4all | node-llama-cpp |
-| ------------------- | ------- | -------------- |
-| stream              | ✅      | ✅             |
-| temperature         | ✅      | ✅             |
-| max_tokens          | ✅      | ✅             |
-| top_p               | ✅      | ✅             |
-| stop                | ✅      | ✅             |
-| seed                | ❌      | ✅             |
-| frequency_penalty   | ❌      | ✅             |
-| presence_penalty    | ❌      | ✅             |
-| best_of             | ❌      | ❌             |
-| n                   | ❌      | ❌             |
-| logprobs            | ❌      | ❌             |
-| top_logprobs        | ❌      | ❌             |
-| logit_bias          | ❌      | ✅             |
-| response_format     | ❌      | ✅             |
-| tools               | ❌      | ✅             |
-| tool_choice         | ❌      | ❌             |
-| suffix              | ❌      | ❌             |
-| echo                | ❌      | ❌             |
-
-| Additional params   | gpt4all | node-llama-cpp |
-| ------------------- | ------- | -------------- |
-| top_k               | ✅      | ✅             |
-| min_p               | ✅      | ✅             |
-| repeat_penalty_num  | ✅      | ✅             |
-| repeat_penalty      | ✅      | -              |
-
-#### Functionality
-
-| Feature               | gpt4all | node-llama-cpp |
-| --------------------- | ------- | -------------- |
-| Chat context cache    | ✅      | ✅             |
-| System prompt         | ✅      | ✅             |
-| GPU                   | ✅      | ✅             |
-| Grammar               | ❌      | ✅             |
-| Function Calling      | ❌      | ✅             |
+For usage of the express middleware see [./examples/express](./examples/express.js). For a cli chat example to test session reuse see [./examples/chat-cli](./examples/chat-cli.js). And for an example of how to use the underlying ModelPool class see [./examples/pool](./examples/pool.js).
 
 
 #### Limitations and Known Issues
 
-##### GPU Support limited to one model
+##### Only one model can run on GPU at a time
 Llama.cpp bindings currently do not support running multiple models on gpu at the same time. This means if `gpu` is set to `true` for a model, only one instance of it can run at one time (additional instances will refuse to spawn and requests will stall). If `gpu` is left unset more cpu instances can be spawned instead (and the first instance will still pick up gpu). Instances can not switch between gpu and cpu.
 
-I hope I can improve this in the future. Meanwhile if you require closer control over which requests exactly use gpu, you can always configure a model multiple times with different configuration.
+I hope I can improve this in the future. Meanwhile if you require closer control over which requests exactly use gpu, you can always configure a model multiple times with different options.
 
 ##### System Messages
-System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored.
+System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored. This is only for simplicity reasons and might change in the future.
 
 ##### Chat Context Cache
-Note that the current context cache implementation only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and passed messages will be reingested.
+Note that the current context cache implementation only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and the whole input conversation will be reingested, instead of just the new user message.
 
 ##### Function Calling
-Only available when using node-llama-cpp and models that support it, like [functionary models](https://functionary.meetkai.com/) and Llama3 instruct. `tool_choice` can currently not be controlled and will always be `auto`. GBNF grammars cannot be used together with function calling.
+Only available when using node-llama-cpp and a model that supports function calling, like [functionary models](https://functionary.meetkai.com/) and Llama3 instruct. `tool_choice` can currently not be controlled and will always be `auto`. GBNF grammars cannot be used together with function calling.
 
 #### TODO / Roadmap
 
@@ -244,7 +135,9 @@ Not in any particular order:
 - [x] Support custom engine implementations
 - [x] Make sure nothing clashes if multiple servers/stores are using the same cache directory
 - [x] See if we can install supported engines as peer deps
+- [x] Improve types, simpler node-llama-cpp grammar integration
 - [ ] Support more transformer.js tasks / pipelines
+- [ ] Make pool dispose / stop more robust
 - [ ] Restructure docs, add function calling & grammar usage docs
 - [ ] Rework GPU+device usage / lock (Support multiple models on gpu in cases where its possible)
 - [ ] Allow configuring total RAM/VRAM usage (See https://github.com/ggerganov/llama.cpp/issues/4315 Check estimates?)
@@ -252,7 +145,7 @@ Not in any particular order:
 - [ ] Logprobs support
 - [ ] Improve offline support (allow running `Engine.prepareModel` ahead of time)
 - [ ] Replace express with tinyhttp?
--
+
 ### Contributing
 
 If you know how to fill in any of the above checkboxes or have additional ideas you'd like to make happen, feel free to open an issue or PR.

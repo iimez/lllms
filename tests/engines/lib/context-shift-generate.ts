@@ -43,7 +43,7 @@ export async function runContextShiftGenerationTest(
 		messages,
 		maxTokens: 1024,
 	})
-	console.debug({ turn2: response2.result.message.content })
+	// console.debug({ turn2: response2.result.message.content })
 	const instanceId2 = parseInstanceId(response2.task.id)
 	expect(instanceId1).toBe(instanceId2)
 
@@ -63,7 +63,7 @@ export async function runContextShiftGenerationTest(
 			},
 			60000,
 		)
-		console.debug({ field, response: response.result.message.content })
+		// console.debug({ field, response: response.result.message.content })
 		const instanceId = parseInstanceId(response.task.id)
 		expect(instanceId1).toBe(instanceId)
 		// make sure the model gave proper output throughout its elaboration

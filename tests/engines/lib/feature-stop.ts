@@ -13,9 +13,9 @@ export async function runStopTriggerTest(llms: ModelServer) {
 		stop: ['OK'],
 		maxTokens: 10,
 	})
-	console.debug({
-		response: chat.result.message.content,
-	})
+	// console.debug({
+	// 	response: chat.result.message.content,
+	// })
 	expect(chat.result.finishReason).toBe('stopTrigger')
 	expect(chat.result.message.content).toBe('')
 	const completion = await createCompletion(llms, {

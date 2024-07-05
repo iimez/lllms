@@ -32,7 +32,6 @@ import {
 	EngineTextCompletionArgs,
 	EngineChatCompletionArgs,
 	EngineContext,
-	EngineOptionsBase,
 	ToolDefinition,
 	ToolCallResultMessage,
 	AssistantMessage,
@@ -40,6 +39,8 @@ import {
 	EngineEmbeddingResult,
 	FileDownloadProgress,
 	ModelConfig,
+	TextCompletionParams,
+	TextCompletionPreloadOptions,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
@@ -50,21 +51,8 @@ import {
 	createChatMessageArray,
 	addFunctionCallToChatHistory,
 	mapFinishReason,
-	prepareGrammars,
-	readGrammarFiles,
 } from './util.js'
-import {
-	LlamaChatResult,
-} from './types.js'
-import { fileURLToPath } from 'node:url'
-
-// https://github.com/withcatai/node-llama-cpp/pull/105
-// https://github.com/withcatai/node-llama-cpp/discussions/109
-
-export interface NodeLlamaCppEngineOptions extends EngineOptionsBase {
-	memLock?: boolean
-	grammarsPath?: string
-}
+import { LlamaChatResult } from './types.js'
 
 export interface NodeLlamaCppInstance {
 	model: LlamaModel
@@ -81,17 +69,30 @@ export interface NodeLlamaCppModelMeta {
 	gguf: GgufFileInfo
 }
 
-function checkModelExists(config: ModelConfig<NodeLlamaCppEngineOptions>) {
-	if (!fs.existsSync(config.location)) {
-		return false
+export interface NodeLlamaCppModelConfig extends ModelConfig {
+	location: string
+	grammars?: Record<string, string>
+	sha256?: string
+	completionDefaults?: TextCompletionParams
+	tools?: Record<string, ToolDefinition>
+	preload?: TextCompletionPreloadOptions
+	contextSize?: number
+	batchSize?: number
+	device?: {
+		gpu?: boolean | 'auto' | (string & {})
+		gpuLayers?: number
+		cpuThreads?: number
+		memLock?: boolean
 	}
-	return true
 }
 
 export const autoGpu = true
 
 export async function prepareModel(
-	{ config, log }: EngineContext<NodeLlamaCppModelMeta, NodeLlamaCppEngineOptions>,
+	{
+		config,
+		log,
+	}: EngineContext<NodeLlamaCppModelConfig>,
 	onProgress?: (progress: FileDownloadProgress) => void,
 	signal?: AbortSignal,
 ) {
@@ -100,13 +101,12 @@ export async function prepareModel(
 	log(LogLevels.info, `Preparing node-llama-cpp model at ${config.location}`, {
 		model: config.id,
 	})
-	if (!checkModelExists(config)) {
+	if (!fs.existsSync(config.location)) {
 		if (!config.url) {
 			throw new Error(`Cannot download "${config.id}" - no URL configured`)
 		}
 		log(LogLevels.info, `Downloading ${config.id}`, {
 			url: config.url,
-			file: config.file,
 			location: config.location,
 		})
 		const downloader = await createModelDownloader({
@@ -127,38 +127,46 @@ export async function prepareModel(
 		await downloader.download()
 	}
 
+	const postDownloadPromises: Array<Promise<GgufFileInfo | string>> = [
+		readGgufFileInfo(config.location, {
+			signal,
+			ignoreKeys: [
+				'gguf.tokenizer.ggml.merges',
+				'gguf.tokenizer.ggml.tokens',
+				'gguf.tokenizer.ggml.scores',
+				'gguf.tokenizer.ggml.token_type',
+			],
+		}),
+	]
+	
 	if (config.sha256) {
-		const fileHash = await calculateFileChecksum(config.location, 'sha256')
-		if (fileHash !== config.sha256) {
-			throw new Error(
-				`Model sha256 checksum mismatch: expected ${config.sha256} got ${fileHash} for ${config.location}`,
-			)
-		}
+		postDownloadPromises.push(
+			calculateFileChecksum(config.location, 'sha256'),
+		)
 	}
-	const gguf = await readGgufFileInfo(config.location, {
-		signal,
-		ignoreKeys: [
-			'gguf.tokenizer.ggml.merges',
-			'gguf.tokenizer.ggml.tokens',
-			'gguf.tokenizer.ggml.scores',
-			'gguf.tokenizer.ggml.token_type',
-		],
-	})
+	const [gguf, fileHash] = await Promise.all(postDownloadPromises)
+	if (config.sha256 && fileHash !== config.sha256) {
+		throw new Error(
+			`Model sha256 checksum mismatch: expected ${config.sha256} got ${fileHash} for ${config.location}`,
+		)
+	}
 	clearFileLock()
 	return {
 		gguf,
 	}
 }
 
-const defaultGrammarsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'grammars');
 
 export async function createInstance(
-	{ config, log }: EngineContext<NodeLlamaCppModelMeta, NodeLlamaCppEngineOptions>,
+	{
+		config,
+		log,
+	}: EngineContext<NodeLlamaCppModelConfig>,
 	signal?: AbortSignal,
 ) {
-	log(LogLevels.debug, 'Load Llama model', config.engineOptions)
+	log(LogLevels.debug, 'Load Llama model', config.device)
 	// takes "auto" | "metal" | "cuda" | "vulkan"
-	const gpuSetting = (config.engineOptions?.gpu ??
+	const gpuSetting = (config.device?.gpu ??
 		'auto') as LlamaOptions['gpu']
 	const llama = await getLlama({
 		gpu: gpuSetting,
@@ -180,28 +188,33 @@ export async function createInstance(
 			}
 		},
 	})
-	
-	// load GBNF grammars from file
-	const grammarsPath = config.engineOptions?.grammarsPath ?? defaultGrammarsPath
-	const loadedGrammars = readGrammarFiles(grammarsPath)
-	let grammars: Record<string, LlamaGrammar> = {}
-	if (Object.keys(loadedGrammars).length) {
-		grammars = prepareGrammars(llama, loadedGrammars)
+
+	const llamaGrammars: Record<string, LlamaGrammar> = {
+		'json': await LlamaGrammar.getFor(llama, 'json'),
+	}
+
+	if (config.grammars) {
+		for (const key in config.grammars) {
+			llamaGrammars[key] = new LlamaGrammar(llama, {
+				grammar: config.grammars[key],
+				// printGrammar: true,
+			})
+		}
 	}
 
 	const llamaModel = await llama.loadModel({
 		modelPath: config.location, // full model absolute path
 		loadSignal: signal,
-		useMlock: config.engineOptions?.memLock ?? false,
-		gpuLayers: config.engineOptions?.gpuLayers,
+		useMlock: config.device?.memLock ?? false,
+		gpuLayers: config.device?.gpuLayers,
 		// onLoadProgress: (percent) => {}
 	})
 
 	const context = await llamaModel.createContext({
 		sequences: 1,
 		seed: config.completionDefaults?.seed ?? createSeed(0, 1000000),
-		threads: config.engineOptions?.cpuThreads,
-		batchSize: config.engineOptions?.batchSize,
+		threads: config.device?.cpuThreads,
+		batchSize: config.batchSize,
 		contextSize: config.contextSize,
 		// batching: {
 		// 	dispatchSchedule: 'nextTick',
@@ -214,7 +227,7 @@ export async function createInstance(
 	const instance: NodeLlamaCppInstance = {
 		model: llamaModel,
 		context,
-		grammars,
+		grammars: llamaGrammars,
 		chat: undefined,
 		chatHistory: [],
 		pendingFunctionCalls: {},
@@ -288,12 +301,15 @@ export async function processChatCompletionTask(
 		resetContext,
 		log,
 		onChunk,
-	}: EngineChatCompletionArgs<NodeLlamaCppEngineOptions>,
+	}: EngineChatCompletionArgs<NodeLlamaCppModelConfig>,
 	instance: NodeLlamaCppInstance,
 	signal?: AbortSignal,
 ): Promise<EngineChatCompletionResult> {
 	if (!instance.chat || resetContext) {
-		log(LogLevels.debug, 'Recreating chat context', { resetContext, willDisposeChat: !!instance.chat })
+		log(LogLevels.debug, 'Recreating chat context', {
+			resetContext,
+			willDisposeChat: !!instance.chat,
+		})
 		// if context reset is requested, dispose the chat instance
 		if (instance.chat) {
 			await instance.chat.dispose()
@@ -347,7 +363,10 @@ export async function processChatCompletionTask(
 	) as ToolCallResultMessage[]
 	for (const message of functionCallResultMessages) {
 		if (!instance.pendingFunctionCalls[message.callId]) {
-			log(LogLevels.warn, `Received function result for non-existing call id "${message.callId}`)
+			log(
+				LogLevels.warn,
+				`Received function result for non-existing call id "${message.callId}`,
+			)
 			continue
 		}
 		log(LogLevels.debug, 'Resolving pending function call', {
@@ -394,6 +413,8 @@ export async function processChatCompletionTask(
 				text: newUserText,
 			})
 		}
+	} else if (!resolvedFunctionCalls.length) {
+		throw new Error('Chat completions require a final user message.')
 	}
 
 	// only grammar or functions can be used, not both.
@@ -451,7 +472,7 @@ export async function processChatCompletionTask(
 				functions: inputFunctions,
 				documentFunctionParams: true,
 				maxParallelFunctionCalls: 2,
-				onFunctionCall: async (
+				onFunctionCall: (
 					functionCall: LlamaChatResponseFunctionCall<any>,
 				) => {
 					// log(LogLevels.debug, 'Called function', functionCall)
@@ -506,7 +527,7 @@ export async function processChatCompletionTask(
 		newChatHistory = lastEvaluation.cleanHistory
 
 		if (functionCalls) {
-			// find leading immediately evokable function calls (=have a handler)
+			// find leading immediately evokable function calls (=have a handler function)
 			const evokableFunctionCalls = []
 			for (const functionCall of functionCalls) {
 				const functionDef = toolDefinitions[functionCall.functionName]
@@ -607,6 +628,8 @@ export async function processChatCompletionTask(
 
 	if (completionResult.functionCalls) {
 		// TODO its possible that there are tailing immediately-evaluatable function calls.
+		// function call results need to be added in the order the functions were called, so
+		// we need to wait for the pending calls to complete before we can add the tailing calls.
 		// as is, these may never resolve
 		const pendingFunctionCalls = completionResult.functionCalls.filter(
 			(call) => {
@@ -614,8 +637,8 @@ export async function processChatCompletionTask(
 				return !functionDef.handler
 			},
 		)
-		
-		// TODO write a test that triggers this?
+
+		// TODO write a test that triggers a parallel call to a deferred function and to an IE function
 		const tailingFunctionCalls = completionResult.functionCalls.filter(
 			(call) => {
 				const functionDef = toolDefinitions[call.functionName]
@@ -663,7 +686,7 @@ export async function processTextCompletionTask(
 		config,
 		log,
 		onChunk,
-	}: EngineTextCompletionArgs<NodeLlamaCppEngineOptions>,
+	}: EngineTextCompletionArgs<NodeLlamaCppModelConfig>,
 	instance: NodeLlamaCppInstance,
 	signal?: AbortSignal,
 ): Promise<EngineTextCompletionResult> {
@@ -683,9 +706,12 @@ export async function processTextCompletionTask(
 		await instance.context.dispose()
 		instance.context = await instance.model.createContext({
 			createSignal: signal,
-			seed: request.seed ?? config.completionDefaults?.seed ?? createSeed(0, 1000000),
-			threads: config.engineOptions?.cpuThreads,
-			batchSize: config.engineOptions?.batchSize,
+			seed:
+				request.seed ??
+				config.completionDefaults?.seed ??
+				createSeed(0, 1000000),
+			threads: config.device?.cpuThreads,
+			batchSize: config.batchSize,
 		})
 		contextSequence = instance.context.getSequence()
 	}
@@ -742,7 +768,7 @@ export async function processTextCompletionTask(
 }
 
 export async function processEmbeddingTask(
-	{ request, config }: EngineEmbeddingArgs<NodeLlamaCppEngineOptions>,
+	{ request, config }: EngineEmbeddingArgs<NodeLlamaCppModelConfig>,
 	instance: NodeLlamaCppInstance,
 	signal?: AbortSignal,
 ): Promise<EngineEmbeddingResult> {
@@ -760,7 +786,10 @@ export async function processEmbeddingTask(
 	}
 
 	if (!instance.embeddingContext) {
-		instance.embeddingContext = await instance.model.createEmbeddingContext({ createSignal: signal })
+		instance.embeddingContext = await instance.model.createEmbeddingContext({
+			batchSize: config.batchSize,
+			createSignal: signal,
+		})
 	}
 
 	const embeddings: Float32Array[] = []

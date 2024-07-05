@@ -1,12 +1,7 @@
-import type {
-	BuiltInEngineName,
-	NodeLlamaCppEngineOptions,
-	GPT4AllEngineOptions,
-	TransformersJsEngineOptions,
-} from '#lllms/engines/index.js'
+import type { BuiltInEngineName } from '#lllms/engines/index.js'
 import type { Logger } from '#lllms/lib/logger.js'
 import type { ModelPool } from '#lllms/pool.js'
-import { ModelStore } from '#lllms/store.js'
+import type { ModelStore } from '#lllms/store.js'
 import {
 	AssistantMessage,
 	ChatMessage,
@@ -17,7 +12,81 @@ import {
 } from '#lllms/types/completions.js'
 export * from '#lllms/types/completions.js'
 
-export type ModelTaskType = 'text-completion' | 'embedding' | 'image-to-text'
+export type ModelTaskType =
+	| 'text-completion'
+	| 'embedding'
+	| 'image-to-text'
+	| 'speech-to-text'
+
+export interface ModelOptionsBase {
+	engine: BuiltInEngineName | (string & {})
+	task: ModelTaskType | (string & {})
+	prepare?: 'blocking' | 'async' | 'on-demand'
+	minInstances?: number
+	maxInstances?: number
+}
+
+// export type LooseModelOptions = ModelOptionsBase & Record<string, unknown>
+
+
+
+
+export interface BuiltInModelOptionsBase extends ModelOptionsBase {
+	engine: BuiltInEngineName
+	task: ModelTaskType
+	url?: string
+	location?: string
+}
+
+export interface ModelConfigBase extends ModelOptionsBase {
+	id: string
+	minInstances: number
+	maxInstances: number
+}
+
+export interface ModelConfig extends ModelConfigBase {
+	url?: string
+	location?: string
+	task: ModelTaskType | string & {}
+	engine: BuiltInEngineName | string & {}
+	minInstances: number
+	maxInstances: number
+	ttl?: number
+	preload?: TextCompletionPreloadOptions
+	device?: {
+		gpu?: boolean | 'auto' | string & {}
+		// gpuLayers?: number
+		// cpuThreads?: number
+		// memLock?: boolean
+	}
+}
+
+export interface CompletionChunk {
+	tokens: number[]
+	text: string
+}
+
+export interface ProcessingOptions {
+	timeout?: number
+	signal?: AbortSignal
+}
+
+export interface CompletionProcessingOptions extends ProcessingOptions {
+	onChunk?: (chunk: CompletionChunk) => void
+}
+
+export interface SpeechToTextProcessingOptions extends ProcessingOptions {
+	onChunk?: (chunk: { text: string }) => void
+}
+
+export interface EngineContext<
+	TModelConfig = ModelConfig,
+	TModelMeta = unknown,
+> {
+	config: TModelConfig
+	meta?: TModelMeta
+	log: Logger
+}
 
 export interface TextCompletionRequestBase extends TextCompletionParams {
 	model: string
@@ -68,99 +137,41 @@ export type IncomingRequest =
 	| SpeechToTextRequest
 export type ModelInstanceRequest = ModelRequestMeta & IncomingRequest
 
-export interface ModelOptionsBase {
-	url?: string
-	file?: string
-	location?: string
-	engine: BuiltInEngineName | (string & {})
-	task: ModelTaskType | (string & {})
-	prepare?: 'blocking' | 'async' | 'on-demand'
-	minInstances?: number
-	maxInstances?: number
-	md5?: string
-	sha256?: string
-}
-
-// this is the internal state/config of the model. its not used in anything user-facing
-// so taking some shortcuts here and use one single interface for all engine/task combinations
-// this will work until some option clashes between different engines/tasks (same key but different types)
-export interface ModelConfig<T extends EngineOptionsBase = EngineOptionsBase>
-	extends ModelOptionsBase {
-	id: string
-	location: string
-	task: ModelTaskType | (string & {})
-	engine: BuiltInEngineName | (string & {})
-	engineOptions?: T
-	minInstances: number
-	maxInstances: number
-	ttl?: number
-	contextSize?: number
-	grammars?: Record<string, string>
-	completionDefaults?: TextCompletionParams
-	tools?: Record<string, ToolDefinition>
-	preload?: TextCompletionPreloadOptions
-}
-
-export interface EngineOptionsBase {
-	gpu?: boolean | 'auto' | (string & {})
-	gpuLayers?: number
-	batchSize?: number
-	cpuThreads?: number
-}
-
-export interface EngineContext<
+export interface EngineTextCompletionArgs<
+	TModelConfig = unknown,
 	TModelMeta = unknown,
-	TOptions extends EngineOptionsBase = EngineOptionsBase,
-> {
-	config: ModelConfig<TOptions>
-	modelMeta?: TModelMeta
-	log: Logger
-}
-
-export interface CompletionChunk {
-	tokens: number[]
-	text: string
-}
-
-export interface ProcessingOptions {
-	timeout?: number
-	signal?: AbortSignal
-}
-
-export interface CompletionProcessingOptions extends ProcessingOptions {
-	onChunk?: (chunk: CompletionChunk) => void
-}
-
-export interface SpeechToTextProcessingOptions extends ProcessingOptions {
-	onChunk?: (chunk: { text: string }) => void
-}
-
-export interface EngineTextCompletionArgs<T extends EngineOptionsBase>
-	extends EngineContext<T> {
+> extends EngineContext<TModelConfig, TModelMeta> {
 	onChunk?: (chunk: CompletionChunk) => void
 	request: TextCompletionRequest
 }
 
 export interface EngineChatCompletionArgs<
-	T extends EngineOptionsBase = EngineOptionsBase,
-> extends EngineContext<T> {
+	TModelConfig = unknown,
+	TModelMeta = unknown,
+> extends EngineContext<TModelConfig, TModelMeta> {
 	onChunk?: (chunk: CompletionChunk) => void
 	resetContext?: boolean
 	request: ChatCompletionRequest
 }
 
-export interface EngineEmbeddingArgs<T extends EngineOptionsBase = EngineOptionsBase>
-	extends EngineContext<T> {
+export interface EngineEmbeddingArgs<
+	TModelConfig = unknown,
+	TModelMeta = unknown,
+> extends EngineContext<TModelConfig, TModelMeta> {
 	request: EmbeddingRequest
 }
 
-export interface EngineImageToTextArgs<T extends EngineOptionsBase = EngineOptionsBase>
-	extends EngineContext<T> {
+export interface EngineImageToTextArgs<
+	TModelConfig = unknown,
+	TModelMeta = unknown,
+> extends EngineContext<TModelConfig, TModelMeta> {
 	request: ImageToTextRequest
 }
 
-export interface EngineSpeechToTextArgs<T extends EngineOptionsBase = EngineOptionsBase>
-	extends EngineContext<T> {
+export interface EngineSpeechToTextArgs<
+	TModelConfig = unknown,
+	TModelMeta = unknown,
+> extends EngineContext<TModelConfig, TModelMeta> {
 	request: SpeechToTextRequest
 	onChunk?: (chunk: { text: string }) => void
 }
@@ -178,99 +189,125 @@ export interface EngineStartContext {
 
 export interface ModelEngine<
 	TInstance = unknown,
-	TModel = unknown,
-	TOptions extends EngineOptionsBase = EngineOptionsBase,
+	TModelConfig extends ModelConfig = ModelConfig,
+	TModelMeta = unknown,
 > {
 	autoGpu?: boolean
 	start?: (ctx: EngineStartContext) => Promise<void>
 	prepareModel: (
-		ctx: EngineContext<TOptions>,
+		ctx: EngineContext<TModelConfig, TModelMeta>,
 		onProgress?: (progress: FileDownloadProgress) => void,
 		signal?: AbortSignal,
-	) => Promise<TModel>
+	) => Promise<TModelMeta>
 	createInstance: (
-		ctx: EngineContext<TOptions>,
+		ctx: EngineContext<TModelConfig, TModelMeta>,
 		signal?: AbortSignal,
 	) => Promise<TInstance>
 	disposeInstance: (instance: TInstance) => Promise<void>
 	processChatCompletionTask?: (
-		args: EngineChatCompletionArgs<TOptions>,
+		args: EngineChatCompletionArgs<TModelConfig, TModelMeta>,
 		instance: TInstance,
 		signal?: AbortSignal,
 	) => Promise<EngineChatCompletionResult>
 	processTextCompletionTask?: (
-		args: EngineTextCompletionArgs<TOptions>,
+		args: EngineTextCompletionArgs<TModelConfig, TModelMeta>,
 		instance: TInstance,
 		signal?: AbortSignal,
 	) => Promise<EngineTextCompletionResult>
 	processEmbeddingTask?: (
-		args: EngineEmbeddingArgs<TOptions>,
+		args: EngineEmbeddingArgs<TModelConfig, TModelMeta>,
 		instance: TInstance,
 		signal?: AbortSignal,
 	) => Promise<EngineEmbeddingResult>
 	processImageToTextTask?: (
-		args: EngineImageToTextArgs<TOptions>,
+		args: EngineImageToTextArgs<TModelConfig, TModelMeta>,
 		instance: TInstance,
 		signal?: AbortSignal,
 	) => Promise<EngineImageToTextResult>
 	processSpeechToTextTask?: (
-		args: EngineSpeechToTextArgs<TOptions>,
+		args: EngineSpeechToTextArgs<TModelConfig, TModelMeta>,
 		instance: TInstance,
 		signal?: AbortSignal,
 	) => Promise<EngineSpeechToTextResult>
 }
 
-interface EmbeddingModelOptions extends ModelOptionsBase {
+interface EmbeddingModelOptions {
 	task: 'embedding'
 }
 
-interface TextCompletionModelOptions extends ModelOptionsBase {
+interface TextCompletionModelOptions {
 	task: 'text-completion'
 	contextSize?: number
 	grammars?: Record<string, string>
 	tools?: Record<string, ToolDefinition>
 	completionDefaults?: TextCompletionParams
 	preload?: TextCompletionPreloadOptions
+	batchSize?: number
 }
 
-interface CustomEngineModelOptions extends ModelOptionsBase {
-	engine: string
-	engineOptions?: EngineOptionsBase
-}
-
-interface NodeLlamaCppEmbeddingModelOptions extends EmbeddingModelOptions {
+interface LlamaCppModelOptionsBase extends BuiltInModelOptionsBase {
 	engine: 'node-llama-cpp'
-	engineOptions?: NodeLlamaCppEngineOptions
+	task: 'text-completion' | 'embedding'
+	sha256?: string
+	file?: string
+	batchSize?: number
+	preload?: TextCompletionPreloadOptions
+	device?: {
+		gpu?: boolean | 'auto' | (string & {})
+		gpuLayers?: number
+		cpuThreads?: number
+		memLock?: boolean
+	}
 }
 
-interface NodeLlamaCppTextCompletionModelOptions
-	extends TextCompletionModelOptions {
-	engine: 'node-llama-cpp'
-	engineOptions?: NodeLlamaCppEngineOptions
+interface LlamaCppEmbeddingModelOptions extends LlamaCppModelOptionsBase, EmbeddingModelOptions {
+	task: 'embedding'
 }
 
-interface GPT4AllTextCompletionModelOptions extends TextCompletionModelOptions {
+export interface LlamaCppTextCompletionModelOptions extends LlamaCppModelOptionsBase, TextCompletionModelOptions {
+	task: 'text-completion'
+	// preload?: TextCompletionPreloadOptions
+}
+
+interface GPT4AllModelOptions extends BuiltInModelOptionsBase {
 	engine: 'gpt4all'
-	engineOptions?: GPT4AllEngineOptions
+	task: 'text-completion' | 'embedding'
+	file?: string
+	md5?: string
+	device?: {
+		gpu?: boolean | 'auto' | (string & {})
+		gpuLayers?: number
+		cpuThreads?: number
+	}
 }
 
-interface GPT4AllEmbeddingModelOptions extends EmbeddingModelOptions {
-	engine: 'gpt4all'
-	engineOptions?: GPT4AllEngineOptions
-}
+type GPT4AllTextCompletionModelOptions = TextCompletionModelOptions &
+	GPT4AllModelOptions
 
-interface TransformersJsModelOptions extends ModelOptionsBase {
+type GPT4AllEmbeddingModelOptions = GPT4AllModelOptions & EmbeddingModelOptions
+
+interface TransformersJsModelOptions extends BuiltInModelOptionsBase {
 	engine: 'transformers-js'
-	engineOptions?: TransformersJsEngineOptions
+	task: 'image-to-text' | 'speech-to-text'
+	// TODO transformers.js v3
+	modelClass: any
+	dtype: Record<string, string> | string
+	device?: {
+		gpu?: boolean | 'auto' | (string & {})
+	}
 }
 
-export type ModelOptions =
-	| NodeLlamaCppTextCompletionModelOptions
-	| NodeLlamaCppEmbeddingModelOptions
+export interface CustomEngineModelOptions extends ModelOptionsBase {
+}
+
+export type BuiltInModelOptions =
+	| LlamaCppTextCompletionModelOptions
+	| LlamaCppEmbeddingModelOptions
 	| GPT4AllTextCompletionModelOptions
 	| GPT4AllEmbeddingModelOptions
 	| TransformersJsModelOptions
-	| CustomEngineModelOptions
+	
+export type ModelOptions = BuiltInModelOptions | CustomEngineModelOptions
 
 export interface EngineEmbeddingResult {
 	embeddings: Float32Array[]

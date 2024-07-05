@@ -1,10 +1,10 @@
 import http from 'node:http'
 import express from 'express'
 import OpenAI from 'openai'
-import { ModelServer } from '../dist/server.js'
-import { createExpressMiddleware } from '../dist/http.js'
+import { ModelServer } from '#lllms/server.js'
+import { createExpressMiddleware } from '#lllms/http.js'
 
-// Demonstration of using the LLMServer + Express middleware to serve an OpenAI API.
+// Demonstration of using the ModelServer + Express middleware to serve an OpenAI API.
 
 // Create a server with a single model, limiting to 2 instances that can run concurrently.
 // Models will be downloaded on-demand or during LLMServer.start() if minInstances > 0.

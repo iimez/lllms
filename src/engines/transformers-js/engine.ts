@@ -3,7 +3,6 @@ import fs from 'node:fs'
 
 import {
 	EngineContext,
-	EngineOptionsBase,
 	FileDownloadProgress,
 	ModelConfig,
 	EngineImageToTextArgs,
@@ -23,12 +22,7 @@ import { LogLevels } from '#lllms/lib/logger.js'
 import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
 import { decodeAudio } from '#lllms/lib/audio.js'
 
-// TODO types currently hard to fix, until v3 is released with typedefs
-
-export interface TransformersJsEngineOptions extends EngineOptionsBase {
-	modelClass?: any
-	dtype: any
-}
+// TODO transformers.js types currently hard to fix, until v3 is released on npm (with typedefs)
 
 interface TransformersJsInstance {
 	model: any
@@ -46,31 +40,41 @@ interface TransformersJsModelMeta {
 	files: ModelFile[]
 }
 
-function checkModelExists(config: ModelConfig<TransformersJsEngineOptions>) {
+export interface TransformersJsModelConfig extends ModelConfig {
+	location: string
+	url: string
+	modelClass?: any
+	dtype?: Record<string, string> | string
+	device?: {
+		gpu?: boolean | 'auto' | (string & {})
+	}
+}
+
+function checkModelExists(config: TransformersJsModelConfig) {
 	if (!fs.existsSync(config.location)) {
 		return false
 	}
 	if (!fs.existsSync(config.location + '/onnx')) {
 		return false
 	}
-	if (config.engineOptions?.dtype) {
-		if (typeof config.engineOptions?.dtype === 'string') {
-			if (config.engineOptions?.dtype === 'fp32') {
+	if (config.dtype) {
+		if (typeof config.dtype === 'string') {
+			if (config.dtype === 'fp32') {
 				const expectedFile = `${config.location}/onnx/encoder_model.onnx`
 				if (!fs.existsSync(expectedFile)) {
-					console.debug('missing', config.engineOptions?.dtype, expectedFile)
+					console.debug('missing', config.dtype, expectedFile)
 					return false
 				}
 			}
-		} else if (typeof config.engineOptions?.dtype === 'object') {
-			for (const fileName in config.engineOptions?.dtype) {
-				const dataType = config.engineOptions?.dtype[fileName]
+		} else if (typeof config.dtype === 'object') {
+			for (const fileName in config.dtype) {
+				const dataType = config.dtype[fileName]
 				let expectedFile = `${config.location}/onnx/${fileName}_${dataType}.onnx`
 				if (dataType === 'fp32') {
 					expectedFile = `${config.location}/onnx/${fileName}.onnx`
 				}
 				if (!fs.existsSync(expectedFile)) {
-					console.debug('missing', config.engineOptions?.dtype, expectedFile)
+					console.debug('missing', config.dtype, expectedFile)
 					return false
 				}
 			}
@@ -85,7 +89,7 @@ export async function prepareModel(
 	{
 		config,
 		log,
-	}: EngineContext<TransformersJsModelMeta, TransformersJsEngineOptions>,
+	}: EngineContext<TransformersJsModelConfig>,
 	onProgress?: (progress: FileDownloadProgress) => void,
 	signal?: AbortSignal,
 ) {
@@ -109,7 +113,7 @@ export async function prepareModel(
 	const branch = urlSegments[4] || 'main'
 
 	const modelId = `${org}/${repo}`
-	const ModelClass = config.engineOptions?.modelClass ?? PreTrainedModel
+	const ModelClass = config.modelClass ?? PreTrainedModel
 	const modelFiles: ModelFile[] = []
 	const configMeta: any = {}
 
@@ -125,7 +129,7 @@ export async function prepareModel(
 		})
 		const modelDownload = ModelClass.from_pretrained(modelId, {
 			revision: branch,
-			dtype: config.engineOptions?.dtype,
+			dtype: config.dtype,
 			progress_callback: (progress: any) => {
 				if (onProgress && progress.status === 'progress') {
 					onProgress({
@@ -202,10 +206,10 @@ export async function createInstance(
 	{
 		config,
 		log,
-	}: EngineContext<TransformersJsModelMeta, TransformersJsEngineOptions>,
+	}: EngineContext<TransformersJsModelConfig>,
 	signal?: AbortSignal,
 ) {
-	const ModelClass = config.engineOptions?.modelClass ?? PreTrainedModel
+	const ModelClass = config.modelClass ?? PreTrainedModel
 	let modelPath = config.location
 	if (!modelPath.endsWith('/')) {
 		modelPath += '/'
@@ -213,8 +217,8 @@ export async function createInstance(
 	const modelPromise = ModelClass.from_pretrained(modelPath, {
 		local_files_only: true,
 		cache_dir: '/',
-		dtype: config.engineOptions?.dtype,
-		device: config.engineOptions?.gpu ? 'gpu' : 'cpu',
+		dtype: config.dtype,
+		device: config.device?.gpu ? 'gpu' : 'cpu',
 	})
 	const processorPromise = AutoProcessor.from_pretrained(modelPath, {
 		local_files_only: true,
@@ -249,7 +253,7 @@ export async function disposeInstance(instance: TransformersJsInstance) {
 }
 
 export async function processImageToTextTask(
-	{ request, config, log }: EngineImageToTextArgs<TransformersJsEngineOptions>,
+	{ request, config, log }: EngineImageToTextArgs,
 	instance: TransformersJsInstance,
 	signal?: AbortSignal,
 ) {
@@ -302,7 +306,7 @@ async function readAudioFile(filePath: string) {
 }
 
 export async function processSpeechToTextTask(
-	{ request, onChunk }: EngineSpeechToTextArgs<TransformersJsEngineOptions>,
+	{ request, onChunk }: EngineSpeechToTextArgs,
 	instance: TransformersJsInstance,
 	signal?: AbortSignal,
 ) {

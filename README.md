@@ -90,6 +90,16 @@ httpServer.close()
 
 For usage of the express middleware see [./examples/express](./examples/express.js). For a cli chat example to test session reuse see [./examples/chat-cli](./examples/chat-cli.js). And for an example of how to use the underlying ModelPool class see [./examples/pool](./examples/pool.js).
 
+The engine peer dependencies are pinned currently. I plan to make this more loose in the future.
+
+For now:
+
+| Engine | Peer Dependency |
+| --- | --- |
+| node-llama-cpp | `node-llama-cpp@3.0.0-beta.36` |
+| gpt4all | `gpt4all@4.0.0` |
+| transformers-js | `github:xenova/transformers.js#v3` |
+
 
 #### Limitations and Known Issues
 

@@ -5,15 +5,17 @@ Currently the built-in inference engines are `node-llama-cpp`, `gpt4all` and `tr
 
 #### node-llama-cpp
 
-Can be used for `text-completion` and `embedding` tasks. See the [beta v3 discussion](https://github.com/withcatai/node-llama-cpp/discussions/109) for more information. Versions older than 3.0.0-beta.32 are not supported. For how to use function calling take a look at the [tests](./tests/engines/lib/feature-functions.ts). For grammar see [here](./tests/engines/lib/feature-grammar.ts).
+Can be used for `text-completion` and `embedding` tasks. See the [beta v3 discussion](https://github.com/withcatai/node-llama-cpp/discussions/109) for more information. For how to use function calling take a look at the [tests](./tests/engines/lib/feature-functions.ts). For grammar see [here](./tests/engines/lib/feature-grammar.ts).
+
+Peer dependency currently requires `node-llama-cpp@3.0.0-beta.36`.
 
 #### gpt4all
 
-Can be used for `text-completion` and `embedding` tasks. You can find parameter docs [here](https://github.com/nomic-ai/gpt4all/blob/c73f0e5c8c25ede56e3eeb28ff9dd37f09212994/gpt4all-bindings/typescript/src/gpt4all.d.ts#L615).
+Can be used for `text-completion` and `embedding` tasks. You can find parameter docs [here](https://github.com/nomic-ai/gpt4all/blob/c73f0e5c8c25ede56e3eeb28ff9dd37f09212994/gpt4all-bindings/typescript/src/gpt4all.d.ts#L615). Peer dependency currently requires `gpt4all@4.0.0`.
 
 #### transformers-js
 
-Currently supporting `speech-to-text` and `image-to-text` tasks using the v3 branch.
+Currently supporting `speech-to-text` and `image-to-text` tasks. Peer dependency currently requires `github:xenova/transformers.js#v3`.
 
 #### Custom Engines
 

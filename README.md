@@ -1,10 +1,10 @@
 ## lllms
 
-Local Large Language Models for node.js. Simple tools to build complex AI applications on localhost. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all). And [transformers.js](https://github.com/xenova/transformers.js/) using [ONNX](https://github.com/microsoft/onnxruntime/tree/main/js#onnxruntime-node)!
+Local Large Language Models for node.js - Tools to build AI applications on localhost. Built on [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all). And [transformers.js](https://github.com/xenova/transformers.js/) using [ONNX](https://github.com/microsoft/onnxruntime/tree/main/js#onnxruntime-node)!
 
-Including a model resource pool and an optional HTTP API server. Model file management is abstracted away completely. Useful for small-scale chatbots, local assistants, or any applications where private+offline is critical. Prioritizing ease of use (DX and deployment) and nice APIs. For other approaches check out some [similar projects](#related-solutions).
+The project includes a model resource pool and an optional HTTP API server. Model file management is abstracted away completely. Useful for small-scale chatbots, local assistants, or any applications where private+offline is critical. For other not node-based projects, check out the [related solutions](#related-solutions) section.
 
-⚠️ This package is currently in beta. Some APIs may change. Things may break. Feel free to report any issues you encounter.
+⚠️ This package is currently in beta. Some APIs may change. Things may break. Issue reports are very welcome.
 
 ### Features
 
@@ -16,7 +16,7 @@ Including a model resource pool and an optional HTTP API server. Model file mana
 - BYO web server or use the provided express server and middleware.
 - Or don't use a web server and instead use the JS APIs directly within your node.js application.
 - Have as many ModelServers running as you want, they can share the same cache directory. (Multiple processes can as well)
-- Use the [ModelPool](./src/model-pool.ts) class directly for a lowerlevel transaction-like API to manage model instances.
+- Use the [ModelPool](./examples/pool.js) class directly for a lowerlevel transaction-like API to manage model instances.
 - Use [custom engines](./docs/engines.md#custom-engines) to combine multiple models (or do RAG) behind the scenes.
 
 ### Usage
@@ -33,7 +33,7 @@ const llms = new ModelServer({
       // Required are `task`, `engine`, `url` and/or `file`.
       task: 'text-completion', // text-completion models can be used for chat and text generation tasks
       engine: 'node-llama-cpp', // don't forget to `npm install node-llama-cpp@beta`
-      url: 'https://huggingface.co/QuantFactory/dolphin-2.9-llama3-8b-GGUF/blob/main/dolphin-2.9-llama3-8b.Q4_K_M.gguf',
+      url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
     },
   },
 })
@@ -58,8 +58,8 @@ import { startHTTPServer } from 'lllms'
 import OpenAI from 'openai'
 
 const httpServer = await startHTTPServer({
-	listen: { port: 3000 }, // apart from `listen` options are identical to ModelServer
-	log: 'info',
+  listen: { port: 3000 }, // apart from `listen` options are identical to ModelServer
+  log: 'info',
   models: {
     'dolphin': {
       task: 'text-completion',
@@ -74,39 +74,42 @@ const client = new OpenAI({
   apiKey: 'yes',
 })
 const completion = await client.beta.chat.completions.stream({
-	stream_options: { include_usage: true },
-	model: 'dolphin',
-	messages: [
-		{ role: 'user', content: 'lets count to 10, but only whisper every second number' },
-	],
+  stream_options: { include_usage: true },
+  model: 'dolphin',
+  messages: [
+    { role: 'user', content: 'lets count to 10, but only whisper every second number' },
+  ],
 })
 for await (const chunk of completion) {
-	if (chunk.choices[0]?.delta?.content) {
-		process.stdout.write(chunk.choices[0].delta.content)
-	}
+  if (chunk.choices[0]?.delta?.content) {
+    process.stdout.write(chunk.choices[0].delta.content)
+  }
 }
 httpServer.close()
 ```
 
-For usage of the express middleware see [./examples/express](./examples/express.js). For a cli chat example to test session reuse see [./examples/chat-cli](./examples/chat-cli.js). And for an example of how to use the underlying ModelPool class see [./examples/pool](./examples/pool.js).
+More usage examples:
+- Using all available options / model options API doc [./examples/all-options](./examples/all-options.js).
+- Custom engines [./tests/engines/custom.test.ts](./tests/engines/custom.test.ts).
+- A chat cli [./examples/chat-cli](./examples/chat-cli.js).
+- `concurrency` behavior [./examples/concurrency](./examples/concurrency.js).
+- Using the ModelPool directly [./examples/pool](./examples/pool.js).
+- Using the express middleware [./examples/express](./examples/express.js).
 
-The engine peer dependencies are pinned currently. I plan to make this more loose in the future.
-
-For now:
+Currently supported inference engines are:
 
 | Engine | Peer Dependency |
 | --- | --- |
-| node-llama-cpp | `node-llama-cpp@3.0.0-beta.36` |
-| gpt4all | `gpt4all@4.0.0` |
+| node-llama-cpp | `node-llama-cpp >= 3.0.0-beta.32` |
+| gpt4all | `gpt4all >= 4.0.0` |
 | transformers-js | `github:xenova/transformers.js#v3` |
 
+See [engine docs](./docs/engines.md) for more information on each.
 
 #### Limitations and Known Issues
 
 ##### Only one model can run on GPU at a time
-Llama.cpp bindings currently do not support running multiple models on gpu at the same time. This means if `gpu` is set to `true` for a model, only one instance of it can run at one time (additional instances will refuse to spawn and requests will stall). If `gpu` is left unset more cpu instances can be spawned instead (and the first instance will still pick up gpu). Instances can not switch between gpu and cpu.
-
-I hope I can improve this in the future. Meanwhile if you require closer control over which requests exactly use gpu, you can always configure a model multiple times with different options.
+Llama.cpp bindings currently do not support running multiple models on gpu at the same time. This can/will likely be improved in the future. See [GPU docs](./docs/gpu.md) for more information on how to work around that.
 
 ##### System Messages
 System role messages are supported only as the first message in a chat completion session. All other system messages will be ignored. This is only for simplicity reasons and might change in the future.
@@ -146,14 +149,19 @@ Not in any particular order:
 - [x] Make sure nothing clashes if multiple servers/stores are using the same cache directory
 - [x] See if we can install supported engines as peer deps
 - [x] Improve types, simpler node-llama-cpp grammar integration
-- [ ] Support more transformer.js tasks / pipelines
+- [x] Restructure docs, add function calling & grammar usage docs
+- [ ] Support transformer.js for text-completion and embedding tasks
+- [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
 - [ ] Make pool dispose / stop more robust
-- [ ] Restructure docs, add function calling & grammar usage docs
-- [ ] Rework GPU+device usage / lock (Support multiple models on gpu in cases where its possible)
-- [ ] Allow configuring total RAM/VRAM usage (See https://github.com/ggerganov/llama.cpp/issues/4315 Check estimates?)
 - [ ] Tests for cancellation and timeouts
+- [ ] Log more task metadata
+- [ ] Expose more context shifting options
+- [ ] Simpler custom engine APIs (+docs)
+- [ ] Rework GPU+device usage / lock (Support multiple models on gpu in cases where its possible)
+- [ ] Add engine interfaces for resource use (and estimates, see https://github.com/ggerganov/llama.cpp/issues/4315)
+- [ ] Allow configuring total memory usage
 - [ ] Logprobs support
-- [ ] Improve offline support (allow running `Engine.prepareModel` ahead of time)
+- [ ] [CLI](./src/cli.ts)
 - [ ] Replace express with tinyhttp?
 
 ### Contributing
@@ -164,7 +172,6 @@ If you know how to fill in any of the above checkboxes or have additional ideas 
 
 - Create a separate HTTP API thats independent of the OpenAI spec and stateful.
 - Add a clientside library (React hooks?) for use of above API.
-- Provide a CLI. (Launch a server via `lllms serve config.json|js`? `lllms prepare` to download everything needed to disk?)
 - Provide a Docker image. And maybe a Prometheus endpoint.
 
 #### Currently not the Goals

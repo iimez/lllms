@@ -98,7 +98,7 @@ suite('gpu', () => {
 			gpt4all: {
 				url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
 				task: 'text-completion',
-				// md5: 'f8347badde9bfc2efbe89124d78ddaf5',
+				md5: 'f8347badde9bfc2efbe89124d78ddaf5',
 				engine: 'gpt4all',
 				batchSize: 512,
 				device: { gpu: true },
@@ -106,7 +106,7 @@ suite('gpu', () => {
 			'node-llama-cpp': {
 				url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
 				task: 'text-completion',
-				// sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
+				sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
 				engine: 'node-llama-cpp',
 				batchSize: 512,
 				device: { gpu: true },
@@ -121,7 +121,7 @@ suite('gpu', () => {
 		await llms.stop()
 	})
 
-	test('does a gpu completion', async () => {
+	test('gpu completion', async () => {
 		const chat = await createChatCompletion(llms, {
 			model: 'gpt4all',
 			messages: [
@@ -134,7 +134,7 @@ suite('gpu', () => {
 		expect(chat.device).toBe('gpu')
 	})
 
-	test('loads different gpu model when necessary', async () => {
+	test('switch to different gpu model when necessary', async () => {
 		const chat = await createChatCompletion(llms, {
 			model: 'node-llama-cpp',
 			messages: [
@@ -146,4 +146,27 @@ suite('gpu', () => {
 		})
 		expect(chat.device).toBe('gpu')
 	})
+	
+	test('handle simultaneous requests to two gpu models', async () => {
+		const [chat1, chat2] = await Promise.all([
+			createChatCompletion(llms, {
+				model: 'node-llama-cpp',
+				messages: [
+					{
+						role: 'user',
+						content: 'Tell me a story, but just its title.',
+					},
+				],
+			}),
+			createChatCompletion(llms, {
+				model: 'gpt4all',
+				messages: [
+					{
+						role: 'user',
+						content: 'Tell me a story, but just its title.',
+					},
+				],
+			}),
+		])
+	}, 10000)
 })

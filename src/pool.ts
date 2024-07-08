@@ -120,7 +120,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		await Promise.allSettled(initPromises)
 		this.emit('ready')
 		this.evictionInterval = setInterval(() => {
-			this.evictOutdated()
+			this.disposeOutdatedInstances()
 		}, 1000 * 60) // every minute
 	}
 
@@ -152,7 +152,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	}
 
 	// disposes instances that have been idle for longer than their ttl
-	private evictOutdated() {
+	private disposeOutdatedInstances() {
 		const now = new Date().getTime()
 		for (const key in this.instances) {
 			const instance = this.instances[key]
@@ -283,7 +283,6 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			try {
 				await this.prepareInstance(instance, options?.signal)
 				instance.status = 'idle'
-				// console.debug('after prepareInstance', instance.id)
 			} catch (error) {
 				console.error('Error preparing instance', error)
 				this.log(LogLevels.error, 'Error preparing instance', {
@@ -331,18 +330,22 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 
 			// otherwise attach the listener and wait until gpu slot becomes available
 			const listener = async (instance: ModelInstance) => {
-				if (
-					instance.matchesRequirements(request) &&
-					instance.status === 'idle' &&
-					instance.gpu === true
-				) {
-					this.off('release', listener)
-					await this.disposeInstance(instance)
-					const newInstance = await this.spawnInstance(request.model, {
-						emit: false,
-					})
-					newInstance.lock(request)
-					resolve(newInstance)
+				if (instance.gpu === true && instance.status === 'idle') {
+					if (instance.matchesRequirements(request)) {
+						// model matches whats needed, lock and resolve
+						this.off('release', listener)
+						instance.lock(request)
+						resolve(instance)
+					} else {
+						// model doesnt match, dispose and spawn new instance
+						this.off('release', listener)
+						await this.disposeInstance(instance)
+						const newInstance = await this.spawnInstance(request.model, {
+							emit: false,
+						})
+						newInstance.lock(request)
+						resolve(newInstance)
+					}
 				}
 			}
 			this.on('release', listener)
@@ -381,9 +384,6 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			}
 			this.on('spawn', listener)
 			this.on('release', listener)
-			setInterval(() => {
-				console.debug(this.instances)
-			}, 10000)
 			if (signal) {
 				signal.addEventListener('abort', () => {
 					this.off('release', listener)
@@ -482,8 +482,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			)!
 
 			if (gpuInstance.modelId !== request.model) {
-				this.log(LogLevels.debug, 'Awaiting GPU instance for', {
-					model: request.model,
+				this.log(LogLevels.debug, 'GPU already in use, waiting ...', {
 					sequence: request.sequence,
 				})
 				const instance = await this.acquireGpuInstance(request, signal)

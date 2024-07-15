@@ -10,14 +10,15 @@ On the packaged web server there is currently only one additional HTTP endpoint:
 
 `/openai/v1` is the default base path. The following endpoints and parameters are supported:
 
-| Endpoints           | gpt4all | node-llama-cpp |
-| ------------------- | ------- | -------------- |
-| v1/chat/completions | ✅      | ✅             |
-| v1/completions      | ✅      | ✅             |
-| v1/embeddings       | ✅      | ✅             |
-| v1/models           | ✅      | ✅             |
+| Endpoints               | gpt4all | node-llama-cpp | transformers-js |
+| ----------------------- | ------- | -------------- | --------------- |
+| v1/chat/completions     | ✅      | ✅             | 🚧              |
+| v1/completions          | ✅      | ✅             | 🚧              |
+| v1/embeddings           | ✅      | ✅             | 🚧              |
+| v1/models               | ✅      | ✅             | ✅              |
+| v1/audio/transcriptions | ❌      | ❌             | 🚧              |
 
-| Spec params         | gpt4all | node-llama-cpp |
+| Text Compl Params   | gpt4all | node-llama-cpp |
 | ------------------- | ------- | -------------- |
 | stream              | ✅      | ✅             |
 | temperature         | ✅      | ✅             |

@@ -5,7 +5,7 @@ import { startHTTPServer } from '../dist/http.js'
 startHTTPServer({
 	log: 'info', // 'debug', 'info', 'warn', 'error' - or pass a function as custom logger.
 	// Limit how many instances may be handed out concurrently for processing.
-	// If its exceeded, requests will stall until a model is available.
+	// If its exceeded, requests will be queued up and stall until a model becomes available.
 	// Defaults to 1 = process one request at a time.
 	concurrency: 2,
 	// Where to cache models to disk. Defaults to `~/.cache/lllms`
@@ -42,6 +42,7 @@ startHTTPServer({
 						content: 'You are a helpful assistant.',
 					},
 				],
+				// toolDocumentation: true, // Tool docs may also be preloaded. See `tools` below.
 			},
 			// Options to control resource usage.
 			contextSize: 2046, // Maximum context size. Will be determined automatically if not set.
@@ -61,6 +62,42 @@ startHTTPServer({
 				// cpuThreads: 4, // Only gpt4all and node-llama-cpp
 				// memLock: true, // Only node-llama-cpp.
 			},
+			// node-llama-cpp text-completion models may have GBNF grammars and tools configured.
+			// You can define multiple grammars for a model. `json` grammar will alway be available.
+			// Key is the grammar name (that later can be used as value for `grammar` in a request). Value is a string containing the GBNF grammar.
+			grammars: {
+				// For example:
+				// 'custom-grammar': fs.readFileSync('custom-grammar.gbnf', 'utf8'), // Supply your own grammar
+				// 'chess': await LlamaGrammar.getFor(llama, 'chess') // Or reuse a grammar shipped with (node-)llama-cpp
+			},
+			// Avilable tools may be defined on the model or during requests.
+			// Note that for using `preload` with `toolDocumentation` they _must_ be defined here (on the model).
+			tools: {
+				getLocationWeather: {
+					description: 'Get the weather in a location',
+					parameters: {
+						type: 'object',
+						properties: {
+							location: {
+								type: 'string',
+								description: 'The city and state, e.g. San Francisco, CA',
+							},
+							unit: {
+								type: 'string',
+								enum: ['celsius', 'fahrenheit'],
+							},
+						},
+						required: ['location'],
+					},
+					// Handler is optional. If its set, the model will ingest the return value and respond with the final assistant message.
+					// If unset the model will respond with a tool call message instead. In this case you need to push tool call results into the message array.
+					handler: async (parameters) => {
+						const { location, unit } = parameters
+						// Call a weather API or something
+						return `The temperature in ${location} is 23°C`
+					},
+				}
+			}
 		},
 	},
 	// HTTP listen options. If you don't need a web server, use `startModelServer` or `new ModelServer()`.

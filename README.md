@@ -27,13 +27,13 @@ Example with minimal configuration:
 import { ModelServer } from 'lllms'
 
 const llms = new ModelServer({
-  log: 'info',
+  log: 'info', // default is 'warn'
   models: {
     'my-model': { // Identifiers can use a-zA-Z0-9_:\-\.
       // Required are `task`, `engine`, `url` and/or `file`.
       task: 'text-completion', // text-completion models can be used for chat and text generation tasks
       engine: 'node-llama-cpp', // don't forget to `npm install node-llama-cpp@beta`
-      url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+      url: 'https://huggingface.co/bartowski/Phi-3.1-mini-4k-instruct-GGUF/blob/main/Phi-3.1-mini-4k-instruct-Q4_K_M.gguf',
     },
   },
 })
@@ -57,14 +57,18 @@ Or, to start an OAI compatible HTTP server with two concurrent instances of the 
 import { startHTTPServer } from 'lllms'
 import OpenAI from 'openai'
 
-const httpServer = await startHTTPServer({
+const server = await startHTTPServer({
   listen: { port: 3000 }, // apart from `listen` options are identical to ModelServer
-  log: 'info',
+  concurrency: 2, // two inference processes may run at the same time
   models: {
-    'dolphin': {
+    'phi-3.1-mini': {
       task: 'text-completion',
       engine: 'node-llama-cpp',
-      url: 'https://huggingface.co/QuantFactory/dolphin-2.9-llama3-8b-GGUF/blob/main/dolphin-2.9-llama3-8b.Q4_K_M.gguf',
+      url: 'https://huggingface.co/bartowski/Phi-3.1-mini-4k-instruct-GGUF/blob/main/Phi-3.1-mini-4k-instruct-Q4_K_M.gguf',
+      maxInstances: 2, // two instances of this model may be loaded into memory
+      device: {
+        cpuThreads: 4, // limit cpu threads so we dont occupy all cores
+      }
     },
   },
 })
@@ -75,7 +79,7 @@ const client = new OpenAI({
 })
 const completion = await client.beta.chat.completions.stream({
   stream_options: { include_usage: true },
-  model: 'dolphin',
+  model: 'phi-3.1-mini',
   messages: [
     { role: 'user', content: 'lets count to 10, but only whisper every second number' },
   ],
@@ -85,7 +89,7 @@ for await (const chunk of completion) {
     process.stdout.write(chunk.choices[0].delta.content)
   }
 }
-httpServer.close()
+server.stop()
 ```
 
 More usage examples:
@@ -154,19 +158,27 @@ Not in any particular order:
 - [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
 - [ ] Make pool dispose / stop more robust
 - [ ] Tests for cancellation and timeouts
+- [ ] Context cache improvement: Reuse existing context even if the incoming suffix/difference is more than one message
+- [ ] non-chat text completions: Allow reuse of context
+- [ ] non-chat text completions: Support preloading of prefixes
+- [ ] Infill completion support https://github.com/withcatai/node-llama-cpp/blob/beta/src/evaluator/LlamaCompletion.ts#L322-L336
+- [ ] TTL=0 should immediately dispose of instances instead of waiting (currently on avg 30s) for the next TTL check
 - [ ] Log more task metadata
-- [ ] Expose more context shifting options
-- [ ] Simpler custom engine APIs (+docs)
+- [ ] Expose node-llama-cpp context shift strategy, lora, allow json schema as input for `grammar`
+- [ ] Find a way to type available custom engines (and their options?)
+- [ ] Improve types for tool definitions / json schema
 - [ ] Rework GPU+device usage / lock (Support multiple models on gpu in cases where its possible)
-- [ ] Add engine interfaces for resource use (and estimates, see https://github.com/ggerganov/llama.cpp/issues/4315)
-- [ ] Allow configuring total memory usage
+- [ ] Add engine interfaces for resource use (and estimates, see https://github.com/ggerganov/llama.cpp/issues/4315 and https://github.com/withcatai/node-llama-cpp/blob/beta/src/gguf/insights/utils/resolveContextContextSizeOption.ts)
+- [ ] Allow configuring a pools max memory usage
 - [ ] Logprobs support
+- [ ] Add transcript endpoint in oai api
+- [ ] Add `n` parameter support to node-llama-cpp chat completions
 - [ ] [CLI](./src/cli.ts)
 - [ ] Replace express with tinyhttp?
 
 ### Contributing
 
-If you know how to fill in any of the above checkboxes or have additional ideas you'd like to make happen, feel free to open an issue or PR.
+If you know how to fill in any of the above checkboxes or have additional ideas you'd like to make happen, feel free to open an issue, PR or open a new discussion.
 
 #### Possible Future Goals
 
@@ -176,10 +188,10 @@ If you know how to fill in any of the above checkboxes or have additional ideas 
 
 #### Currently not the Goals
 
-- Another facade to LLM hoster HTTP API's. The strengths here are local/private/offline use.
+- A facade to LLM cloud hoster HTTP API's. The strengths here are local/private/offline use.
 - Worry too much about authentication or rate limiting or misuse. Host this with caution.
-- Some kind of distributed or multi-node setup. Too soon.
-- Other common tooling like vector stores, Chat GUIs, etc.
+- Some kind of distributed or multi-node setup. That should probably be something designed for this purpose from the ground up.
+- Other common related tooling like vector stores, Chat GUIs, etc. Scope would probably get out of hand.
 
 ### Related Solutions
 

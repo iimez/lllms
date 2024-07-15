@@ -33,7 +33,7 @@ interface ModelInstanceOptions extends ModelConfig {
 	gpu: boolean
 }
 
-export class ModelInstance {
+export class ModelInstance<TEngineState = unknown> {
 	id: string
 	status: ModelInstanceStatus
 	modelId: string
@@ -48,8 +48,9 @@ export class ModelInstance {
 	private engine: ModelEngine
 	private contextStateIdentity?: string
 	private needsContextReset: boolean = false
-	private engineInstance: unknown | null = null
-	private currentRequest: ModelInstanceRequest | null = null
+	private engineInstance?: TEngineState | unknown
+	private currentRequest?: ModelInstanceRequest | null
+	private disposeController: AbortController
 
 	constructor(
 		engine: ModelEngine,
@@ -66,6 +67,7 @@ export class ModelInstance {
 		this.log = withLogMeta(log ?? createLogger(LogLevels.warn), {
 			instance: this.id,
 		})
+		this.disposeController = new AbortController()
 
 		// TODO to implement this properly we should only include what changes the "behavior" of the model
 		this.fingerprint = crypto
@@ -132,6 +134,7 @@ export class ModelInstance {
 
 	async dispose() {
 		this.status = 'busy'
+		this.disposeController.abort()
 		if (this.engineInstance) {
 			await this.engine.disposeInstance(this.engineInstance)
 		}
@@ -186,7 +189,7 @@ export class ModelInstance {
 	}) {
 		const cancelController = new AbortController()
 		const timeoutController = new AbortController()
-		const abortSignals = [cancelController.signal]
+		const abortSignals = [cancelController.signal, this.disposeController.signal]
 		if (args.signal) {
 			abortSignals.push(args.signal)
 		}

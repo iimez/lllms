@@ -84,7 +84,7 @@ export interface TextCompletionParams {
 
 export interface ChatPreloadOptions {
 	messages: ChatMessage[]
-	documentTools?: boolean
+	toolDocumentation?: boolean
 }
 
 export interface PromptPrefixPreloadOptions {

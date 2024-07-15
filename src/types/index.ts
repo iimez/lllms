@@ -26,11 +26,6 @@ export interface ModelOptionsBase {
 	maxInstances?: number
 }
 
-// export type LooseModelOptions = ModelOptionsBase & Record<string, unknown>
-
-
-
-
 export interface BuiltInModelOptionsBase extends ModelOptionsBase {
 	engine: BuiltInEngineName
 	task: ModelTaskType
@@ -251,7 +246,6 @@ interface LlamaCppModelOptionsBase extends BuiltInModelOptionsBase {
 	sha256?: string
 	file?: string
 	batchSize?: number
-	preload?: TextCompletionPreloadOptions
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
 		gpuLayers?: number
@@ -266,7 +260,6 @@ interface LlamaCppEmbeddingModelOptions extends LlamaCppModelOptionsBase, Embedd
 
 export interface LlamaCppTextCompletionModelOptions extends LlamaCppModelOptionsBase, TextCompletionModelOptions {
 	task: 'text-completion'
-	// preload?: TextCompletionPreloadOptions
 }
 
 interface GPT4AllModelOptions extends BuiltInModelOptionsBase {

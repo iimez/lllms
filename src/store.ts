@@ -108,7 +108,7 @@ export class ModelStore {
 		}
 		model.status = 'preparing'
 		const engine = this.engines[model.engine]
-		this.log(LogLevels.info, `Preparing model`, {
+		this.log(LogLevels.info, 'Preparing model', {
 			model: modelId,
 			task: model.task,
 		})
@@ -131,7 +131,7 @@ export class ModelStore {
 					)
 				if (progress.totalBytes) {
 					const percent = (progress.loadedBytes / progress.totalBytes) * 100
-					this.log(LogLevels.info, `downloading ${Math.round(percent)}%`, {
+					this.log(LogLevels.info, `downloading ${percent.toFixed(1)}%`, {
 						model: modelId,
 					})
 				}
@@ -146,8 +146,12 @@ export class ModelStore {
 				)
 				model.meta = modelMeta
 				model.status = 'ready'
+				this.log(LogLevels.info, 'Model ready', {
+					model: modelId,
+					task: model.task,
+				})
 			} catch (error) {
-				this.log(LogLevels.error, `Error preparing model`, {
+				this.log(LogLevels.error, 'Error preparing model', {
 					model: modelId,
 					error: error,
 				})
@@ -247,9 +251,9 @@ class DownloadTracker {
 		const bytesLoaded = latestState.loadedBytes - previousState.loadedBytes
 		const timeElapsed = latestState.timestamp - previousState.timestamp // in milliseconds
 
-		const speed = bytesLoaded / (timeElapsed / 1000) // convert ms to seconds
+		const speed = bytesLoaded / (timeElapsed / 1000) // bytes per second
 		const remainingBytes = latestState.totalBytes - latestState.loadedBytes
-		const eta = remainingBytes / speed
+		const eta = remainingBytes / speed // in seconds
 
 		return {
 			speed,

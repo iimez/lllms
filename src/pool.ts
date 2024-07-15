@@ -47,7 +47,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	config: ModelPoolConfig
 	instances: Record<string, ModelInstance>
 	private engines?: Record<string, ModelEngine>
-	private evictionInterval?: NodeJS.Timeout
+	private cleanupInterval?: NodeJS.Timeout
 	private log: Logger
 	private requestSequence: number = 0
 	private waitingRequests: number = 0 // TODO should keep requests around so connections can be canceled on dispose?
@@ -119,7 +119,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		// resolve when all initial instances are loaded
 		await Promise.allSettled(initPromises)
 		this.emit('ready')
-		this.evictionInterval = setInterval(() => {
+		this.cleanupInterval = setInterval(() => {
 			this.disposeOutdatedInstances()
 		}, 1000 * 60) // every minute
 	}
@@ -144,7 +144,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 
 	async dispose() {
 		this.log(LogLevels.info, 'Disposing pool')
-		clearInterval(this.evictionInterval)
+		clearInterval(this.cleanupInterval)
 		const disposePromises = Object.values(this.instances).map((instance) =>
 			instance.dispose(),
 		)
@@ -210,7 +210,6 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		// and prevent spawning more instances if the gpu is already locked.
 		const requiresGpu = modelConfig.device?.gpu === true
 		if (requiresGpu && this.gpuLock) {
-			// TODO check if we are allowed to shut down the locking instance?
 			this.log(
 				LogLevels.debug,
 				'Cannot spawn new instance: model requires gpu, but its locked',
@@ -528,7 +527,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		}
 	}
 
-	private getRequestSequence() {
+	private createRequestSequence() {
 		if (this.requestSequence > 999999) {
 			this.requestSequence = 0
 		}
@@ -540,7 +539,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		incomingRequest: IncomingRequest,
 		signal?: AbortSignal,
 	): Promise<ModelInstanceHandle> {
-		const requestSequence = this.getRequestSequence()
+		const requestSequence = this.createRequestSequence()
 		const request = {
 			...incomingRequest,
 			sequence: requestSequence,

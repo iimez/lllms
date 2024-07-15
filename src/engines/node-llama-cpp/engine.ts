@@ -260,7 +260,7 @@ export async function createInstance(
 				{
 					initialUserPrompt: '',
 					functions: inputFunctions,
-					documentFunctionParams: config.preload.documentTools,
+					documentFunctionParams: config.preload.toolDocumentation,
 				},
 			)
 

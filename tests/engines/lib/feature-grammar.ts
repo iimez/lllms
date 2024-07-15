@@ -42,7 +42,7 @@ export async function runCustomGrammarTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
-			content: 'I REQUIRE CATS, IN STRUCTURED DATA! Please not too many!',
+			content: 'Generate a {name, age}[] JSON array with famous actors of all ages.',
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {

@@ -1,3 +1,4 @@
+# see https://github.com/ggerganov/llama.cpp/tree/master/grammars
 char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
 item ::= "{" space item-name-kv "," space item-age-kv "}" space
 item-age ::= ([0-9] | ([1-8] [0-9] | [9] [0-9]) | "1" ([0-4] [0-9] | [5] "0")) space

@@ -16,20 +16,20 @@ import { VoiceFunctionCallEngine } from '#lllms/lib/custom-engines/VoiceFunction
 import { createChatCompletion } from '../util'
 
 suite('chat with vision', () => {
-	// florence2 generates a description of the image and passes it to llama3-8b
+	// florence2 generates a description of the image and passes it to phi3
 	const llms = new ModelServer({
 		// log: 'debug',
 		concurrency: 2,
 		engines: {
 			'chat-with-vision': new ChatWithVisionEngine({
-				chatModel: 'llama3-8b',
+				chatModel: 'phi3',
 				imageToTextModel: 'florence2',
 			}),
 		},
 		models: {
-			'llama3-8b': {
-				url: 'https://gpt4all.io/models/gguf/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
-				md5: 'c87ad09e1e4c8f9c35a5fcef52b6f1c9',
+			'phi3': {
+				url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+				md5: 'f8347badde9bfc2efbe89124d78ddaf5',
 				engine: 'gpt4all',
 				task: 'text-completion',
 			},
@@ -89,6 +89,7 @@ suite('chat with vision', () => {
 })
 
 suite('voice functions', () => {
+	let searchSources: string
 	const llms = new ModelServer({
 		// log: 'debug',
 		engines: {
@@ -111,6 +112,7 @@ suite('voice functions', () => {
 							},
 						},
 						handler: async (params) => {
+							searchSources = params.sources
 							// console.debug('called', { params })
 							return `Searching for: ${params.query}` +
 								'1. A dessert on Darmok\n' +
@@ -162,7 +164,8 @@ suite('voice functions', () => {
 			model: 'voice-function-calling',
 			// model: 'whisper-base',
 		})
-		// console.debug({ result })
-		// expect(result.text).toContain('Risa')
+		console.debug({ result })
+		expect(result.text).toContain('Risa')
+		expect(searchSources).toMatch('all databases')
 	})
 })

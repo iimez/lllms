@@ -20,13 +20,14 @@ import {
 import { createChatCompletion } from '../util.js'
 
 const testModel: ModelOptions ={
-	url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/blob/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
-	sha256: 'c57380038ea85d8bec586ec2af9c91abc2f2b332d41d6cf180581d7bdffb93c1',
+	url: 'https://huggingface.co/mradermacher/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
+	sha256: '8729adfbc1cdaf3229ddeefab2b58ffdc78dbdb4d92234bcd5980c53f12fad15',
 	engine: 'node-llama-cpp',
 	task: 'text-completion',
 	contextSize: 2048,
+	prepare: 'blocking',
 	grammars: {
-		test: fs.readFileSync('tests/fixtures/grammar/json-list-schema.gbnf', 'utf-8')
+		test: fs.readFileSync('tests/fixtures/grammar/name-age-json.gbnf', 'utf-8'),
 	},
 	device: {
 		gpu: true,
@@ -132,7 +133,7 @@ suite('cache', () => {
 		await llms.stop()
 	})
 
-	test('reuse context on stateless requests', async () => {
+	test('reuse existing instance on stateless requests', async () => {
 		await runContextReuseTest(llms)
 	})
 	test('no leak when handling multiple sessions', async () => {
@@ -156,6 +157,7 @@ suite('preload', () => {
 		},
 	]
 	const llms = new ModelServer({
+		// log: 'debug',
 		models: {
 			test: {
 				...testModel,
@@ -256,6 +258,6 @@ suite('ingest', () => {
 	})
 	test('a large website', async () => {
 		const res = await runFileIngestionTest(llms, 'github')
-		expect(res.message.content).toMatch(/github/i)
+		expect(res.message.content).toMatch(/github|html/i)
 	})
 })

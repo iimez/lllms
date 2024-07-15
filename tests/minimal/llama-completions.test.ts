@@ -22,8 +22,7 @@ suite('basic', () => {
 		model = await llama.loadModel({
 			modelPath: path.resolve(
 				os.homedir(),
-				// '.cache/lllms/huggingface/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
-				'.cache/lllms/huggingface/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF-main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+				'.cache/lllms/huggingface/mradermacher/Meta-Llama-3-8B-Instruct-GGUF-main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
 			),
 		})
 	})

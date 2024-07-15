@@ -1,7 +1,6 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
-import { Server } from 'node:http'
 import OpenAI from 'openai'
-import { startHTTPServer } from '#lllms/http.js'
+import { ModelHTTPServer } from '#lllms/http.js'
 
 const chatModel = 'chat'
 const embeddingsModel = 'text-embed'
@@ -87,7 +86,6 @@ function runOpenAITests(client: OpenAI) {
 			}
 			finishReason = chunk.choices[0].finish_reason
 		}
-		console.debug({ response: tokens.join('|'), finishReason })
 		expect(tokens.join('')).toContain(
 			'but some animals are more equal than others',
 		)
@@ -199,15 +197,14 @@ function runOpenAITests(client: OpenAI) {
 }
 
 suite('OpenAI API (node-llama-cpp)', () => {
-	let server: Server
+	let server: ModelHTTPServer
 	const openai = new OpenAI({
 		baseURL: 'http://localhost:3000/openai/v1/',
 		apiKey: '123',
 	})
 
 	beforeAll(async () => {
-		server = await startHTTPServer({
-			// log: 'debug',
+		server = new ModelHTTPServer({
 			listen: { port: 3000 },
 			concurrency: 2,
 			models: {
@@ -219,6 +216,7 @@ suite('OpenAI API (node-llama-cpp)', () => {
 					task: 'embedding',
 					device: {
 						gpu: false,
+						cpuThreads: 4,
 					}
 				},
 				[chatModel]: {
@@ -229,30 +227,28 @@ suite('OpenAI API (node-llama-cpp)', () => {
 					engine: 'node-llama-cpp',
 					minInstances: 1,
 					task: 'text-completion',
-					// engineOptions: {
-					// 	gpu: 'vulkan',
-					// }
 				},
 			},
 		})
+		await server.start()
 	})
 
-	afterAll(() => {
-		server.close()
+	afterAll(async () => {
+		await server.stop()
 	})
 
 	runOpenAITests(openai)
 })
 
 suite('OpenAI API (gpt4all)', () => {
-	let server: Server
+	let server: ModelHTTPServer
 	const openai = new OpenAI({
 		baseURL: 'http://localhost:3001/openai/v1/',
 		apiKey: '123',
 	})
 
 	beforeAll(async () => {
-		server = await startHTTPServer({
+		server = new ModelHTTPServer({
 			// log: 'debug',
 			listen: { port: 3001 },
 			concurrency: 2,
@@ -262,6 +258,10 @@ suite('OpenAI API (gpt4all)', () => {
 					minInstances: 1,
 					engine: 'gpt4all',
 					task: 'embedding',
+					device: {
+						gpu: false,
+						cpuThreads: 4,
+					}
 				},
 				[chatModel]: {
 					url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
@@ -271,10 +271,11 @@ suite('OpenAI API (gpt4all)', () => {
 				}
 			},
 		})
+		await server.start()
 	})
 
-	afterAll(() => {
-		server.close()
+	afterAll(async () => {
+		await server.stop()
 	})
 
 	runOpenAITests(openai)

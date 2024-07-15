@@ -1,16 +1,16 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import { ModelServer } from '#lllms/server.js'
-import { ModelOptions } from '#lllms/types/index.js'
 import { createChatCompletion } from './util.js'
 
 suite('basic', () => {
 	const llms = new ModelServer({
+		log: 'debug',
 		models: {
 			test: {
 				task: 'text-completion',
-				url: 'https://huggingface.co/QuantFactory/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_0.gguf',
+				url: 'https://huggingface.co/mradermacher/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
 				sha256:
-					'1977ae6185ef5bc476e27db85bb3d79ca4bd87e7b03399083c297d9c612d334c',
+					'8729adfbc1cdaf3229ddeefab2b58ffdc78dbdb4d92234bcd5980c53f12fad15',
 				engine: 'node-llama-cpp',
 			},
 		},
@@ -32,9 +32,7 @@ suite('basic', () => {
 				},
 			],
 		})
-		console.log({
-			res: chat.result.message,
-		})
+		expect(chat.result.message.content.length).toBeGreaterThan(0)
 	})
 
 	test('does two consecutive completions', async () => {
@@ -47,10 +45,7 @@ suite('basic', () => {
 				},
 			],
 		})
-		console.log({
-			res: chat1.result.message,
-		})
-		
+		expect(chat1.result.message.content.length).toBeGreaterThan(0)
 		const chat2 = await createChatCompletion(llms, {
 			temperature: 1,
 			messages: [
@@ -60,10 +55,7 @@ suite('basic', () => {
 				},
 			],
 		})
-		console.log({
-			id: chat2.task.id,
-			response: chat2.result.message.content,
-		})
+		expect(chat2.result.message.content.length).toBeGreaterThan(0)
 	})
 
 	test('handles 10 simultaneous completion requests', async () => {
@@ -80,14 +72,8 @@ suite('basic', () => {
 				}),
 			),
 		)
-		console.log({
-			res: results.map((r) => {
-				return {
-					id: r.task.id,
-					response: r.result.message.content,
-				}
-			}),
-		})
+		expect(results.length).toBe(10)
+		expect(results.every((r) => r.result.message.content.length > 0)).toBe(true)
 	})
 })
 
@@ -100,15 +86,13 @@ suite('gpu', () => {
 				task: 'text-completion',
 				md5: 'f8347badde9bfc2efbe89124d78ddaf5',
 				engine: 'gpt4all',
-				batchSize: 512,
 				device: { gpu: true },
 			},
 			'node-llama-cpp': {
-				url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+				url: 'hhttps://huggingface.co/bartowski/Phi-3.1-mini-4k-instruct-GGUF/resolve/main/Phi-3.1-mini-4k-instruct-Q4_K_M.gguf',
 				task: 'text-completion',
-				sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
+				sha256: '39458b227a4be763b7eb39d306d240c3d45205e3f8b474ec7bdca7bba0158e69',
 				engine: 'node-llama-cpp',
-				batchSize: 512,
 				device: { gpu: true },
 			},
 		},
@@ -168,5 +152,7 @@ suite('gpu', () => {
 				],
 			}),
 		])
-	}, 10000)
+		expect(chat1.device).toBe('gpu')
+		expect(chat2.device).toBe('gpu')
+	})
 })

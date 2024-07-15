@@ -587,7 +587,11 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 						instance: instance.id,
 						sequence: request.sequence,
 					})
-					instance.unlock()
+					if (instance.config.ttl === 0) {
+						this.disposeInstance(instance)
+					} else {
+						instance.unlock()
+					}
 					resolve()
 				})
 			})

@@ -48,7 +48,8 @@ startHTTPServer({
 			contextSize: 2046, // Maximum context size. Will be determined automatically if not set.
 			maxInstances: 2, // How many active sessions you wanna be able to cache at the same time.
 			minInstances: 1, // To always keep at least one instance ready. Defaults to 0.
-			ttl: 300, // Idle sessions will be disposed after this many seconds.
+			// Idle instances will be disposed after this many seconds.
+			ttl: 300, // Defaults to 5min. Set it to zero to immediately dispose of instances after use.
 			// Set defaults for completions. These can be overridden per request.
 			// If unset, default values depend on the engine.
 			completionDefaults: {

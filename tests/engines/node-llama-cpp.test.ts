@@ -14,8 +14,9 @@ import {
 	runFunctionCallTest,
 	runSequentialFunctionCallTest,
 	runParallelFunctionCallTest,
-	runJsonGrammarTest,
-	runCustomGrammarTest,
+	runBuiltInGrammarTest,
+	runRawGBNFGrammarTest,
+	runJsonSchemaGrammarTest,
 } from './lib/index.js'
 import { createChatCompletion } from '../util.js'
 
@@ -27,7 +28,15 @@ const testModel: ModelOptions ={
 	contextSize: 2048,
 	prepare: 'blocking',
 	grammars: {
-		test: fs.readFileSync('tests/fixtures/grammar/name-age-json.gbnf', 'utf-8'),
+		'custom-gbnf-string': fs.readFileSync('tests/fixtures/grammar/name-age-json.gbnf', 'utf-8'),
+		'custom-json-schema': {
+			type: 'object',
+			properties: {
+				name: { type: 'string' },
+				age: { type: 'number' },
+			},
+			required: ['name', 'age'],
+		},
 	},
 	device: {
 		gpu: true,
@@ -105,12 +114,16 @@ suite('grammar', async () => {
 		await llms.stop()
 	})
 	
-	test('json grammar', async () => {
-		await runJsonGrammarTest(llms)
+	test('built-in grammar', async () => {
+		await runBuiltInGrammarTest(llms)
 	})
 	
-	test('custom grammar', async () => {
-		await runCustomGrammarTest(llms)
+	test('gbnf string grammar', async () => {
+		await runRawGBNFGrammarTest(llms)
+	})
+	
+	test('json schema grammar', async () => {
+		await runJsonSchemaGrammarTest(llms)
 	})
 	
 })

@@ -10,6 +10,7 @@ import {
 	ToolDefinition,
 	TextCompletionPreloadOptions,
 } from '#lllms/types/completions.js'
+import { GbnfJsonSchema } from 'node-llama-cpp'
 export * from '#lllms/types/completions.js'
 
 export type ModelTaskType =
@@ -230,10 +231,12 @@ interface EmbeddingModelOptions {
 	task: 'embedding'
 }
 
+export type TextCompletionGrammar = string | GbnfJsonSchema
+
 interface TextCompletionModelOptions {
 	task: 'text-completion'
 	contextSize?: number
-	grammars?: Record<string, string>
+	grammars?: Record<string, TextCompletionGrammar>
 	tools?: Record<string, ToolDefinition>
 	completionDefaults?: TextCompletionParams
 	preload?: TextCompletionPreloadOptions

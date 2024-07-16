@@ -3,7 +3,7 @@ import { ModelServer } from '#lllms/server.js'
 import { createChatCompletion } from '../../util.js'
 import { ChatMessage } from '#lllms/types/index.js'
 
-export async function runJsonGrammarTest(llms: ModelServer) {
+export async function runBuiltInGrammarTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
@@ -38,7 +38,7 @@ export async function runJsonGrammarTest(llms: ModelServer) {
 	
 }
 
-export async function runCustomGrammarTest(llms: ModelServer) {
+export async function runRawGBNFGrammarTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
@@ -46,7 +46,7 @@ export async function runCustomGrammarTest(llms: ModelServer) {
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {
-		grammar: 'test',
+		grammar: 'custom-gbnf-string',
 		messages,
 		maxTokens: 512,
 	})
@@ -58,4 +58,24 @@ export async function runCustomGrammarTest(llms: ModelServer) {
 	expect(data).toBeInstanceOf(Array)
 	expect(data[0].name).toBeTruthy()
 	expect(data[0].age).toBeDefined()
+}
+
+export async function runJsonSchemaGrammarTest(llms: ModelServer) {
+	
+	const messages: ChatMessage[] = [
+		{
+			role: 'user',
+			content: 'Generate a {name, age} JSON object of a famous actor.',
+		},
+	]
+	const turn1 = await createChatCompletion(llms, {
+		grammar: 'custom-json-schema',
+		messages,
+		maxTokens: 512,
+	})
+	expect(turn1.result.message.content).toBeTruthy()
+	const data = JSON.parse(turn1.result.message.content!)
+
+	expect(data.name).toBeTruthy()
+	expect(data.age).toBeGreaterThan(0)
 }

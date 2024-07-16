@@ -24,6 +24,7 @@ import {
 	createModelDownloader,
 	readGgufFileInfo,
 	GgufFileInfo,
+	LlamaJsonSchemaGrammar,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 import {
@@ -41,6 +42,7 @@ import {
 	ModelConfig,
 	TextCompletionParams,
 	TextCompletionPreloadOptions,
+	TextCompletionGrammar,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
@@ -71,7 +73,7 @@ export interface NodeLlamaCppModelMeta {
 
 export interface NodeLlamaCppModelConfig extends ModelConfig {
 	location: string
-	grammars?: Record<string, string>
+	grammars?: Record<string, TextCompletionGrammar>
 	sha256?: string
 	completionDefaults?: TextCompletionParams
 	tools?: Record<string, ToolDefinition>
@@ -195,10 +197,15 @@ export async function createInstance(
 
 	if (config.grammars) {
 		for (const key in config.grammars) {
-			llamaGrammars[key] = new LlamaGrammar(llama, {
-				grammar: config.grammars[key],
-				// printGrammar: true,
-			})
+			const input = config.grammars[key]
+			if (typeof input === 'string') {
+				llamaGrammars[key] = new LlamaGrammar(llama, {
+					grammar: input,
+				})
+			} else {
+				// assume input is a JSON schema object
+				llamaGrammars[key] = new LlamaJsonSchemaGrammar(llama, input)
+			}
 		}
 	}
 

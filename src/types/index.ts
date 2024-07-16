@@ -1,3 +1,4 @@
+import type { SomeJSONSchema } from 'ajv/dist/types/json-schema'
 import type { BuiltInEngineName } from '#lllms/engines/index.js'
 import type { Logger } from '#lllms/lib/logger.js'
 import type { ModelPool } from '#lllms/pool.js'
@@ -10,7 +11,6 @@ import {
 	ToolDefinition,
 	TextCompletionPreloadOptions,
 } from '#lllms/types/completions.js'
-import { GbnfJsonSchema } from 'node-llama-cpp'
 export * from '#lllms/types/completions.js'
 
 export type ModelTaskType =
@@ -231,7 +231,7 @@ interface EmbeddingModelOptions {
 	task: 'embedding'
 }
 
-export type TextCompletionGrammar = string | GbnfJsonSchema
+export type TextCompletionGrammar = string | SomeJSONSchema
 
 interface TextCompletionModelOptions {
 	task: 'text-completion'

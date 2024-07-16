@@ -25,6 +25,8 @@ import {
 	readGgufFileInfo,
 	GgufFileInfo,
 	LlamaJsonSchemaGrammar,
+	LlamaModelOptions,
+	LLamaChatContextShiftOptions,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 import {
@@ -80,6 +82,8 @@ export interface NodeLlamaCppModelConfig extends ModelConfig {
 	preload?: TextCompletionPreloadOptions
 	contextSize?: number
 	batchSize?: number
+	lora?: LlamaModelOptions['lora']
+	contextShiftStrategy?: LLamaChatContextShiftOptions['strategy']
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
 		gpuLayers?: number
@@ -204,7 +208,7 @@ export async function createInstance(
 				})
 			} else {
 				// assume input is a JSON schema object
-				llamaGrammars[key] = new LlamaJsonSchemaGrammar(llama, input)
+				llamaGrammars[key] = new LlamaJsonSchemaGrammar(llama, input as GbnfJsonSchema)
 			}
 		}
 	}
@@ -214,6 +218,7 @@ export async function createInstance(
 		loadSignal: signal,
 		useMlock: config.device?.memLock ?? false,
 		gpuLayers: config.device?.gpuLayers,
+		lora: config.lora,
 		// onLoadProgress: (percent) => {}
 	})
 
@@ -512,7 +517,7 @@ export async function processChatCompletionTask(
 				presencePenalty: request.presencePenalty ?? defaults.presencePenalty,
 			},
 			contextShift: {
-				// strategy: 'eraseFirstResponseAndKeepFirstSystem',
+				strategy: config.contextShiftStrategy,
 				lastEvaluationMetadata: lastEvaluation?.contextShiftMetadata,
 			},
 			lastEvaluationContextWindow: {

@@ -1,5 +1,4 @@
-// import type { SchemaObject, JSONSchemaType } from 'ajv'
-// import type { GbnfJsonSchema, GbnfJsonObjectSchema } from 'node-llama-cpp'
+import type { SomeJSONSchema } from 'ajv/dist/types/json-schema'
 
 export type CompletionFinishReason =
 	| 'maxTokens'
@@ -56,11 +55,10 @@ export interface ToolCallResultMessage {
 }
 
 // TODO figure out how to type this better.
-// export type FunctionDefinitionParams<TParamList extends string = any> = GbnfJsonObjectSchema
-// export type FunctionDefinitionParams<TParams = any> = JSONSchemaType<TParams>
-export type ToolDefinitionParams<TParams = any> = Record<string, unknown>;
+// export type ToolDefinitionParams<TParams = any> = JSONSchemaType<TParams>
+export type ToolDefinitionParams<TParams> = SomeJSONSchema
 
-export interface ToolDefinition<TParams = any> {
+export interface ToolDefinition<TParams extends Record<string, any> = any> {
 	description?: string
 	parameters?: ToolDefinitionParams<TParams>
 	handler?: (params: TParams) => Promise<string>

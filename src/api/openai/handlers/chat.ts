@@ -121,7 +121,7 @@ export function createChatCompletionHandler(llms: ModelServer) {
 						completionTools[tool.name] = {
 							description: tool.description,
 							parameters: tool.parameters,
-						}
+						} as ToolDefinition
 					}
 				}
 			}

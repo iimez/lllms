@@ -1,3 +1,5 @@
+import { inspect } from 'node:util'
+
 export function elapsedMillis(since: bigint): number {
 	const now = process.hrtime.bigint()
 	return Number(now - BigInt(since)) / 1e6
@@ -27,17 +29,11 @@ export function mergeAbortSignals(
 }
 
 export function printActiveHandles() {
-	// @ts-ignore
-	const activeHandles = process._getActiveHandles()
-	console.log('Active Handles:', activeHandles.length)
-	activeHandles.forEach((handle: any, index: number) => {
-		console.log(`Handle ${index + 1}:`, handle.constructor.name)
-	})
+	//@ts-ignore
+	const handles = process._getActiveHandles();
+	//@ts-ignore
+	const requests = process._getActiveRequests();
 
-	// @ts-ignore
-	const activeRequests = process._getActiveRequests()
-	console.log('Active Requests:', activeRequests.length)
-	activeRequests.forEach((request: any, index: number) => {
-		console.log(`Request ${index + 1}:`, request.constructor.name)
-	})
+	console.log('Active Handles:', inspect(handles, { depth: 1 }));
+	console.log('Active Requests:', inspect(requests, { depth: 1 }));
 }

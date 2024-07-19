@@ -184,7 +184,7 @@ export async function createInstance(
 }
 
 export async function disposeInstance(instance: GPT4AllInstance) {
-	return instance.dispose()
+	instance.dispose()
 }
 
 export async function processTextCompletionTask(
@@ -221,6 +221,7 @@ export async function processTextCompletionTask(
 		// so not falling back to them here.
 		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // https://github.com/nomic-ai/gpt4all/issues/1952
+		// @ts-ignore
 		onResponseToken: (tokenId, text) => {
 			const matchingTrigger = includesStopTriggers(text)
 			if (matchingTrigger) {
@@ -331,6 +332,7 @@ export async function processChatCompletionTask(
 		repeatLastN: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,
 		repeatPenalty: request.repeatPenalty ?? defaults.repeatPenalty,
 		// seed: args.seed, // see https://github.com/nomic-ai/gpt4all/issues/1952
+		// @ts-ignore
 		onResponseToken: (tokenId, text) => {
 			const matchingTrigger = includesStopTriggers(text)
 			if (matchingTrigger) {

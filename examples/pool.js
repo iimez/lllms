@@ -3,7 +3,7 @@ import path from 'node:path'
 import chalk from 'chalk'
 import { ModelPool } from '#lllms/index.js'
 import { elapsedMillis } from '#lllms/lib/util.js'
-import * as GPT4AllEngine from '#lllms/engines/gpt4all/engine.js'
+import * as LlamaCppEngine from '#lllms/engines/node-llama-cpp/engine.js'
 
 // Complete multiple prompts concurrently using ModelPool.
 
@@ -17,7 +17,7 @@ async function onPrepareInstance(instance) {
 const pool = new ModelPool(
 	{
 		// to see what's going on, set the log level to 'debug'
-		log: 'debug',
+		// log: 'debug',
 		// global processing concurrency limit, across all instances of all models
 		concurrency: 2,
 		models: {
@@ -26,9 +26,9 @@ const pool = new ModelPool(
 				// note that this path needs to be absolute and the file needs to be downloaded beforehand.
 				location: path.resolve(
 					os.homedir(),
-					'.cache/lllms/gpt4all.io/Phi-3-mini-4k-instruct.Q4_0.gguf',
+					'.cache/lllms/huggingface/bartowski/Phi-3.1-mini-4k-instruct-GGUF-main/Phi-3.1-mini-4k-instruct-Q4_K_M.gguf',
 				),
-				engine: 'gpt4all',
+				engine: 'node-llama-cpp',
 				minInstances: 1, // setting this to something greater 0 will load the model on pool.init()
 				maxInstances: 2, // allow the pool to spawn additional instances of this model
 			},
@@ -37,9 +37,13 @@ const pool = new ModelPool(
 	onPrepareInstance,
 )
 
+process.on('exit', () => {
+	pool.dispose()
+})
+
 console.log('Initializing pool...')
 await pool.init({
-	gpt4all: GPT4AllEngine,
+	'node-llama-cpp': LlamaCppEngine,
 })
 
 async function createCompletion(prompt) {

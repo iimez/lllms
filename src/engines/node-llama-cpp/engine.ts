@@ -303,7 +303,7 @@ export async function createInstance(
 }
 
 export async function disposeInstance(instance: NodeLlamaCppInstance) {
-	instance.model.dispose()
+	await instance.model.dispose()
 }
 
 export async function processChatCompletionTask(

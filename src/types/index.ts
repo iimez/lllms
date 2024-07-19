@@ -124,6 +124,7 @@ export interface SpeechToTextRequest {
 
 export interface ModelRequestMeta {
 	sequence: number
+	abortController: AbortController
 }
 export type IncomingRequest =
 	| TextCompletionRequest

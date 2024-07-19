@@ -50,7 +50,7 @@ export class ModelInstance<TEngineState = unknown> {
 	private needsContextReset: boolean = false
 	private engineInstance?: TEngineState | unknown
 	private currentRequest?: ModelInstanceRequest | null
-	private disposeController: AbortController
+	private shutdownController: AbortController
 
 	constructor(
 		engine: ModelEngine,
@@ -67,7 +67,7 @@ export class ModelInstance<TEngineState = unknown> {
 		this.log = withLogMeta(log ?? createLogger(LogLevels.warn), {
 			instance: this.id,
 		})
-		this.disposeController = new AbortController()
+		this.shutdownController = new AbortController()
 
 		// TODO to implement this properly we should only include what changes the "behavior" of the model
 		this.fingerprint = crypto
@@ -96,6 +96,10 @@ export class ModelInstance<TEngineState = unknown> {
 		}
 		this.status = 'loading'
 		const loadBegin = process.hrtime.bigint()
+		const abortSignal = mergeAbortSignals([
+			this.shutdownController.signal,
+			signal,
+		])
 		try {
 			this.engineInstance = await this.engine.createInstance(
 				{
@@ -110,7 +114,7 @@ export class ModelInstance<TEngineState = unknown> {
 						},
 					},
 				},
-				signal,
+				abortSignal,
 			)
 			this.status = 'idle'
 			if (this.config.preload) {
@@ -132,12 +136,13 @@ export class ModelInstance<TEngineState = unknown> {
 		}
 	}
 
-	async dispose() {
+	dispose() {
 		this.status = 'busy'
-		this.disposeController.abort()
-		if (this.engineInstance) {
-			await this.engine.disposeInstance(this.engineInstance)
+		if (!this.engineInstance) {
+			return Promise.resolve()
 		}
+		this.shutdownController.abort()
+		return this.engine.disposeInstance(this.engineInstance)
 	}
 
 	lock(request: ModelInstanceRequest) {
@@ -189,7 +194,7 @@ export class ModelInstance<TEngineState = unknown> {
 	}) {
 		const cancelController = new AbortController()
 		const timeoutController = new AbortController()
-		const abortSignals = [cancelController.signal, this.disposeController.signal]
+		const abortSignals = [cancelController.signal, this.shutdownController.signal]
 		if (args.signal) {
 			abortSignals.push(args.signal)
 		}

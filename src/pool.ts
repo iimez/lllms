@@ -1,3 +1,4 @@
+import process from 'node:process'
 import PQueue from 'p-queue'
 import EventEmitter3 from 'eventemitter3'
 import { ModelInstance } from '#lllms/instance.js'
@@ -13,6 +14,7 @@ import {
 	createSublogger,
 	LogLevel,
 } from '#lllms/lib/logger.js'
+import { mergeAbortSignals } from '#lllms/lib/util.js'
 
 export interface ModelInstanceHandle {
 	instance: ModelInstance
@@ -50,7 +52,8 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	private cleanupInterval?: NodeJS.Timeout
 	private log: Logger
 	private requestSequence: number = 0
-	private waitingRequests: number = 0 // TODO should keep requests around so connections can be canceled on dispose?
+	private pendingRequests: Set<ModelInstanceRequest> = new Set()
+	private shutdownController: AbortController = new AbortController()
 	private gpuLock: boolean = false // TODO could derive this from "is there any instance that has gpu=true"
 	private prepareInstance?: PrepareModelInstanceCallback
 
@@ -143,12 +146,21 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 	}
 
 	async dispose() {
-		this.log(LogLevels.info, 'Disposing pool')
+		this.log(LogLevels.debug, 'Disposing pool')
 		clearInterval(this.cleanupInterval)
-		const disposePromises = Object.values(this.instances).map((instance) =>
-			instance.dispose(),
-		)
-		await Promise.all(disposePromises)
+		super.removeAllListeners()
+		this.queue.pause()
+		this.queue.clear()
+		this.shutdownController.abort()
+		for (const request of this.pendingRequests) {
+			request.abortController.abort()
+		}
+		const disposePromises: Array<Promise<void>> = []
+		for (const key in this.instances) {
+			const instance = this.instances[key]
+			disposePromises.push(this.disposeInstance(instance))
+		}
+		await Promise.allSettled(disposePromises)
 	}
 
 	// disposes instances that have been idle for longer than their ttl
@@ -170,9 +182,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 				this.log(LogLevels.info, 'Auto disposing instance', {
 					instance: instance.id,
 				})
-				this.disposeInstance(instance).then(() => {
-					delete this.instances[key]
-				})
+				this.disposeInstance(instance)
 			}
 		}
 	}
@@ -183,7 +193,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		)
 		const poolStatusInfo = {
 			processing: processingInstances.length,
-			waiting: this.waitingRequests,
+			pending: this.pendingRequests.size,
 			instances: Object.fromEntries(
 				Object.entries(this.instances).map(([key, instance]) => {
 					return [
@@ -254,6 +264,9 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		}
 		const model = this.config.models[modelId]
 		const engine = this.engines[model.engine]
+		if (!engine) {
+			throw new Error(`Engine not found: ${model.engine}`)
+		}
 		const autoGpuEnabled = !!engine.autoGpu
 
 		// if the model is configured with gpu=auto (or unset), we can use the gpu if its not locked
@@ -275,12 +288,17 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		if (useGpu) {
 			this.gpuLock = true
 		}
+		const signals = [this.shutdownController.signal]
+		if (options.signal) {
+			signals.push(options.signal)
+		}
+		const abortSignal = mergeAbortSignals(signals)
 		if (this.prepareInstance) {
 			this.log(LogLevels.debug, 'Preparing instance', {
 				instance: instance.id,
 			})
 			try {
-				await this.prepareInstance(instance, options?.signal)
+				await this.prepareInstance(instance, abortSignal)
 				instance.status = 'idle'
 			} catch (error) {
 				console.error('Error preparing instance', error)
@@ -293,7 +311,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 				return instance
 			}
 		}
-		await instance.load(options?.signal)
+		await instance.load(abortSignal)
 		if (options.emit !== false) {
 			this.emit('spawn', instance)
 		}
@@ -539,10 +557,14 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		incomingRequest: IncomingRequest,
 		signal?: AbortSignal,
 	): Promise<ModelInstanceHandle> {
+		if (this.shutdownController.signal.aborted) {
+			throw new Error('Pool is disposed')
+		}
 		const requestSequence = this.createRequestSequence()
 		const request = {
 			...incomingRequest,
 			sequence: requestSequence,
+			abortController: new AbortController(),
 		}
 		if (!this.config.models[request.model]) {
 			this.log(LogLevels.error, `Model not found: ${request.model}`)
@@ -554,8 +576,19 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			sequence: request.sequence,
 		})
 
-		this.waitingRequests++
-		const instance = await this.acquireInstance(request, signal)
+		this.pendingRequests.add(request)
+		const abortSignal = mergeAbortSignals([
+			request.abortController.signal,
+			signal,
+		])
+		abortSignal.addEventListener('abort', () => {
+			this.log(LogLevels.info, 'Request aborted', {
+				model: request.model,
+				sequence: request.sequence,
+			})
+			this.pendingRequests.delete(request)
+		})
+		const instance = await this.acquireInstance(request, abortSignal)
 
 		// once instance is acquired & locked, we can pass it on to the caller
 		// the queue task promise will be forwarded as releaseInstance
@@ -563,14 +596,14 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 
 		this.queue
 			.add((): Promise<ModelTask> => {
-				this.waitingRequests--
+				this.pendingRequests.delete(request)
 				return new Promise((resolve, reject) => {
 					resolveQueueTask = resolve
 				})
 			})
 			.then((task) => {
 				// if theres more requests waiting, prioritize handling them first
-				if (!this.waitingRequests && this.canSpawnInstance(request.model)) {
+				if (!this.pendingRequests.size && this.canSpawnInstance(request.model)) {
 					this.spawnInstance(request.model)
 				}
 				if (task?.instance) {

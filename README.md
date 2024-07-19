@@ -154,19 +154,18 @@ Not in any particular order:
 - [x] See if we can install supported engines as peer deps
 - [x] Improve types, simpler node-llama-cpp grammar integration
 - [x] Restructure docs, add function calling & grammar usage docs
+- [x] TTL=0 should immediately dispose of instances instead of waiting (currently on avg 30s) for the next TTL check
+- [x] Expose node-llama-cpp context shift strategy, lora, allow json schema as input for `grammar`
+- [x] Improve types for tool definitions / json schema
+- [x] Make pool dispose / stop more robust
 - [ ] Support transformer.js for text-completion and embedding tasks
 - [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
-- [ ] Make pool dispose / stop more robust
 - [ ] Tests for cancellation and timeouts
 - [ ] Context cache improvement: Reuse existing context even if the incoming suffix/difference is more than one message
 - [ ] non-chat text completions: Allow reuse of context
 - [ ] non-chat text completions: Support preloading of prefixes
 - [ ] Infill completion support https://github.com/withcatai/node-llama-cpp/blob/beta/src/evaluator/LlamaCompletion.ts#L322-L336
-- [ ] TTL=0 should immediately dispose of instances instead of waiting (currently on avg 30s) for the next TTL check
-- [ ] Log more task metadata
-- [ ] Expose node-llama-cpp context shift strategy, lora, allow json schema as input for `grammar`
 - [ ] Find a way to type available custom engines (and their options?)
-- [ ] Improve types for tool definitions / json schema
 - [ ] Rework GPU+device usage / lock (Support multiple models on gpu in cases where its possible)
 - [ ] Add engine interfaces for resource use (and estimates, see https://github.com/ggerganov/llama.cpp/issues/4315 and https://github.com/withcatai/node-llama-cpp/blob/beta/src/gguf/insights/utils/resolveContextContextSizeOption.ts)
 - [ ] Allow configuring a pools max memory usage

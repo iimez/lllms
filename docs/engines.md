@@ -23,4 +23,4 @@ Currently supporting `speech-to-text` and `image-to-text` tasks. Peer dependency
 
 #### Custom Engines
 
-You can also write your own engine implementation. See [./src/engines](./src/engines) for how the built-in engines are implemented and [here](./tests/engines/custom.test.ts) for examples of how to utilize custom engines to combine models and add multimodality to your chat completion endpoint. (Or to any other consumer of the ModelServer class.) Multiple ModelServers are allowed and can also be nested to create more complex pipelines.
+You can also write your own engine implementation. See [./src/engines](./src/engines) for how the built-in engines are implemented and [here](./tests/engines/experiments.test.ts) for examples of how to utilize custom engines to combine models and add multimodality to your chat completion endpoint. (Or to any other consumer of the ModelServer class.) Multiple ModelServers are allowed and can also be nested to create more complex pipelines.

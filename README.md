@@ -94,7 +94,7 @@ server.stop()
 
 More usage examples:
 - Using all available options / model options API doc [./examples/all-options](./examples/all-options.js).
-- Custom engines [./tests/engines/custom.test.ts](./tests/engines/custom.test.ts).
+- Custom engines [./tests/engines/experiments.test.ts](./tests/engines/experiments.test.ts).
 - A chat cli [./examples/chat-cli](./examples/chat-cli.js).
 - `concurrency` behavior [./examples/concurrency](./examples/concurrency.js).
 - Using the ModelPool directly [./examples/pool](./examples/pool.js).
@@ -172,7 +172,7 @@ Not in any particular order:
 - [ ] Logprobs support
 - [ ] Add transcript endpoint in oai api
 - [ ] Add `n` parameter support to node-llama-cpp chat completions
-- [ ] [CLI](./src/cli.ts)
+- [ ] [CLI](https://github.com/iimez/lllms/discussions/7)
 - [ ] Replace express with tinyhttp?
 
 ### Contributing

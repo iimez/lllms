@@ -1,4 +1,4 @@
-import crypto from 'node:crypto'
+import crypto, { sign } from 'node:crypto'
 import { customAlphabet } from 'nanoid'
 import {
 	TextCompletionRequest,
@@ -12,6 +12,8 @@ import {
 	ProcessingOptions,
 	SpeechToTextRequest,
 	SpeechToTextProcessingOptions,
+	EngineChatCompletionResult,
+	EngineTextCompletionResult,
 } from '#lllms/types/index.js'
 import { calculateChatIdentity } from '#lllms/lib/calculateChatIdentity.js'
 import {
@@ -194,20 +196,26 @@ export class ModelInstance<TEngineState = unknown> {
 	}) {
 		const cancelController = new AbortController()
 		const timeoutController = new AbortController()
-		const abortSignals = [cancelController.signal, this.shutdownController.signal]
+		const abortSignals = [
+			cancelController.signal,
+			this.shutdownController.signal,
+		]
 		if (args.signal) {
 			abortSignals.push(args.signal)
 		}
 		let timeout: NodeJS.Timeout | undefined
 		if (args.timeout) {
 			timeout = setTimeout(() => {
-				timeoutController.abort()
+				timeoutController.abort('timeout')
 			}, args.timeout)
 			abortSignals.push(timeoutController.signal)
 		}
 		return {
 			cancel: () => {
-				cancelController.abort()
+				cancelController.abort('cancel')
+				if (timeout) {
+					clearTimeout(timeout)
+				}
 			},
 			complete: () => {
 				if (timeout) {
@@ -216,6 +224,7 @@ export class ModelInstance<TEngineState = unknown> {
 			},
 			signal: mergeAbortSignals(abortSignals),
 			timeoutSignal: timeoutController.signal,
+			cancelSignal: cancelController.signal,
 		}
 	}
 
@@ -261,27 +270,53 @@ export class ModelInstance<TEngineState = unknown> {
 			},
 			this.engineInstance,
 			controller.signal,
-		).then((result) => {
-			const elapsedTime = elapsedMillis(taskBegin)
-			controller.complete()
-			if (controller.timeoutSignal.aborted) {
-				taskLogger(LogLevels.warn, 'Chat completion task timed out')
-				result.finishReason = 'timeout'
-			}
-			this.contextStateIdentity = calculateChatIdentity([
-				...request.messages,
-				result.message,
-			])
-			taskLogger(LogLevels.info, 'Chat completion done', {
-				elapsed: elapsedTime,
+		)
+			.then((result) => {
+				if (controller.timeoutSignal.aborted) {
+					result.finishReason = 'timeout'
+				} else if (controller.cancelSignal.aborted) {
+					result.finishReason = 'cancel'
+				}
+				this.contextStateIdentity = calculateChatIdentity([
+					...request.messages,
+					result.message,
+				])
+				return result
 			})
-			return result
-		}).catch((error) => {
-			taskLogger(LogLevels.error, 'Task failed - ', {
-				error,
+			.catch((error) => {
+				if (error.name === 'AbortError') {
+					const emptyResponse: EngineChatCompletionResult = {
+						finishReason: 'abort',
+						message: {
+							role: 'assistant',
+							content: '',
+						},
+						promptTokens: 0,
+						completionTokens: 0,
+						totalTokens: 0,
+					}
+					if (controller.timeoutSignal.aborted) {
+						emptyResponse.finishReason = 'timeout'
+						return emptyResponse
+					}
+					if (controller.cancelSignal.aborted) {
+						emptyResponse.finishReason = 'cancel'
+						return emptyResponse
+					}
+					return emptyResponse
+				}
+				taskLogger(LogLevels.error, 'Error while processing task - ', {
+					error,
+				})
+				throw error
 			})
-			throw error
-		})
+			.finally(() => {
+				const elapsedTime = elapsedMillis(taskBegin)
+				controller.complete()
+				taskLogger(LogLevels.info, 'Chat completion task done', {
+					elapsed: elapsedTime,
+				})
+			})
 		return {
 			id,
 			model: this.modelId,
@@ -324,27 +359,50 @@ export class ModelInstance<TEngineState = unknown> {
 			},
 			this.engineInstance,
 			controller.signal,
-		).then((result) => {
-			// TODO allow continueing / caching prefix for text completions?
-			// this.contextStateHash = calculateChatIdentity({
-			// 	prompt: request.prompt,
-			// })
-			const elapsedTime = elapsedMillis(taskBegin)
-			controller.complete()
-			if (controller.timeoutSignal.aborted) {
-				taskLogger(LogLevels.warn, 'Text completion task timed out')
-				result.finishReason = 'timeout'
-			}
-			taskLogger(LogLevels.verbose, 'Text completion task done', {
-				elapsed: elapsedTime,
+		)
+			.then((result) => {
+				if (controller.timeoutSignal.aborted) {
+					result.finishReason = 'timeout'
+				} else if (controller.cancelSignal.aborted) {
+					result.finishReason = 'cancel'
+				}
+				// TODO allow continueing / caching prefix for text completions?
+				// this.contextStateIdentity = calculateChatIdentity([
+				// 	prompt: request.prompt,
+				// ])
+				return result
 			})
-			return result
-		}).catch((error) => {
-			taskLogger(LogLevels.error, 'Task failed - ', {
-				error,
+			.catch((error) => {
+				if (error.name === 'AbortError') {
+					const emptyResponse: EngineTextCompletionResult = {
+						finishReason: 'abort',
+						text: '',
+						promptTokens: 0,
+						completionTokens: 0,
+						totalTokens: 0,
+					}
+					if (controller.timeoutSignal.aborted) {
+						emptyResponse.finishReason = 'timeout'
+						return emptyResponse
+					}
+					if (controller.cancelSignal.aborted) {
+						emptyResponse.finishReason = 'cancel'
+						return emptyResponse
+					}
+					return emptyResponse
+				}
+				taskLogger(LogLevels.error, 'Error while processing task - ', {
+					error,
+				})
+				throw error
 			})
-			throw error
-		})
+			.finally(() => {
+				const elapsedTime = elapsedMillis(taskBegin)
+				controller.complete()
+				taskLogger(LogLevels.info, 'Text completion task done', {
+					elapsed: elapsedTime,
+				})
+			})
 		return {
 			id,
 			model: this.modelId,
@@ -383,22 +441,24 @@ export class ModelInstance<TEngineState = unknown> {
 			},
 			this.engineInstance,
 			controller.signal,
-		).then((result) => {
-			const timeElapsed = elapsedMillis(taskBegin)
-			controller.complete()
-			if (controller.timeoutSignal.aborted) {
-				taskLogger(LogLevels.warn, 'Embedding task timed out')
-			}
-			taskLogger(LogLevels.verbose, 'Embedding task done', {
-				elapsed: timeElapsed,
+		)
+			.then((result) => {
+				const timeElapsed = elapsedMillis(taskBegin)
+				controller.complete()
+				if (controller.timeoutSignal.aborted) {
+					taskLogger(LogLevels.warn, 'Embedding task timed out')
+				}
+				taskLogger(LogLevels.verbose, 'Embedding task done', {
+					elapsed: timeElapsed,
+				})
+				return result
 			})
-			return result
-		}).catch((error) => {
-			taskLogger(LogLevels.error, 'Task failed - ', {
-				error,
+			.catch((error) => {
+				taskLogger(LogLevels.error, 'Task failed - ', {
+					error,
+				})
+				throw error
 			})
-			throw error
-		})
 
 		return {
 			id,
@@ -437,22 +497,24 @@ export class ModelInstance<TEngineState = unknown> {
 			},
 			this.engineInstance,
 			controller.signal,
-		).then((result) => {
-			const timeElapsed = elapsedMillis(taskBegin)
-			controller.complete()
-			if (controller.timeoutSignal.aborted) {
-				taskLogger(LogLevels.warn, 'ImageToText task timed out')
-			}
-			taskLogger(LogLevels.verbose, 'ImageToText task done', {
-				elapsed: timeElapsed,
+		)
+			.then((result) => {
+				const timeElapsed = elapsedMillis(taskBegin)
+				controller.complete()
+				if (controller.timeoutSignal.aborted) {
+					taskLogger(LogLevels.warn, 'ImageToText task timed out')
+				}
+				taskLogger(LogLevels.verbose, 'ImageToText task done', {
+					elapsed: timeElapsed,
+				})
+				return result
 			})
-			return result
-		}).catch((error) => {
-			taskLogger(LogLevels.error, 'Task failed - ', {
-				error,
+			.catch((error) => {
+				taskLogger(LogLevels.error, 'Task failed - ', {
+					error,
+				})
+				throw error
 			})
-			throw error
-		})
 
 		return {
 			id,
@@ -462,7 +524,7 @@ export class ModelInstance<TEngineState = unknown> {
 			result,
 		}
 	}
-	
+
 	processSpeechToTextTask(
 		request: SpeechToTextRequest,
 		options?: SpeechToTextProcessingOptions,
@@ -491,22 +553,24 @@ export class ModelInstance<TEngineState = unknown> {
 			},
 			this.engineInstance,
 			controller.signal,
-		).then((result) => {
-			const timeElapsed = elapsedMillis(taskBegin)
-			controller.complete()
-			if (controller.timeoutSignal.aborted) {
-				taskLogger(LogLevels.warn, 'SpeechToText task timed out')
-			}
-			taskLogger(LogLevels.verbose, 'SpeechToText task done', {
-				elapsed: timeElapsed,
+		)
+			.then((result) => {
+				const timeElapsed = elapsedMillis(taskBegin)
+				controller.complete()
+				if (controller.timeoutSignal.aborted) {
+					taskLogger(LogLevels.warn, 'SpeechToText task timed out')
+				}
+				taskLogger(LogLevels.verbose, 'SpeechToText task done', {
+					elapsed: timeElapsed,
+				})
+				return result
 			})
-			return result
-		}).catch((error) => {
-			taskLogger(LogLevels.error, 'Task failed - ', {
-				error,
+			.catch((error) => {
+				taskLogger(LogLevels.error, 'Task failed - ', {
+					error,
+				})
+				throw error
 			})
-			throw error
-		})
 
 		return {
 			id,

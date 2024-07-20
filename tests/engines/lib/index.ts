@@ -10,3 +10,5 @@ export * from './context-shift-generate.js'
 export * from './context-shift-ingest.js'
 
 export * from './ingest-file.js'
+
+export * from './cancel-timeout.js'

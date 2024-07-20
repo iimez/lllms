@@ -1,7 +1,7 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'node:fs'
 import { ModelServer } from '#lllms/server.js'
-import { ChatMessage, ModelOptions } from '#lllms/types/index.js'
+import { ChatCompletionRequest, ChatMessage, ModelOptions } from '#lllms/types/index.js'
 import {
 	runStopTriggerTest,
 	runTokenBiasTest,
@@ -17,6 +17,8 @@ import {
 	runBuiltInGrammarTest,
 	runRawGBNFGrammarTest,
 	runJsonSchemaGrammarTest,
+	runTimeoutTest,
+	runCancellationTest,
 } from './lib/index.js'
 import { createChatCompletion } from '../util.js'
 
@@ -272,5 +274,30 @@ suite('ingest', () => {
 	test('a large website', async () => {
 		const res = await runFileIngestionTest(llms, 'github')
 		expect(res.message.content).toMatch(/github|html/i)
+	})
+})
+
+suite('timeout and cancellation', () => {
+	const llms = new ModelServer({
+		log: 'debug',
+		models: {
+			'test': {
+				...testModel,
+				minInstances: 1,
+				device: { gpu: true },
+			},
+		},
+	})
+	beforeAll(async () => {
+		await llms.start()
+	})
+	afterAll(async () => {
+		await llms.stop()
+	})
+	test('timeout', async () => {
+		await runTimeoutTest(llms)
+	})
+	test('cancellation', async () => {
+		await runCancellationTest(llms)
 	})
 })

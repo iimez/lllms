@@ -11,8 +11,8 @@ import {
 	ModelEngine,
 	ModelOptions,
 } from '#lllms/types/index.js'
-import { ChatWithVisionEngine } from '#lllms/lib/custom-engines/ChatWithVision.js'
-import { VoiceFunctionCallEngine } from '#lllms/lib/custom-engines/VoiceFunctionCall.js'
+import { ChatWithVisionEngine } from '#lllms/experiments/ChatWithVision.js'
+import { VoiceFunctionCallEngine } from '#lllms/experiments/VoiceFunctionCall.js'
 import { createChatCompletion } from '../util'
 
 suite('chat with vision', () => {

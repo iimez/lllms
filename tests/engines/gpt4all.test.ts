@@ -1,28 +1,45 @@
 import { suite, it, test, beforeAll, afterAll, expect } from 'vitest'
 import { ModelServer } from '#lllms/server.js'
-import { ChatCompletionRequest, ChatMessage, ModelOptions } from '#lllms/types/index.js'
+import {
+	ChatCompletionRequest,
+	ChatMessage,
+	ModelOptions,
+} from '#lllms/types/index.js'
 import {
 	runContextLeakTest,
 	runContextReuseTest,
 	runStopTriggerTest,
 	runSystemMessageTest,
+	runTimeoutTest,
+	runCancellationTest,
 } from './lib/index.js'
 
-const models: Record<string, ModelOptions> = {
-	test: {
-		task: 'text-completion',
-		url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
-		md5: 'f8347badde9bfc2efbe89124d78ddaf5',
-		engine: 'gpt4all',
-		prepare: 'blocking',
-		maxInstances: 2,
-	},
+// const models: Record<string, ModelOptions> = {
+// 	test: {
+// 		task: 'text-completion',
+// 		url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+// 		md5: 'f8347badde9bfc2efbe89124d78ddaf5',
+// 		engine: 'gpt4all',
+// 		prepare: 'blocking',
+// 		maxInstances: 2,
+// 	},
+// }
+
+const testModel: ModelOptions = {
+	task: 'text-completion',
+	url: 'https://gpt4all.io/models/gguf/Phi-3-mini-4k-instruct.Q4_0.gguf',
+	md5: 'f8347badde9bfc2efbe89124d78ddaf5',
+	engine: 'gpt4all',
+	prepare: 'blocking',
+	maxInstances: 2,
 }
 
 suite('features', () => {
 	const llms = new ModelServer({
 		// log: 'debug',
-		models,
+		models: {
+			test: testModel,
+		},
 	})
 
 	beforeAll(async () => {
@@ -44,7 +61,9 @@ suite('features', () => {
 suite('cache', () => {
 	const llms = new ModelServer({
 		// log: 'debug',
-		models,
+		models: {
+			test: testModel,
+		},
 	})
 
 	beforeAll(async () => {
@@ -112,10 +131,12 @@ suite('preload', () => {
 				},
 			],
 		}
-		
+
 		const lock = await llms.pool.requestInstance(args)
+
 		// @ts-ignore
-		const internalMessages = lock.instance.engineInstance.activeChatSession.messages
+		const activeSession = lock.instance.engineInstance.activeChatSession
+		const internalMessages = activeSession.messages
 		expect(internalMessages.length).toBe(2)
 		await lock.release()
 	})
@@ -130,7 +151,7 @@ suite('preload', () => {
 				},
 			],
 		}
-		
+
 		const lock = await llms.pool.requestInstance(args)
 
 		// const internalMessagesBefore = lock.instance.llm.activeChatSession.messages
@@ -142,10 +163,36 @@ suite('preload', () => {
 		await handle.result
 		await lock.release()
 		// @ts-ignore
-		const internalMessagesAfter = lock.instance.engineInstance.activeChatSession.messages
+		const activeSession = lock.instance.engineInstance.activeChatSession
+		const internalMessagesAfter = activeSession.messages
 		// console.debug({
 		// 	internalMessagesAfter,
 		// })
-		expect(internalMessagesAfter[1].content).not.toBe('It\'s 5!')
+		expect(internalMessagesAfter[1].content).not.toBe("It's 5!")
+	})
+})
+
+suite('timeout and cancellation', () => {
+	const llms = new ModelServer({
+		log: 'debug',
+		models: {
+			test: {
+				...testModel,
+				minInstances: 1,
+				device: { gpu: true },
+			},
+		},
+	})
+	beforeAll(async () => {
+		await llms.start()
+	})
+	afterAll(async () => {
+		await llms.stop()
+	})
+	test('timeout', async () => {
+		await runTimeoutTest(llms)
+	})
+	test('cancellation', async () => {
+		await runCancellationTest(llms)
 	})
 })

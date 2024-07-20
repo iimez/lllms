@@ -95,10 +95,7 @@ export interface NodeLlamaCppModelConfig extends ModelConfig {
 export const autoGpu = true
 
 export async function prepareModel(
-	{
-		config,
-		log,
-	}: EngineContext<NodeLlamaCppModelConfig>,
+	{ config, log }: EngineContext<NodeLlamaCppModelConfig>,
 	onProgress?: (progress: FileDownloadProgress) => void,
 	signal?: AbortSignal,
 ) {
@@ -144,11 +141,9 @@ export async function prepareModel(
 			],
 		}),
 	]
-	
+
 	if (config.sha256) {
-		postDownloadPromises.push(
-			calculateFileChecksum(config.location, 'sha256'),
-		)
+		postDownloadPromises.push(calculateFileChecksum(config.location, 'sha256'))
 	}
 	const [gguf, fileHash] = await Promise.all(postDownloadPromises)
 	if (config.sha256 && fileHash !== config.sha256) {
@@ -162,18 +157,13 @@ export async function prepareModel(
 	}
 }
 
-
 export async function createInstance(
-	{
-		config,
-		log,
-	}: EngineContext<NodeLlamaCppModelConfig>,
+	{ config, log }: EngineContext<NodeLlamaCppModelConfig>,
 	signal?: AbortSignal,
 ) {
 	log(LogLevels.debug, 'Load Llama model', config.device)
 	// takes "auto" | "metal" | "cuda" | "vulkan"
-	const gpuSetting = (config.device?.gpu ??
-		'auto') as LlamaOptions['gpu']
+	const gpuSetting = (config.device?.gpu ?? 'auto') as LlamaOptions['gpu']
 	const llama = await getLlama({
 		gpu: gpuSetting,
 		// forwarding llama logger
@@ -196,7 +186,7 @@ export async function createInstance(
 	})
 
 	const llamaGrammars: Record<string, LlamaGrammar> = {
-		'json': await LlamaGrammar.getFor(llama, 'json'),
+		json: await LlamaGrammar.getFor(llama, 'json'),
 	}
 
 	if (config.grammars) {
@@ -208,7 +198,10 @@ export async function createInstance(
 				})
 			} else {
 				// assume input is a JSON schema object
-				llamaGrammars[key] = new LlamaJsonSchemaGrammar(llama, input as GbnfJsonSchema)
+				llamaGrammars[key] = new LlamaJsonSchemaGrammar(
+					llama,
+					input as GbnfJsonSchema,
+				)
 			}
 		}
 	}
@@ -484,9 +477,7 @@ export async function processChatCompletionTask(
 				functions: inputFunctions,
 				documentFunctionParams: true,
 				maxParallelFunctionCalls: 2,
-				onFunctionCall: (
-					functionCall: LlamaChatResponseFunctionCall<any>,
-				) => {
+				onFunctionCall: (functionCall: LlamaChatResponseFunctionCall<any>) => {
 					// log(LogLevels.debug, 'Called function', functionCall)
 				},
 		  }
@@ -501,6 +492,7 @@ export async function processChatCompletionTask(
 			metadata,
 		} = await instance.chat.generateResponse(newChatHistory, {
 			signal,
+			stopOnAbortSignal: true, // this will make aborted completions resolve (with a partial response)
 			maxTokens: request.maxTokens ?? defaults.maxTokens,
 			temperature: request.temperature ?? defaults.temperature,
 			topP: request.topP ?? defaults.topP,
@@ -509,7 +501,6 @@ export async function processChatCompletionTask(
 			tokenBias,
 			customStopTriggers,
 			trimWhitespaceSuffix: false,
-			stopOnAbortSignal: true,
 			...functionsOrGrammar,
 			repeatPenalty: {
 				lastTokens: request.repeatPenaltyNum ?? defaults.repeatPenaltyNum,

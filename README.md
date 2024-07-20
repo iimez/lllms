@@ -158,9 +158,9 @@ Not in any particular order:
 - [x] Expose node-llama-cpp context shift strategy, lora, allow json schema as input for `grammar`
 - [x] Improve types for tool definitions / json schema
 - [x] Make pool dispose / stop more robust
+- [x] Tests for cancellation and timeouts
 - [ ] Support transformer.js for text-completion and embedding tasks
 - [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
-- [ ] Tests for cancellation and timeouts
 - [ ] Context cache improvement: Reuse existing context even if the incoming suffix/difference is more than one message
 - [ ] non-chat text completions: Allow reuse of context
 - [ ] non-chat text completions: Support preloading of prefixes

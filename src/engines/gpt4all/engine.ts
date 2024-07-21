@@ -104,6 +104,11 @@ export async function prepareModel(
 		if (signal?.aborted) {
 			return
 		}
+		log(LogLevels.info, 'Downloading', {
+			model: config.id,
+			url: config.url,
+			location: config.location,
+		})
 		await downloadLargeFile({
 			url: config.url,
 			file: config.location,

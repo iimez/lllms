@@ -1,5 +1,7 @@
 import { promises as fs, existsSync } from 'node:fs'
 import PQueue from 'p-queue'
+import prettyMilliseconds from 'pretty-ms'
+import prettyBytes from 'pretty-bytes'
 import {
 	FileDownloadProgress,
 	ModelConfig,
@@ -131,7 +133,9 @@ export class ModelStore {
 					)
 				if (progress.totalBytes) {
 					const percent = (progress.loadedBytes / progress.totalBytes) * 100
-					this.log(LogLevels.info, `downloading ${percent.toFixed(1)}%`, {
+					const formattedTotalBytes = prettyBytes(progress.totalBytes, { space: false })
+					const formattedLoadedBytes = prettyBytes(progress.loadedBytes, { space: false })
+					this.log(LogLevels.info, `Downloading at ${percent.toFixed(1)}% - ${formattedLoadedBytes} of ${formattedTotalBytes}`, {
 						model: modelId,
 					})
 				}
@@ -174,14 +178,22 @@ export class ModelStore {
 							const status = download.getStatus()
 							const latestState =
 								download.progressBuffer[download.progressBuffer.length - 1]
-							// console.log('latestState', latestState)
+							const totalBytes = latestState?.totalBytes ?? 0
+							const loadedBytes = latestState?.loadedBytes ?? 0
+							const eta = status?.eta ?? 0
+							const formattedEta = prettyMilliseconds(eta)
+							const formattedTotalBytes = prettyBytes(totalBytes)
+							const formattedLoadedBytes = prettyBytes(loadedBytes)
 							acc.push({
 								file: key,
-								...status,
+								loadedBytes,
+								formattedLoadedBytes,
+								totalBytes,
+								formattedTotalBytes,
 								percent: formatFloat(status?.percent),
 								speed: formatFloat(status?.speed),
-								eta: formatFloat(status?.eta),
-								// latest: latestState,
+								eta: formatFloat(eta),
+								formattedEta,
 							})
 							return acc
 						},

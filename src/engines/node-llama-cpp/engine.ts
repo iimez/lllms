@@ -108,7 +108,8 @@ export async function prepareModel(
 		if (!config.url) {
 			throw new Error(`Cannot download "${config.id}" - no URL configured`)
 		}
-		log(LogLevels.info, `Downloading ${config.id}`, {
+		log(LogLevels.info, 'Downloading', {
+			model: config.id,
 			url: config.url,
 			location: config.location,
 		})

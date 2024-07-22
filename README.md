@@ -173,7 +173,7 @@ Not in any particular order:
 - [ ] Add transcript endpoint in oai api
 - [ ] Add `n` parameter support to node-llama-cpp chat completions
 - [ ] [CLI](https://github.com/iimez/lllms/discussions/7)
-- [ ] Replace express with tinyhttp?
+- [ ] Replace express with tinyhttp
 
 ### Contributing
 
@@ -181,7 +181,7 @@ If you know how to fill in any of the above checkboxes or have additional ideas 
 
 #### Possible Future Goals
 
-- Create a separate HTTP API thats independent of the OpenAI spec and stateful.
+- Create a separate HTTP API thats independent of the OpenAI spec and stateful. See [discussion](https://github.com/iimez/lllms/discussions/8).
 - Add a clientside library (React hooks?) for use of above API.
 - Provide a Docker image. And maybe a Prometheus endpoint.
 

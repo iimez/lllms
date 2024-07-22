@@ -1,11 +1,16 @@
-### Llama.cpp API
+See [discussion](https://github.com/iimez/lllms/discussions/8) for more details.
 
-Shared surface for all engines?
+### Task API
 
-Stateless endpoints:
-- `POST /llama/completion`
-- `POST /llama/chat`
+- `POST /tasks/text-completion`
+- `POST /tasks/chat-completion` should continue to be stateless
+- `GET /tasks/{task_id}`
+- `DELETE /tasks/{task_id}`
 
-Simplest way for stateful chat?
-- `GET /llama/chat/{chat_id}`
-- `POST /llama/chat/{chat_id}`
+### Thread API
+
+- `POST /threads`
+- `POST /threads/{thread_id}` mutate state without generating anything
+- `POST /threads/{thread_id}/generate` to generate a new assistant message
+- `GET /threads/{thread_id}`
+- `DELETE /threads/{thread_id}`

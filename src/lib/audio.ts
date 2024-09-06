@@ -1,5 +1,5 @@
 import decode from 'audio-decode'
-import { create as createResampler, ConverterType } from '@alexanderolsen/libsamplerate-js'
+import libSampleRate from '@alexanderolsen/libsamplerate-js'
 
 interface ResampleOptions {
 	inputSampleRate?: number
@@ -11,9 +11,9 @@ async function resampleAudioBuffer(input: Float32Array, opts: ResampleOptions) {
 	const nChannels = opts.nChannels ?? 2
 	const inputSampleRate = opts.inputSampleRate ?? 44100
 
-	const resampler = await createResampler(nChannels, inputSampleRate, opts.outputSampleRate, {
+	const resampler = await libSampleRate.create(nChannels, inputSampleRate, opts.outputSampleRate, {
 		// http://www.mega-nerd.com/SRC/api_full.html http://www.mega-nerd.com/SRC/api_simple.html
-		converterType: ConverterType.SRC_SINC_BEST_QUALITY, // default SRC_SINC_FASTEST. see API for more
+		converterType: libSampleRate.ConverterType.SRC_SINC_BEST_QUALITY, // default SRC_SINC_FASTEST. see API for more
 	})
 	const resampledData = resampler.simple(input)
 	resampler.destroy()

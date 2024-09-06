@@ -45,18 +45,4 @@ export function acquireFileLock(file: string, signal?: AbortSignal): Promise<() 
 			}
 		}, 1000)
 	})
-	// if (signal) {
-	// 	signal.addEventListener('abort', () => {
-	// 		clearFileLock(file)
-	// 		// throw new Error('Aborted')
-	// 	})
-	// }
-	// if (fs.existsSync(lockFile)) {
-	// 	while (fs.existsSync(lockFile)) {
-	// 		await new Promise((resolve) => setTimeout(resolve, 1000))
-	// 	}
-	// }
-	// fs.writeFileSync(lockFile, '')
-	// activeLocks.add(file)
-	// return () => clearFileLock(file)
 }

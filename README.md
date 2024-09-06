@@ -159,12 +159,15 @@ Not in any particular order:
 - [x] Improve types for tool definitions / json schema
 - [x] Make pool dispose / stop more robust
 - [x] Tests for cancellation and timeouts
-- [ ] Support transformer.js for text-completion and embedding tasks
+- [ ] transformer.js text embeddings
+- [ ] transformer.js image embeddings
+- [ ] transformer.js multimodal image/text embeddings (see [jina-clip-v1](https://github.com/xenova/transformers.js/issues/793) and [nomic-embed-vision](https://github.com/xenova/transformers.js/issues/848) issues.)
+- [ ] Support transformer.js for text-completion tasks ([not yet supported in Node.js](https://github.com/xenova/transformers.js/blob/38a3bf6dab2265d9f0c2f613064535863194e6b9/src/models.js#L205-L207))
 - [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
-- [ ] Context cache improvement: Reuse existing context even if the incoming suffix/difference is more than one message
 - [ ] non-chat text completions: Allow reuse of context
 - [ ] non-chat text completions: Support preloading of prefixes
 - [ ] Infill completion support https://github.com/withcatai/node-llama-cpp/blob/beta/src/evaluator/LlamaCompletion.ts#L322-L336
+- [ ] Allow "prefilling" (partial) assistant responses like outlined [here](https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/prefill-claudes-response#how-to-prefill-claudes-response)
 - [ ] Find a way to type available custom engines (and their options?)
 - [ ] Rework GPU+device usage / lock (Support multiple models on gpu in cases where its possible)
 - [ ] Add engine interfaces for resource use (and estimates, see https://github.com/ggerganov/llama.cpp/issues/4315 and https://github.com/withcatai/node-llama-cpp/blob/beta/src/gguf/insights/utils/resolveContextContextSizeOption.ts)
@@ -201,3 +204,4 @@ If you look at this package, you might also want to take a look at these other s
 - [VLLM](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html) - A more production ready solution for hosting large language models.
 - [LM Studio](https://lmstudio.ai/docs/local-server) - Also has a local server.
 - [LocalAI](https://github.com/mudler/LocalAI) - Similar project in go.
+- [Petals](https://github.com/bigscience-workshop/petals) - Local (and distributed!) inference in python.

@@ -1,4 +1,5 @@
 import type { SomeJSONSchema } from 'ajv/dist/types/json-schema'
+import { Sharp } from 'sharp'
 
 export type CompletionFinishReason =
 	| 'maxTokens'
@@ -26,6 +27,7 @@ export interface MessageTextContentPart {
 export interface MessageImageContentPart {
 	type: 'image'
 	url: string
+	image?: Sharp
 }
 
 export type MessageContentPart = MessageTextContentPart | MessageImageContentPart

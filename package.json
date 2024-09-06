@@ -26,6 +26,7 @@
 		"test:openai": "vitest tests/openai.test.ts",
 		"test:gpt4all": "vitest tests/engines/gpt4all.test.ts",
 		"test:llama": "vitest tests/engines/node-llama-cpp.test.ts",
+		"test:transformers": "vitest tests/engines/transformers.test.ts",
 		"test:experiments": "vitest tests/engines/experiments.test.ts",
 		"test:server": "vitest tests/server.test.ts",
 		"prewatch": "npm run clean",
@@ -54,7 +55,7 @@
 		"#lllms/*": "./dist/*"
 	},
 	"peerDependencies": {
-		"@xenova/transformers": "github:xenova/transformers.js#v3",
+		"@huggingface/transformers": ">=3.0.0-alpha.9",
 		"gpt4all": ">=4.0.0",
 		"node-llama-cpp": ">=3.0.0-beta.32"
 	},
@@ -65,7 +66,7 @@
 		"gpt4all": {
 			"optional": true
 		},
-		"@xenova/transformers": {
+		"@huggingface/transformers": {
 			"optional": true
 		}
 	},
@@ -78,16 +79,18 @@
 		"express": "^4.19.2",
 		"ipull": "^3.6.0",
 		"nanoid": "^5.0.7",
+		"onnxruntime-node": "^1.18.0",
 		"p-queue": "^8.0.1",
 		"pretty-bytes": "^6.1.1",
-		"pretty-ms": "^9.0.0"
+		"pretty-ms": "^9.0.0",
+		"sharp": "^0.33.4"
 	},
 	"devDependencies": {
+		"@huggingface/transformers": "^3.0.0-alpha.9",
 		"@types/cors": "^2.8.17",
 		"@types/express": "^4.17.21",
 		"@types/node": "^20.14.11",
 		"@types/supertest": "^6.0.2",
-		"@xenova/transformers": "github:xenova/transformers.js#v3",
 		"cross-env": "^7.0.3",
 		"gpt4all": "^4.0.0",
 		"node-llama-cpp": "^3.0.0-beta.38",

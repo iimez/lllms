@@ -1,7 +1,11 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'node:fs'
 import { ModelServer } from '#lllms/server.js'
-import { ChatCompletionRequest, ChatMessage, ModelOptions } from '#lllms/types/index.js'
+import {
+	ChatCompletionRequest,
+	ChatMessage,
+	ModelOptions,
+} from '#lllms/types/index.js'
 import {
 	runStopTriggerTest,
 	runTokenBiasTest,
@@ -22,7 +26,7 @@ import {
 } from './lib/index.js'
 import { createChatCompletion } from '../util.js'
 
-const testModel: ModelOptions ={
+const testModel: ModelOptions = {
 	url: 'https://huggingface.co/mradermacher/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
 	sha256: '8729adfbc1cdaf3229ddeefab2b58ffdc78dbdb4d92234bcd5980c53f12fad15',
 	engine: 'node-llama-cpp',
@@ -30,12 +34,19 @@ const testModel: ModelOptions ={
 	contextSize: 2048,
 	prepare: 'blocking',
 	grammars: {
-		'custom-gbnf-string': fs.readFileSync('tests/fixtures/grammar/name-age-json.gbnf', 'utf-8'),
+		'custom-gbnf-string': fs.readFileSync(
+			'tests/fixtures/grammar/name-age-json.gbnf',
+			'utf-8',
+		),
 		'custom-json-schema': {
 			type: 'object',
 			properties: {
-				name: { type: 'string' },
-				age: { type: 'number' },
+				name: {
+					type: 'string',
+				},
+				age: {
+					type: 'number',
+				},
 			},
 			required: ['name', 'age'],
 		},
@@ -50,7 +61,7 @@ suite('features', () => {
 		// log: 'debug',
 		models: {
 			test: testModel,
-		}
+		},
 	})
 	beforeAll(async () => {
 		await llms.start()
@@ -79,10 +90,11 @@ suite('function calling', async () => {
 			test: {
 				task: 'text-completion',
 				url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
-				sha256: '3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
+				sha256:
+					'3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
 				engine: 'node-llama-cpp',
 			},
-		}
+		},
 	})
 	beforeAll(async () => {
 		await llms.start()
@@ -115,19 +127,18 @@ suite('grammar', async () => {
 	afterAll(async () => {
 		await llms.stop()
 	})
-	
+
 	test('built-in grammar', async () => {
 		await runBuiltInGrammarTest(llms)
 	})
-	
+
 	test('gbnf string grammar', async () => {
 		await runRawGBNFGrammarTest(llms)
 	})
-	
+
 	test('json schema grammar', async () => {
 		await runJsonSchemaGrammarTest(llms)
 	})
-	
 })
 
 suite('cache', () => {
@@ -234,7 +245,7 @@ suite('context shift', () => {
 		// log: 'debug',
 		models: {
 			test: testModel,
-		}
+		},
 	})
 	beforeAll(async () => {
 		await llms.start()
@@ -255,7 +266,7 @@ suite('ingest', () => {
 		// log: 'debug',
 		models: {
 			test: testModel,
-		}
+		},
 	})
 	beforeAll(async () => {
 		await llms.start()
@@ -281,7 +292,7 @@ suite('timeout and cancellation', () => {
 	const llms = new ModelServer({
 		log: 'debug',
 		models: {
-			'test': {
+			test: {
 				...testModel,
 				minInstances: 1,
 				device: { gpu: true },

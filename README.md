@@ -159,9 +159,9 @@ Not in any particular order:
 - [x] Improve types for tool definitions / json schema
 - [x] Make pool dispose / stop more robust
 - [x] Tests for cancellation and timeouts
-- [ ] transformer.js text embeddings
-- [ ] transformer.js image embeddings
-- [ ] transformer.js multimodal image/text embeddings (see [jina-clip-v1](https://github.com/xenova/transformers.js/issues/793) and [nomic-embed-vision](https://github.com/xenova/transformers.js/issues/848) issues.)
+- [x] transformer.js text embeddings
+- [x] transformer.js image embeddings
+- [x] transformer.js multimodal image/text embeddings (see [jina-clip-v1](https://github.com/xenova/transformers.js/issues/793) and [nomic-embed-vision](https://github.com/xenova/transformers.js/issues/848) issues.)
 - [ ] Support transformer.js for text-completion tasks ([not yet supported in Node.js](https://github.com/xenova/transformers.js/blob/38a3bf6dab2265d9f0c2f613064535863194e6b9/src/models.js#L205-L207))
 - [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
 - [ ] non-chat text completions: Allow reuse of context

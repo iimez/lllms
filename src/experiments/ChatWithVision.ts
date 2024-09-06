@@ -1,5 +1,5 @@
 
-import { EngineChatCompletionArgs, ModelEngine } from '#lllms/types/index.js'
+import { EngineChatCompletionArgs, ImageToTextRequest, ModelEngine } from '#lllms/types/index.js'
 import { CustomEngine } from '#lllms/engines/index.js'
 
 // an experimental engine that replaces images with their descriptions before passing them to a chat model
@@ -36,7 +36,7 @@ export class ChatWithVisionEngine extends CustomEngine implements ModelEngine {
 					continue
 				}
 				imageTextPromises.push(new Promise(async (resolve, reject) => {
-					// Florence2 prompts
+					// Florence2 prompt doc
 					// "task_prompts_without_inputs": {
 					// 	"<OCR>": "What is the text in the image?",
 					// 	"<OCR_WITH_REGION>": "What is the text in the image, with regions?",
@@ -57,8 +57,9 @@ export class ChatWithVisionEngine extends CustomEngine implements ModelEngine {
 					// 	"<REGION_TO_OCR>": "What text is in the region {input}?"
 					// }
 					const task = imageToTextModel.instance.processImageToTextTask({
-						model: 'florence2',
+						model: this.imageToTextModel,
 						url: contentPart.url,
+						image: contentPart.image,
 						prompt: 'What does the image describe?',
 					})
 					const result = await task.result

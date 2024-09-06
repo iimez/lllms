@@ -782,17 +782,23 @@ export async function processEmbeddingTask(
 	const texts: string[] = []
 	if (typeof request.input === 'string') {
 		texts.push(request.input)
-	} else {
-		const strInputs = request.input.filter(
-			(i) => typeof i === 'string',
-		) as string[]
-		texts.push(...strInputs)
+	} else if (Array.isArray(request.input)) {
+		for (const input of request.input) {
+			if (typeof input === 'string') {
+				texts.push(input)
+			} else if (input.type === 'text') {
+				texts.push(input.content)
+			} else if (input.type === 'image') {
+				throw new Error('Image inputs not implemented.')
+			}
+		}
 	}
 
 	if (!instance.embeddingContext) {
 		instance.embeddingContext = await instance.model.createEmbeddingContext({
 			batchSize: config.batchSize,
 			createSignal: signal,
+			threads: config.device?.cpuThreads,
 		})
 	}
 

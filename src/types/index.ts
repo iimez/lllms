@@ -1,4 +1,5 @@
 import type { SomeJSONSchema } from 'ajv/dist/types/json-schema'
+import type { Sharp } from 'sharp'
 import type { BuiltInEngineName } from '#lllms/engines/index.js'
 import type { Logger } from '#lllms/lib/logger.js'
 import type { ModelPool } from '#lllms/pool.js'
@@ -11,6 +12,7 @@ import {
 	ToolDefinition,
 	TextCompletionPreloadOptions,
 } from '#lllms/types/completions.js'
+import type { PreTrainedModel, PreTrainedTokenizer, Processor } from '@huggingface/transformers'
 export * from '#lllms/types/completions.js'
 
 export type ModelTaskType =
@@ -99,16 +101,32 @@ export interface ChatCompletionRequest extends TextCompletionRequestBase {
 	tools?: Record<string, ToolDefinition>
 }
 
+export interface TextEmbeddingInput {
+	type: 'text'
+	content: string
+}
+
+export interface ImageEmbeddingInput {
+	type: 'image'
+	content?: Sharp
+	url?: string
+	file?: string
+}
+
+export type EmbeddingInput = TextEmbeddingInput | ImageEmbeddingInput | string
+
 export interface EmbeddingRequest {
 	model: string
-	input: string | string[] | number[] | number[][]
+	input: EmbeddingInput | EmbeddingInput[]
 	dimensions?: number
+	pooling?: 'cls' | 'mean'
 }
 
 export interface ImageToTextRequest {
 	model: string
 	url?: string
 	file?: string
+	image?: Sharp
 	prompt?: string
 	maxTokens?: number
 }
@@ -283,12 +301,24 @@ type GPT4AllTextCompletionModelOptions = TextCompletionModelOptions &
 
 type GPT4AllEmbeddingModelOptions = GPT4AllModelOptions & EmbeddingModelOptions
 
+export interface TransformersJsModel {
+	processor?: string
+	// TODO classes not working
+	// processorClass?: Processor
+	// tokenizerClass?: PreTrainedTokenizer
+	// modelClass?: PreTrainedModel
+	processorClass?: any
+	tokenizerClass?: any
+	modelClass?: any
+	dtype?: Record<string, string> | string
+}
+
 interface TransformersJsModelOptions extends BuiltInModelOptionsBase {
 	engine: 'transformers-js'
-	task: 'image-to-text' | 'speech-to-text'
-	// TODO transformers.js v3
-	modelClass: any
-	dtype: Record<string, string> | string
+	task: 'image-to-text' | 'speech-to-text' | 'text-completion' | 'embedding'
+	textModel?: TransformersJsModel,
+	visionModel?: TransformersJsModel,
+	speechModel?: TransformersJsModel,
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
 	}

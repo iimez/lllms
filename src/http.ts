@@ -59,7 +59,7 @@ export class ModelHTTPServer {
 		})
 	}
 	
-	async close() {
+	async stop() {
 		this.httpServer.close()
 		await this.modelServer.stop()
 	}

@@ -112,7 +112,7 @@ export class ModelInstance<TEngineState = unknown> {
 						...this.config,
 						device: {
 							...this.config.device,
-							gpu: this.gpu,
+							gpu: this.gpu ? this.config.device?.gpu : false,
 						},
 					},
 				},

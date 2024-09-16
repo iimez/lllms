@@ -218,7 +218,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		const modelConfig = this.config.models[modelId]
 		// if the model is configured with gpu=true, interpret that as "it MUST run on gpu"
 		// and prevent spawning more instances if the gpu is already locked.
-		const requiresGpu = modelConfig.device?.gpu === true
+		const requiresGpu = !!modelConfig.device?.gpu
 		if (requiresGpu && this.gpuLock) {
 			this.log(
 				LogLevels.debug,
@@ -274,7 +274,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			model.device?.gpu === undefined || model.device?.gpu === 'auto'
 		let useGpu = autoGpu ? autoGpuEnabled && !this.gpuLock : false
 
-		if (model.device?.gpu === true) {
+		if (!!model.device?.gpu) {
 			useGpu = true
 		}
 

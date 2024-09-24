@@ -21,12 +21,12 @@ const pool = new ModelPool(
 		// global processing concurrency limit, across all instances of all models
 		concurrency: 2,
 		models: {
-			'phi3-mini-4k': {
+			'my-model': {
 				task: 'text-completion',
 				// note that this path needs to be absolute and the file needs to be downloaded beforehand.
 				location: path.resolve(
 					os.homedir(),
-					'.cache/lllms/huggingface/bartowski/Phi-3.1-mini-4k-instruct-GGUF-main/Phi-3.1-mini-4k-instruct-Q4_K_M.gguf',
+					'.cache/lllms/huggingface/HuggingFaceTB/smollm-135M-instruct-v0.2-Q8_0-GGUF-main/smollm-135m-instruct-add-basics-q8_0.gguf',
 				),
 				engine: 'node-llama-cpp',
 				minInstances: 1, // setting this to something greater 0 will load the model on pool.init()
@@ -48,7 +48,7 @@ await pool.init({
 
 async function createCompletion(prompt) {
 	const req = {
-		model: 'phi3-mini-4k',
+		model: 'my-model',
 		prompt,
 		temperature: 3,
 		maxTokens: 200,

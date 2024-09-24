@@ -33,7 +33,7 @@ const llms = new ModelServer({
       // Required are `task`, `engine`, `url` and/or `file`.
       task: 'text-completion', // text-completion models can be used for chat and text generation tasks
       engine: 'node-llama-cpp', // don't forget to `npm install node-llama-cpp@beta`
-      url: 'https://huggingface.co/bartowski/Phi-3.1-mini-4k-instruct-GGUF/blob/main/Phi-3.1-mini-4k-instruct-Q4_K_M.gguf',
+      url: 'https://huggingface.co/HuggingFaceTB/smollm-135M-instruct-v0.2-Q8_0-GGUF/blob/main/smollm-135m-instruct-add-basics-q8_0.gguf',
     },
   },
 })
@@ -43,7 +43,7 @@ const result = await llms.processChatCompletionTask({
   messages: [
     { 
       role: 'user',
-      content: 'Quick! I need you to precisely estimate the number of times the letter "r" appears in the word "strawberry"!'
+      content: 'Why are bananas rather blue than bread at night?',
     },
   ],
 })
@@ -61,10 +61,10 @@ const server = await startHTTPServer({
   listen: { port: 3000 }, // apart from `listen` options are identical to ModelServer
   concurrency: 2, // two inference processes may run at the same time
   models: {
-    'phi-3.1-mini': {
+    'smollm': {
       task: 'text-completion',
       engine: 'node-llama-cpp',
-      url: 'https://huggingface.co/bartowski/Phi-3.1-mini-4k-instruct-GGUF/blob/main/Phi-3.1-mini-4k-instruct-Q4_K_M.gguf',
+      url: 'https://huggingface.co/HuggingFaceTB/smollm-135M-instruct-v0.2-Q8_0-GGUF/blob/main/smollm-135m-instruct-add-basics-q8_0.gguf',
       maxInstances: 2, // two instances of this model may be loaded into memory
       device: {
         cpuThreads: 4, // limit cpu threads so we dont occupy all cores
@@ -79,7 +79,7 @@ const client = new OpenAI({
 })
 const completion = await client.beta.chat.completions.stream({
   stream_options: { include_usage: true },
-  model: 'phi-3.1-mini',
+  model: 'smollm',
   messages: [
     { role: 'user', content: 'lets count to 10, but only whisper every second number' },
   ],
@@ -104,9 +104,9 @@ Currently supported inference engines are:
 
 | Engine | Peer Dependency |
 | --- | --- |
-| node-llama-cpp | `node-llama-cpp >= 3.0.0-beta.32` |
+| node-llama-cpp | `node-llama-cpp >= 3.0.0` |
 | gpt4all | `gpt4all >= 4.0.0` |
-| transformers-js | `github:xenova/transformers.js#v3` |
+| transformers-js | `@huggingface/transformers >= 3.0.0-alpha.9` |
 
 See [engine docs](./docs/engines.md) for more information on each.
 
@@ -162,6 +162,7 @@ Not in any particular order:
 - [x] transformer.js text embeddings
 - [x] transformer.js image embeddings
 - [x] transformer.js multimodal image/text embeddings (see [jina-clip-v1](https://github.com/xenova/transformers.js/issues/793) and [nomic-embed-vision](https://github.com/xenova/transformers.js/issues/848) issues.)
+- [ ] utilize node-llama-cpp's support to reuse LlamaModel instances with multiple contexts
 - [ ] Support transformer.js for text-completion tasks ([not yet supported in Node.js](https://github.com/xenova/transformers.js/blob/38a3bf6dab2265d9f0c2f613064535863194e6b9/src/models.js#L205-L207))
 - [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
 - [ ] non-chat text completions: Allow reuse of context

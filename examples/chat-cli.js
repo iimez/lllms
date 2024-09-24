@@ -7,10 +7,11 @@ import { ModelServer } from '#lllms/index.js'
 const llms = new ModelServer({
 	// log: 'info',
 	models: {
-		'dolphin': {
+		'my-model': {
 			task: 'text-completion',
 			minInstances: 1,
-			url: 'https://huggingface.co/QuantFactory/dolphin-2.9-llama3-8b-GGUF/blob/main/dolphin-2.9-llama3-8b.Q4_K_M.gguf',
+			url: 'https://huggingface.co/HuggingFaceTB/smollm-135M-instruct-v0.2-Q8_0-GGUF/blob/main/smollm-135m-instruct-add-basics-q8_0.gguf',
+			sha256: 'a98d3857b95b96c156d954780d28f39dcb35b642e72892ee08ddff70719e6220',
 			engine: 'node-llama-cpp',
 			// device: { gpu: false },
 		},
@@ -41,7 +42,7 @@ while (true) {
 	process.stdout.write(chalk.bold(chalk.dim('model > ')))
 	const result = await llms.processChatCompletionTask(
 		{
-			model: 'dolphin',
+			model: 'my-model',
 			messages,
 		},
 		{

@@ -11,7 +11,8 @@ const httpServer = await startHTTPServer({
 		'my-model': {
 			task: 'text-completion',
 			engine: 'node-llama-cpp',
-			url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+			url: 'https://huggingface.co/HuggingFaceTB/smollm-135M-instruct-v0.2-Q8_0-GGUF/blob/main/smollm-135m-instruct-add-basics-q8_0.gguf',
+			sha256: 'a98d3857b95b96c156d954780d28f39dcb35b642e72892ee08ddff70719e6220',
 			minInstances: 1, // one instance / session will always be ready
 			maxInstances: 2, // up to two may be spawned
 			device: { gpu: false, cpuThreads: 4 }, // configure so they're roughly the same speed

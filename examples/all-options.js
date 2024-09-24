@@ -13,18 +13,14 @@ startHTTPServer({
 	models: {
 		// Specify as many models as you want. Identifiers can use a-zA-Z0-9_:\-\.
 		// Required are `task`, `engine`, `url` and/or `file`.
-		'phi3-mini-4k': {
+		'my-model': {
 			task: 'text-completion', // 'text-completion', 'embedding', 'image-to-text', 'speech-to-text'
 			engine: 'node-llama-cpp', // 'node-llama-cpp', 'transformers-js', 'gpt4all'
 			// Model weights may be specified by file and/or url.
-			url: 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+			url: 'https://huggingface.co/HuggingFaceTB/smollm-135M-instruct-v0.2-Q8_0-GGUF/blob/main/smollm-135m-instruct-add-basics-q8_0.gguf',
 			// specify sha256 hash to verify the downloaded file.
-			sha256: '8a83c7fb9049a9b2e92266fa7ad04933bb53aa1e85136b7b30f1b8000ff2edef',
-			// File path may be absolute or relative to modelsPath.
-			// - If an absolute path is given, it will be downloaded to that location.
-			// - If a relative path is given, it will be resolved relative to modelsPath.
-			file: 'Phi-3-mini-4k-instruct-q4.gguf',
-			// The preparation process downloads and verifies models weights.
+			sha256: 'a98d3857b95b96c156d954780d28f39dcb35b642e72892ee08ddff70719e6220',
+			// The preparation process downloads and verifies model files before instantiating the model.
 			// Use this to control when that happens. Defaults to 'on-demand'.
 			// Options are:
 			// - 'on-demand' = prepare on first request

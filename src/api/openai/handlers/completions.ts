@@ -177,7 +177,7 @@ export function createCompletionHandler(llms: ModelServer) {
 					usage: {
 						prompt_tokens: result.promptTokens,
 						completion_tokens: result.completionTokens,
-						total_tokens: result.totalTokens,
+						total_tokens: result.contextTokens,
 					},
 				}
 				res.writeHead(200, { 'Content-Type': 'application/json' })

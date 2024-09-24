@@ -9,6 +9,7 @@ import {
 	UserMessage,
 	AssistantMessage,
 	SystemMessage,
+	MessageContentPart,
 } from '#lllms/types/index.js'
 import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
 import { omitEmptyValues } from '#lllms/lib/util.js'
@@ -137,15 +138,15 @@ export function createChatCompletionHandler(llms: ModelServer) {
 								return {
 									type: 'text',
 									text: part,
-								}
+								} as MessageContentPart
 							}
 							if (part.type === 'image_url') {
 								return {
 									type: 'image',
 									url: part.image_url.url,
-								}
+								} as MessageContentPart
 							}
-							return part
+							return part as MessageContentPart
 						})
 					} else {
 						content = msg.content || ''
@@ -281,7 +282,7 @@ export function createChatCompletionHandler(llms: ModelServer) {
 						usage: {
 							prompt_tokens: result.promptTokens,
 							completion_tokens: result.completionTokens,
-							total_tokens: result.totalTokens,
+							total_tokens: result.contextTokens,
 						},
 					}
 					res.write(`data: ${JSON.stringify(finalChunk)}\n\n`)
@@ -301,6 +302,7 @@ export function createChatCompletionHandler(llms: ModelServer) {
 							message: {
 								role: 'assistant',
 								content: result.message.content || null,
+								refusal: null,
 							},
 							logprobs: null,
 							finish_reason: result.finishReason
@@ -311,7 +313,7 @@ export function createChatCompletionHandler(llms: ModelServer) {
 					usage: {
 						prompt_tokens: result.promptTokens,
 						completion_tokens: result.completionTokens,
-						total_tokens: result.totalTokens,
+						total_tokens: result.contextTokens,
 					},
 				}
 				if (

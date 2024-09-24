@@ -25,7 +25,13 @@ import {
 } from '@huggingface/transformers'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
+import { copyDirectory } from '#lllms/lib/copyDirectory.js'
 import { decodeAudio } from '#lllms/lib/audio.js'
+import {
+	parseModelUrl,
+	remoteFileExists,
+	checkModelExists,
+} from './util.js'
 
 // TODO transformers.js types currently hard to fix, until v3 is released on npm (with typedefs)
 
@@ -62,77 +68,29 @@ export interface TransformersJsModelConfig extends ModelConfig {
 	}
 }
 
-function checkModelExists(config: TransformersJsModelConfig) {
-	if (!fs.existsSync(config.location)) {
-		return false
-	}
-	if (!fs.existsSync(config.location + '/onnx')) {
-		return false
-	}
-	
-	const checkDTypeExists = (dtype: string | Record<string, string>) => {
-		// TODO needs more work, does not handle all cases
-		if (typeof dtype === 'string') {
-			if (dtype === 'fp32') {
-				const expectedFile = `${config.location}/onnx/encoder_model.onnx`
-				if (!fs.existsSync(expectedFile)) {
-					console.debug('missing', dtype, expectedFile)
-					return false
-				}
-			}
-		} else if (typeof dtype === 'object') {
-			for (const fileName in dtype) {
-				const dataType = dtype[fileName]
-				let expectedFile = `${config.location}/onnx/${fileName}_${dataType}.onnx`
-				if (dataType === 'fp32') {
-					expectedFile = `${config.location}/onnx/${fileName}.onnx`
-				}
-				if (!fs.existsSync(expectedFile)) {
-					console.debug('missing', dtype, expectedFile)
-					return false
-				}
-			}
-		}
-		return true
-	}
-	if (config.textModel?.dtype) {
-		const notExisting = checkDTypeExists(config.textModel.dtype)
-		if (!notExisting) {
-			return false
-		}
-	}
-	if (config.visionModel?.dtype) {
-		const notExisting = checkDTypeExists(config.visionModel.dtype)
-		if (!notExisting) {
-			return false
-		}
-	}
-	if (config.speechModel?.dtype) {
-		const notExisting = checkDTypeExists(config.speechModel.dtype)
-		if (!notExisting) {
-			return false
-		}
-	}
-	return true
-}
-
-async function remoteFileExists(url: string): Promise<boolean> {
-	try {
-		const response = await fetch(url, { method: 'HEAD' })
-		return response.ok
-	} catch (error) {
-		console.error('Error checking remote file:', error)
-		return false
-	}
-}
-
 export const autoGpu = true
 
+let didConfigureEnvironment = false
+function configureEnvironment(modelsPath: string) {
+	// console.debug({
+	// 	cacheDir: env.cacheDir,
+	// 	localModelPaths: env.localModelPath,
+	// })
+	// env.useFSCache = false
+	// env.useCustomCache = true
+	// env.customCache = new TransformersFileCache(modelsPath)
+	env.localModelPath = ''
+	didConfigureEnvironment = true
+}
+
 export async function prepareModel(
-	{ config, log }: EngineContext<TransformersJsModelConfig>,
+	{ config, log, modelsPath }: EngineContext<TransformersJsModelConfig>,
 	onProgress?: (progress: FileDownloadProgress) => void,
 	signal?: AbortSignal,
 ) {
+	if (!didConfigureEnvironment && modelsPath) {
+		configureEnvironment(modelsPath)
+	}
 	fs.mkdirSync(config.location, { recursive: true })
 	const clearFileLock = await acquireFileLock(config.location + '/', signal)
 	if (signal?.aborted) {
@@ -145,16 +103,10 @@ export async function prepareModel(
 		throw new Error(`Missing URL for model ${config.id}`)
 	}
 
-	const parsedUrl = new URL(config.url)
-	// TODO support other hostnames than huggingface.co?
-	const urlSegments = parsedUrl.pathname.split('/')
-	const org = urlSegments[1]
-	const repo = urlSegments[2]
-	const branch = urlSegments[4] || 'main'
-
-	const modelId = `${org}/${repo}`
+	const { modelId, branch } = parseModelUrl(config.url)
 	const modelFiles: ModelFile[] = []
 	const configMeta: any = {}
+	const downloadedFileSet = new Set<string>()
 
 	const downloadModelFiles = async (modelOpts: TransformersJsModel) => {
 		const modelClass = modelOpts.modelClass ?? AutoModel
@@ -165,8 +117,9 @@ export async function prepareModel(
 			// use_external_data_format: true, // https://github.com/xenova/transformers.js/blob/38a3bf6dab2265d9f0c2f613064535863194e6b9/src/models.js#L205-L207
 			progress_callback: (progress: any) => {
 				if (onProgress && progress.status === 'progress') {
+					downloadedFileSet.add(progress.file)
 					onProgress({
-						file: env.cacheDir + progress.file,
+						file: env.cacheDir + modelId + '/' + progress.file,
 						loadedBytes: progress.loaded,
 						totalBytes: progress.total,
 					})
@@ -175,7 +128,9 @@ export async function prepareModel(
 		})
 		downloadPromises.push(modelDownloadPromise)
 
-		const hasTokenizer = await remoteFileExists(`${config.url}/blob/${branch}/tokenizer.json`)
+		const hasTokenizer = await remoteFileExists(
+			`${config.url}/blob/${branch}/tokenizer.json`,
+		)
 		if (hasTokenizer) {
 			const TokenizerClass = modelOpts.tokenizerClass ?? AutoTokenizer
 			const tokenizerDownload = TokenizerClass.from_pretrained(modelId, {
@@ -185,7 +140,10 @@ export async function prepareModel(
 			downloadPromises.push(tokenizerDownload)
 		}
 
-		if (modelOpts.processor) {
+		const hasProcessor = await remoteFileExists(
+			`${config.url}/blob/${branch}/processor_config.json`,
+		)
+		if (hasProcessor) {
 			const ProcessorClass = modelOpts.processorClass ?? AutoProcessor
 			if (typeof modelOpts.processor === 'string') {
 				const processorDownload = ProcessorClass.from_pretrained(modelId)
@@ -208,12 +166,16 @@ export async function prepareModel(
 		log(LogLevels.info, `Downloading ${config.id}`, {
 			url: config.url,
 			location: config.location,
-			modelId: modelId,
+			cacheDir: env.cacheDir,
+			localModelPath: env.localModelPath,
+			// modelId: modelId,
 			branch,
 		})
 		const modelDownloadPromises = []
-		if (config.textModel) {
-			modelDownloadPromises.push(downloadModelFiles(config.textModel))
+		const noModelConfigured =
+			!config.textModel && !config.visionModel && !config.speechModel
+		if (config.textModel || noModelConfigured) {
+			modelDownloadPromises.push(downloadModelFiles(config.textModel || {}))
 		}
 		if (config.visionModel) {
 			modelDownloadPromises.push(downloadModelFiles(config.visionModel))
@@ -233,54 +195,24 @@ export async function prepareModel(
 		if (signal?.aborted) {
 			return
 		}
-		const files = fs.readdirSync(env.cacheDir, { recursive: true })
-		for (const file of files) {
-			const filePath = file.toString()
-			const sourceFile = path.join(env.cacheDir, filePath)
-			const sourceStat = fs.statSync(sourceFile)
-			let targetFile = path.join(config.location, path.basename(sourceFile))
-			const isONNXFile = filePath.match(/\/onnx\/.+\.onnx$/)?.length
-			if (isONNXFile) {
-				const targetDir = path.join(config.location, '/onnx/')
-				fs.mkdirSync(targetDir, { recursive: true })
-				targetFile = path.join(targetDir, path.basename(sourceFile))
-			}
+		const modelCacheDir = path.join(env.cacheDir, modelId)
+		await copyDirectory(modelCacheDir, config.location)
+	}
 
-			const targetExists = fs.existsSync(targetFile)
-			modelFiles.push({
-				file: targetFile,
-				size: sourceStat.size,
-			})
-			if (targetExists) {
-				const targetStat = fs.statSync(targetFile)
-				if (sourceStat.size === targetStat.size) {
-					continue
-				}
-			}
-			if (sourceStat.isDirectory()) {
-				continue
-			}
-			fs.copyFileSync(sourceFile, targetFile)
-			if (targetFile.endsWith('.json')) {
-				const key = path.basename(targetFile).replace('.json', '')
-				configMeta[key] = JSON.parse(fs.readFileSync(targetFile, 'utf8'))
-			}
-		}
-	} else {
-		const files = fs.readdirSync(config.location, { recursive: true })
-		for (const file of files) {
-			const targetFile = path.join(config.location, file.toString())
-			const targetStat = fs.statSync(targetFile)
-			modelFiles.push({
-				file: targetFile,
-				size: targetStat.size,
-			})
-			if (targetFile.endsWith('.json')) {
-				const key = path.basename(targetFile).replace('.json', '')
-				configMeta[key] = JSON.parse(fs.readFileSync(targetFile, 'utf8'))
-			}
+	const files = fs.readdirSync(config.location, { recursive: true })
+	for (const file of files) {
+		const targetFile = path.join(config.location, file.toString())
+		const targetStat = fs.statSync(targetFile)
+		modelFiles.push({
+			file: targetFile,
+			size: targetStat.size,
+		})
+		if (targetFile.endsWith('.json')) {
+			const key = path.basename(targetFile).replace('.json', '')
+			configMeta[key] = JSON.parse(fs.readFileSync(targetFile, 'utf8'))
 		}
 	}
+
 	clearFileLock()
 	return {
 		files: modelFiles,
@@ -302,32 +234,32 @@ export async function createInstance(
 		const loadPromises = []
 		const modelPromise = modelClass.from_pretrained(modelPath, {
 			local_files_only: true,
-			cache_dir: '/',
 			dtype: modelOpts.dtype,
 			device: config.device?.gpu ? 'gpu' : 'cpu',
 		})
 		loadPromises.push(modelPromise)
-
 		const TokenizerClass = modelOpts.tokenizerClass ?? AutoTokenizer
 		const tokenizerPromise = TokenizerClass.from_pretrained(modelPath, {
 			local_files_only: true,
-			cache_dir: '/',
 		})
 		loadPromises.push(tokenizerPromise)
 
-		const ProcessorClass = modelOpts.processorClass ?? AutoProcessor
-		if (typeof modelOpts.processor === 'string') {
-			const processorDownload = ProcessorClass.from_pretrained(
-				modelOpts.processor,
-			)
-			loadPromises.push(processorDownload)
-		} else {
-			const processorDownload = ProcessorClass.from_pretrained(modelPath, {
-				local_files_only: true,
-				cache_dir: '/',
-			})
-			loadPromises.push(processorDownload)
+		const hasProcessor = fs.existsSync(modelPath + 'preprocessor_config.json')
+		if (hasProcessor) {
+			const ProcessorClass = modelOpts.processorClass ?? AutoProcessor
+			if (typeof modelOpts.processor === 'string') {
+				const processorPromise = ProcessorClass.from_pretrained(
+					modelOpts.processor,
+				)
+				loadPromises.push(processorPromise)
+			} else {
+				const processorPromise = ProcessorClass.from_pretrained(modelPath, {
+					local_files_only: true,
+				})
+				loadPromises.push(processorPromise)
+			}
 		}
+
 		const results = await Promise.all(loadPromises)
 		return {
 			model: results[0],
@@ -410,7 +342,7 @@ export async function processTextCompletionTask(
 		text: outputText,
 		promptTokens: inputTokens.length,
 		completionTokens: outputTokens.length,
-		totalTokens: inputTokens.length + outputTokens.length,
+		contextTokens: inputTokens.length + outputTokens.length,
 	}
 }
 
@@ -525,11 +457,11 @@ export async function processImageToTextTask(
 		const blob = new Blob([fileBuffer])
 		image = await RawImage.fromBlob(blob)
 	}
-	
+
 	if (!image) {
 		throw new Error('No image provided')
 	}
-	
+
 	if (signal?.aborted) {
 		return
 	}
@@ -545,9 +477,12 @@ export async function processImageToTextTask(
 		...visionInputs,
 		max_new_tokens: request.maxTokens ?? 128,
 	})
-	const outputText = instance.visionModel!.tokenizer.batch_decode(outputTokens, {
-		skip_special_tokens: true,
-	})
+	const outputText = instance.visionModel!.tokenizer.batch_decode(
+		outputTokens,
+		{
+			skip_special_tokens: true,
+		},
+	)
 
 	return {
 		text: outputText[0],

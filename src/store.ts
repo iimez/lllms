@@ -146,9 +146,7 @@ export class ModelStore {
 					},
 					mergeAbortSignals([signal, this.prepareController.signal]),
 				)
-
 				model.downloads = undefined
-				
 				model.meta = modelMeta
 				model.status = 'ready'
 				this.log(LogLevels.info, 'Model ready', {

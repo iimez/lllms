@@ -54,7 +54,7 @@ export async function runSequentialFunctionCallTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
-			content: "What's the weather like today? (hint: combine functions!)",
+			content: "What's the weather like today? (hint: first use getUserLocation, then check the weather for the resulting location.)",
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {

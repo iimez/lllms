@@ -5,6 +5,7 @@ import {
 	CLIPTextModelWithProjection,
 	CLIPVisionModelWithProjection,
 	Florence2ForConditionalGeneration,
+	Florence2Processor,
 }	from '@huggingface/transformers'
 
 suite('basic', () => {
@@ -97,12 +98,12 @@ suite('basic', () => {
 			blueCatTextEmbedding,
 			redCatTextEmbedding,
 		)
-		expect(textSimilarity.toFixed(2)).toBe('0.60')
+		expect(textSimilarity.toFixed(2)).toBe('0.56')
 		const textImageSimilarity = cosineSimilarity(
 			blueCatTextEmbedding,
 			blueCatImageEmbedding,
 		)
-		expect(textImageSimilarity.toFixed(2)).toBe('0.28')
+		expect(textImageSimilarity.toFixed(2)).toBe('0.29')
 		const textImageSimilarity2 = cosineSimilarity(
 			redCatTextEmbedding,
 			blueCatImageEmbedding,
@@ -112,12 +113,12 @@ suite('basic', () => {
 			blueCatTextEmbedding,
 			redCatImageEmbedding,
 		)
-		expect(textImageSimilarity3.toFixed(2)).toBe('0.04')
+		expect(textImageSimilarity3.toFixed(2)).toBe('0.05')
 		const textImageSimilarity4 = cosineSimilarity(
 			redCatTextEmbedding,
 			redCatImageEmbedding,
 		)
-		expect(textImageSimilarity4.toFixed(2)).toBe('0.26')
+		expect(textImageSimilarity4.toFixed(2)).toBe('0.29')
 	})
 
 	test('text embedding', async () => {

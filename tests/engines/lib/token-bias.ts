@@ -19,6 +19,7 @@ export async function runTokenBiasTest(llms: ModelServer) {
 		tokenBias: {
 			'time': -100,
 			'a time...': -100,
+			'...times': -100,
 		},
 		messages: [
 			{

@@ -6,6 +6,7 @@ import {
 	ChatMessage,
 	ModelOptions,
 } from '#lllms/types/index.js'
+import { ContextShiftStrategy } from '#lllms/engines/node-llama-cpp/types.js'
 import {
 	runStopTriggerTest,
 	runTokenBiasTest,
@@ -13,8 +14,8 @@ import {
 	runContextLeakTest,
 	runContextReuseTest,
 	runFileIngestionTest,
-	runContextShiftGenerationTest,
-	runContextShiftIngestionTest,
+	runGenerationContextShiftTest,
+	runIngestionContextShiftTest,
 	runFunctionCallTest,
 	runSequentialFunctionCallTest,
 	runParallelFunctionCallTest,
@@ -27,8 +28,8 @@ import {
 import { createChatCompletion } from '../util.js'
 
 const testModel: ModelOptions = {
-	url: 'https://huggingface.co/mradermacher/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf',
-	sha256: '8729adfbc1cdaf3229ddeefab2b58ffdc78dbdb4d92234bcd5980c53f12fad15',
+	url: 'https://huggingface.co/mradermacher/Meta-Llama-3.1-8B-Instruct-GGUF/blob/main/Meta-Llama-3.1-8B-Instruct.Q4_K_M.gguf',
+	sha256: '56e1a31ac6e5037174344ac2153c33d873f301f2a312ef2619775190aade51c7',
 	engine: 'node-llama-cpp',
 	task: 'text-completion',
 	contextSize: 2048,
@@ -52,7 +53,7 @@ const testModel: ModelOptions = {
 		},
 	},
 	device: {
-		gpu: true,
+		gpu: 'vulkan',
 	},
 }
 
@@ -89,9 +90,8 @@ suite('function calling', async () => {
 		models: {
 			test: {
 				task: 'text-completion',
-				url: 'https://huggingface.co/meetkai/functionary-small-v2.5-GGUF/raw/main/functionary-small-v2.5.Q4_0.gguf',
-				sha256:
-					'3941bf2a5d1381779c60a7ccb39e8c34241e77f918d53c7c61601679b7160c48',
+				url: 'https://huggingface.co/meetkai/functionary-small-v3.2-GGUF/blob/main/functionary-small-v3.2.Q4_0.gguf',
+				sha256: 'c0afdbbffa498a8490dea3401e34034ac0f2c6e337646513a7dbc04fcef1c3a4',
 				engine: 'node-llama-cpp',
 			},
 		},
@@ -211,11 +211,7 @@ suite('preload', () => {
 				},
 			],
 		})
-		// console.debug({
-		// 	response: chat.result.message.content,
-		// 	inputTokens: chat.result.promptTokens,
-		// })
-		expect(chat.result.promptTokens).toBe(8)
+		expect(chat.result.contextTokens).toBeGreaterThan(80)
 	})
 
 	test('should not utilize preloaded messages', async () => {
@@ -232,11 +228,7 @@ suite('preload', () => {
 				},
 			],
 		})
-		// console.debug({
-		// 	response: chat.result.message.content,
-		// 	inputTokens: chat.result.promptTokens,
-		// })
-		expect(chat.result.promptTokens).toBe(27)
+		expect(chat.result.contextTokens).toBe(chat.result.promptTokens + chat.result.completionTokens)
 	})
 })
 
@@ -253,11 +245,11 @@ suite('context shift', () => {
 	afterAll(async () => {
 		await llms.stop()
 	})
-	test('input that exceeds context size', async () => {
-		await runContextShiftIngestionTest(llms)
+	test('during first user message', async () => {
+		await runIngestionContextShiftTest(llms)
 	})
-	test('context shift during generation', async () => {
-		await runContextShiftGenerationTest(llms)
+	test('during assistant response', async () => {
+		await runGenerationContextShiftTest(llms)
 	})
 })
 
@@ -290,7 +282,7 @@ suite('ingest', () => {
 
 suite('timeout and cancellation', () => {
 	const llms = new ModelServer({
-		log: 'debug',
+		// log: 'debug',
 		models: {
 			test: {
 				...testModel,

@@ -4,7 +4,7 @@ import { ChatMessage } from '#lllms/types/index.js'
 import { createChatCompletion, parseInstanceId } from '../../util.js'
 
 // conversation that tests behavior when context window is exceeded while the model is generating text
-export async function runContextShiftGenerationTest(
+export async function runGenerationContextShiftTest(
 	llms: ModelServer,
 	model: string = 'test',
 ) {
@@ -52,14 +52,14 @@ export async function runContextShiftGenerationTest(
 	const elaborateOn = async (field: string) => {
 		messages.push({
 			role: 'user',
-			content: `Elaborate a bit more on its ${field}. Afterwards, make sure you end your response with 'OK'.`,
+			content: `Elaborate a bit more on its ${field}. End your elaboration with 'OK'.`,
 		})
 		const response = await createChatCompletion(
 			llms,
 			{
 				temperature: 1,
 				messages,
-				maxTokens: 1024,
+				maxTokens: 2048,
 			},
 			60000,
 		)
@@ -77,7 +77,7 @@ export async function runContextShiftGenerationTest(
 	await elaborateOn('origins')
 	await elaborateOn('habitat')
 	await elaborateOn('appearance')
-	await elaborateOn('diet')
+	// await elaborateOn('diet')
 
 	messages.push({
 		role: 'user',

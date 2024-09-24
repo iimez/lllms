@@ -42,7 +42,7 @@ export async function runRawGBNFGrammarTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [
 		{
 			role: 'user',
-			content: 'Generate a {name, age}[] JSON array with famous actors of all ages.',
+			content: 'Generate a {name, age}[] JSON array with at most 10 famous actors of all ages.',
 		},
 	]
 	const turn1 = await createChatCompletion(llms, {

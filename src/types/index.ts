@@ -13,6 +13,7 @@ import {
 	TextCompletionPreloadOptions,
 } from '#lllms/types/completions.js'
 import type { PreTrainedModel, PreTrainedTokenizer, Processor } from '@huggingface/transformers'
+import type { ContextShiftStrategy } from '#lllms/engines/node-llama-cpp/types.js'
 export * from '#lllms/types/completions.js'
 
 export type ModelTaskType =
@@ -83,6 +84,7 @@ export interface EngineContext<
 > {
 	config: TModelConfig
 	meta?: TModelMeta
+	modelsPath?: string
 	log: Logger
 }
 
@@ -268,6 +270,7 @@ interface LlamaCppModelOptionsBase extends BuiltInModelOptionsBase {
 	sha256?: string
 	file?: string
 	batchSize?: number
+	contextShiftStrategy?: ContextShiftStrategy
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
 		gpuLayers?: number
@@ -351,7 +354,7 @@ export interface EngineChatCompletionResult {
 	finishReason: CompletionFinishReason
 	promptTokens: number
 	completionTokens: number
-	totalTokens: number
+	contextTokens: number
 }
 
 export interface EngineTextCompletionResult {
@@ -359,7 +362,7 @@ export interface EngineTextCompletionResult {
 	finishReason?: CompletionFinishReason
 	promptTokens: number
 	completionTokens: number
-	totalTokens: number
+	contextTokens: number
 }
 
 export interface EngineImageToTextResult {

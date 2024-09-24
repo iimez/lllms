@@ -1,4 +1,4 @@
-import crypto, { sign } from 'node:crypto'
+import crypto from 'node:crypto'
 import { customAlphabet } from 'nanoid'
 import {
 	TextCompletionRequest,
@@ -184,9 +184,9 @@ export class ModelInstance<TEngineState = unknown> {
 	}
 
 	matchesRequirements(request: ModelInstanceRequest) {
-		const mustGpu = this.config.device?.gpu === true
+		const requiresGpu = !!this.config.device?.gpu && this.config.device?.gpu !== 'auto'
 		const modelMatches = this.modelId === request.model
-		const gpuMatches = mustGpu ? this.gpu : true
+		const gpuMatches = requiresGpu ? this.gpu : true
 		return modelMatches && gpuMatches
 	}
 
@@ -293,7 +293,7 @@ export class ModelInstance<TEngineState = unknown> {
 						},
 						promptTokens: 0,
 						completionTokens: 0,
-						totalTokens: 0,
+						contextTokens: 0,
 					}
 					if (controller.timeoutSignal.aborted) {
 						emptyResponse.finishReason = 'timeout'
@@ -379,7 +379,7 @@ export class ModelInstance<TEngineState = unknown> {
 						text: '',
 						promptTokens: 0,
 						completionTokens: 0,
-						totalTokens: 0,
+						contextTokens: 0,
 					}
 					if (controller.timeoutSignal.aborted) {
 						emptyResponse.finishReason = 'timeout'

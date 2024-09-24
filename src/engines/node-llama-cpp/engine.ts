@@ -25,8 +25,8 @@ import {
 	readGgufFileInfo,
 	GgufFileInfo,
 	LlamaJsonSchemaGrammar,
-	LlamaModelOptions,
 	LLamaChatContextShiftOptions,
+	LlamaContextOptions,
 } from 'node-llama-cpp'
 import { StopGenerationTrigger } from 'node-llama-cpp/dist/utils/StopGenerationDetector'
 import {
@@ -56,7 +56,7 @@ import {
 	addFunctionCallToChatHistory,
 	mapFinishReason,
 } from './util.js'
-import { LlamaChatResult } from './types.js'
+import { LlamaChatResult, ContextShiftStrategy } from './types.js'
 
 export interface NodeLlamaCppInstance {
 	model: LlamaModel
@@ -67,6 +67,7 @@ export interface NodeLlamaCppInstance {
 	pendingFunctionCalls: Record<string, any>
 	lastEvaluation?: LlamaChatResponse['lastEvaluation']
 	embeddingContext?: LlamaEmbeddingContext
+	contextTokenCount: number
 }
 
 export interface NodeLlamaCppModelMeta {
@@ -82,7 +83,7 @@ export interface NodeLlamaCppModelConfig extends ModelConfig {
 	preload?: TextCompletionPreloadOptions
 	contextSize?: number
 	batchSize?: number
-	lora?: LlamaModelOptions['lora']
+	lora?: LlamaContextOptions['lora']
 	contextShiftStrategy?: LLamaChatContextShiftOptions['strategy']
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
@@ -146,15 +147,20 @@ export async function prepareModel(
 	if (config.sha256) {
 		postDownloadPromises.push(calculateFileChecksum(config.location, 'sha256'))
 	}
-	const [gguf, fileHash] = await Promise.all(postDownloadPromises)
-	if (config.sha256 && fileHash !== config.sha256) {
-		throw new Error(
-			`Model sha256 checksum mismatch: expected ${config.sha256} got ${fileHash} for ${config.location}`,
-		)
-	}
-	clearFileLock()
-	return {
-		gguf,
+	try {
+		const [gguf, fileHash] = await Promise.all(postDownloadPromises)
+		if (config.sha256 && fileHash !== config.sha256) {
+			throw new Error(
+				`Model sha256 checksum mismatch: expected ${config.sha256} got ${fileHash} for ${config.location}`,
+			)
+		}
+		clearFileLock()
+		return {
+			gguf,
+		}
+	} catch (err) {
+		clearFileLock()
+		throw err
 	}
 }
 
@@ -212,21 +218,16 @@ export async function createInstance(
 		loadSignal: signal,
 		useMlock: config.device?.memLock ?? false,
 		gpuLayers: config.device?.gpuLayers,
-		lora: config.lora,
 		// onLoadProgress: (percent) => {}
 	})
 
 	const context = await llamaModel.createContext({
 		sequences: 1,
-		seed: config.completionDefaults?.seed ?? createSeed(0, 1000000),
+		lora: config.lora,
 		threads: config.device?.cpuThreads,
 		batchSize: config.batchSize,
 		contextSize: config.contextSize,
-		// batching: {
-		// 	dispatchSchedule: 'nextTick',
-		// 	itemPrioritizationStrategy: 'maximumParallelism',
-		// 	itemPrioritizationStrategy: 'firstInFirstOut',
-		// },
+		flashAttention: true,
 		createSignal: signal,
 	})
 
@@ -238,6 +239,7 @@ export async function createInstance(
 		chatHistory: [],
 		pendingFunctionCalls: {},
 		lastEvaluation: undefined,
+		contextTokenCount: 0,
 	}
 
 	if (config.preload) {
@@ -246,6 +248,7 @@ export async function createInstance(
 			const initialChatHistory = createChatMessageArray(config.preload.messages)
 			const chat = new LlamaChat({
 				contextSequence: context.getSequence(),
+				autoDisposeSequence: true,
 			})
 
 			let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
@@ -253,9 +256,9 @@ export async function createInstance(
 				inputFunctions = {}
 				for (const functionName in config.tools) {
 					const functionDef = config.tools[functionName]
-					inputFunctions[functionName] = defineChatSessionFunction({
+					inputFunctions[functionName] = defineChatSessionFunction<any>({
 						description: functionDef.description,
-						params: functionDef.parameters as GbnfJsonSchema,
+						params: functionDef.parameters,
 						handler: functionDef.handler || (() => {}),
 					}) as ChatSessionModelFunction
 				}
@@ -322,6 +325,7 @@ export async function processChatCompletionTask(
 		}
 		instance.chat = new LlamaChat({
 			contextSequence: instance.context.getSequence(),
+			autoDisposeSequence: true,
 		})
 		// reset state and reingest the conversation history
 		instance.lastEvaluation = undefined
@@ -344,7 +348,7 @@ export async function processChatCompletionTask(
 	const completionTokenBias =
 		request.tokenBias ?? config.completionDefaults?.tokenBias
 	if (completionTokenBias) {
-		tokenBias = new TokenBias(instance.model)
+		tokenBias = new TokenBias(instance.model.tokenizer)
 		for (const key in completionTokenBias) {
 			const bias = completionTokenBias[key] / 10
 			const tokenId = parseInt(key) as Token
@@ -363,6 +367,7 @@ export async function processChatCompletionTask(
 	}
 
 	// see if the user submitted any function call results
+	const supportsParallelFunctionCalling = instance.chat.chatWrapper.settings.functions.parallelism != null
 	const resolvedFunctionCalls = []
 	const functionCallResultMessages = request.messages.filter(
 		(m) => m.role === 'tool',
@@ -386,13 +391,8 @@ export async function processChatCompletionTask(
 			description: functionDef?.description,
 			params: functionCall.params,
 			result: message.content,
-			raw:
-				functionCall.raw +
-				instance.chat.chatWrapper.generateFunctionCallResult(
-					functionCall.functionName,
-					functionCall.params,
-					message.content,
-				),
+			rawCall: functionCall.raw,
+			startsNewChunk: supportsParallelFunctionCalling,
 		})
 		delete instance.pendingFunctionCalls[message.callId]
 	}
@@ -438,11 +438,11 @@ export async function processChatCompletionTask(
 		inputFunctions = {}
 		for (const functionName in toolDefinitions) {
 			const functionDef = toolDefinitions[functionName]
-			inputFunctions[functionName] = defineChatSessionFunction({
+			inputFunctions[functionName] = defineChatSessionFunction<any>({
 				description: functionDef.description,
-				params: functionDef.parameters as GbnfJsonSchema,
+				params: functionDef.parameters,
 				handler: functionDef.handler || (() => {}),
-			}) as ChatSessionModelFunction
+			})
 		}
 	}
 	const defaults = config.completionDefaults ?? {}
@@ -466,12 +466,8 @@ export async function processChatCompletionTask(
 		}
 	}
 
+	const initialTokenMeterState = instance.chat.sequence.tokenMeter.getState()
 	let completionResult: LlamaChatResult
-
-	const inputTokenCountBefore =
-		instance.chat.sequence.tokenMeter.usedInputTokens
-	const outputTokenCountBefore =
-		instance.chat.sequence.tokenMeter.usedOutputTokens
 
 	const functionsOrGrammar = inputFunctions
 		? {
@@ -499,6 +495,10 @@ export async function processChatCompletionTask(
 			topP: request.topP ?? defaults.topP,
 			topK: request.topK ?? defaults.topK,
 			minP: request.minP ?? defaults.minP,
+			seed:
+				request.seed ??
+				config.completionDefaults?.seed ??
+				createSeed(0, 1000000),
 			tokenBias,
 			customStopTriggers,
 			trimWhitespaceSuffix: false,
@@ -567,7 +567,7 @@ export async function processChatCompletionTask(
 				}),
 			)
 			newContextWindowChatHistory = lastEvaluation.contextWindow
-
+			let startNewChunk = true
 			// add results to chat history in the order they were called
 			for (const callResult of results) {
 				newChatHistory = addFunctionCallToChatHistory({
@@ -577,15 +577,18 @@ export async function processChatCompletionTask(
 					callParams: callResult.functionCall.params,
 					callResult: callResult.functionCallResult,
 					rawCall: callResult.functionCall.raw,
+					startsNewChunk: startNewChunk,
 				})
 				newContextWindowChatHistory = addFunctionCallToChatHistory({
-					chatHistory: newChatHistory,
+					chatHistory: newContextWindowChatHistory,
 					functionName: callResult.functionCall.functionName,
 					functionDescription: callResult.functionDef.description,
 					callParams: callResult.functionCall.params,
 					callResult: callResult.functionCallResult,
 					rawCall: callResult.functionCall.raw,
+					startsNewChunk: startNewChunk,
 				})
+				startNewChunk = false
 			}
 
 			// check if all function calls were immediately evokable
@@ -670,17 +673,13 @@ export async function processChatCompletionTask(
 		})
 	}
 
-	const inputTokenCountAfter = instance.chat.sequence.tokenMeter.usedInputTokens
-	const outputTokenCountAfter =
-		instance.chat.sequence.tokenMeter.usedOutputTokens
-	const promptTokens = inputTokenCountAfter - inputTokenCountBefore
-	const completionTokens = outputTokenCountAfter - outputTokenCountBefore
+	const tokenDifference = instance.chat.sequence.tokenMeter.diff(initialTokenMeterState)
 	return {
 		finishReason: mapFinishReason(completionResult.stopReason),
 		message: assistantMessage,
-		promptTokens,
-		completionTokens,
-		totalTokens: promptTokens + completionTokens,
+		promptTokens: tokenDifference.usedInputTokens,
+		completionTokens: tokenDifference.usedOutputTokens,
+		contextTokens: instance.chat.sequence.contextTokens.length,
 	}
 }
 
@@ -709,19 +708,19 @@ export async function processTextCompletionTask(
 		log(LogLevels.debug, 'No sequencesLeft, recreating context')
 		await instance.context.dispose()
 		instance.context = await instance.model.createContext({
+			lora: config.lora,
+			contextSize: config.contextSize,
 			createSignal: signal,
-			seed:
-				request.seed ??
-				config.completionDefaults?.seed ??
-				createSeed(0, 1000000),
 			threads: config.device?.cpuThreads,
 			batchSize: config.batchSize,
+			flashAttention: true,
 		})
 		contextSequence = instance.context.getSequence()
 	}
 
 	const completion = new LlamaCompletion({
 		contextSequence: contextSequence,
+		autoDisposeSequence: true,
 	})
 
 	const stopGenerationTriggers: StopGenerationTrigger[] = []
@@ -729,10 +728,11 @@ export async function processTextCompletionTask(
 	if (stopTrigger) {
 		stopGenerationTriggers.push(...stopTrigger.map((t) => [t]))
 	}
+	
+	const initialTokenMeterState = contextSequence.tokenMeter.getState()
 
 	const tokens = instance.model.tokenize(request.prompt)
 	const defaults = config.completionDefaults ?? {}
-	let generatedTokenCount = 0
 	const result = await completion.generateCompletionWithMeta(tokens, {
 		maxTokens: request.maxTokens ?? defaults.maxTokens,
 		temperature: request.temperature ?? defaults.temperature,
@@ -748,8 +748,11 @@ export async function processTextCompletionTask(
 		customStopTriggers: stopGenerationTriggers.length
 			? stopGenerationTriggers
 			: undefined,
+		seed:
+			request.seed ??
+			config.completionDefaults?.seed ??
+			createSeed(0, 1000000),
 		onToken: (tokens) => {
-			generatedTokenCount += tokens.length
 			const text = instance.model.detokenize(tokens)
 			if (onChunk) {
 				onChunk({
@@ -760,14 +763,15 @@ export async function processTextCompletionTask(
 		},
 	})
 
+	const tokenDifference = contextSequence.tokenMeter.diff(initialTokenMeterState)
 	completion.dispose()
 
 	return {
 		finishReason: mapFinishReason(result.metadata.stopReason),
 		text: result.response,
-		promptTokens: tokens.length,
-		completionTokens: generatedTokenCount,
-		totalTokens: tokens.length + generatedTokenCount,
+		promptTokens: tokenDifference.usedInputTokens,
+		completionTokens: tokenDifference.usedOutputTokens,
+		contextTokens: contextSequence.contextTokens.length,
 	}
 }
 

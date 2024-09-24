@@ -133,12 +133,18 @@ export async function createInstance(
 	signal?: AbortSignal,
 ) {
 	log(LogLevels.info, `Load GPT4All model ${config.location}`)
+	let device = config.device?.gpu ?? 'cpu'
+	if (typeof device === 'boolean') {
+		device = device ? 'gpu' : 'cpu'
+	} else if (device === 'auto') {
+		device = 'cpu'
+	}
 	const loadOpts: LoadModelOptions = {
 		modelPath: path.dirname(config.location),
 		// file: config.file,
 		modelConfigFile: path.dirname(config.location) + '/models.json',
 		allowDownload: false,
-		device: config.device?.gpu ? 'gpu' : 'cpu',
+		device: device,
 		ngl: config.device?.gpuLayers ?? 100,
 		nCtx: config.contextSize ?? 2048,
 		// verbose: true,
@@ -161,6 +167,8 @@ export async function createInstance(
 	if (config.device?.cpuThreads) {
 		instance.llm.setThreadCount(config.device.cpuThreads)
 	}
+	
+	let contextTokenCount = 0
 
 	if (config.preload && 'generate' in instance) {
 		if ('messages' in config.preload) {
@@ -274,7 +282,7 @@ export async function processTextCompletionTask(
 		text: responseText,
 		promptTokens: result.tokensIngested,
 		completionTokens: result.tokensGenerated,
-		totalTokens: result.tokensIngested + result.tokensGenerated,
+		contextTokens: instance.activeChatSession?.promptContext.nPast ?? 0,
 	}
 }
 
@@ -389,7 +397,7 @@ export async function processChatCompletionTask(
 		},
 		promptTokens: result.usage.prompt_tokens,
 		completionTokens: result.usage.completion_tokens,
-		totalTokens: result.usage.total_tokens,
+		contextTokens: session.promptContext.nPast,
 	}
 }
 

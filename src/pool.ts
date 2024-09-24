@@ -98,10 +98,10 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			}
 		}
 
-		// prioritize initializing the first model defined that has gpu=true
+		// prioritize initializing the first model defined that has gpu explicitly set
 		// so lock cant be acquired first by another model that has gpu=auto/undefined
 		const firstGpuModel = Object.entries(modelConfigs).find(
-			([id, config]) => config.device?.gpu === true,
+			([id, config]) => !!config.device?.gpu && config.device?.gpu !== 'auto',
 		)
 		if (firstGpuModel) {
 			const modelConfig = modelConfigs[firstGpuModel[0]]
@@ -219,10 +219,10 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		// if the model is configured with gpu=true, interpret that as "it MUST run on gpu"
 		// and prevent spawning more instances if the gpu is already locked.
 		const requiresGpu = !!modelConfig.device?.gpu
-		if (requiresGpu && this.gpuLock) {
+		if (requiresGpu && this.gpuLock && modelConfig.device?.gpu !== 'auto') {
 			this.log(
 				LogLevels.debug,
-				'Cannot spawn new instance: model requires gpu, but its locked',
+				'Cannot spawn new instance: model requires gpu, but its already in use',
 				{ model: modelId },
 			)
 			return false

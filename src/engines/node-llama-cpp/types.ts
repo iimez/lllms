@@ -1,4 +1,5 @@
 import {
+	ChatHistoryItem,
 	ChatModelFunctions,
 	LlamaChatResponse,
 	LlamaChatResponseFunctionCall,
@@ -9,3 +10,8 @@ export interface LlamaChatResult<T extends ChatModelFunctions = any> {
 	functionCalls?: LlamaChatResponseFunctionCall<T>[]
 	stopReason: LlamaChatResponse['metadata']['stopReason']
 }
+
+export type ContextShiftStrategy = ((options: {
+	chatHistory: ChatHistoryItem[]
+	metadata: any
+}) => { chatHistory: ChatHistoryItem[]; metadata: any }) | null

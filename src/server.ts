@@ -57,7 +57,7 @@ export class ModelServer {
 			const isBuiltIn = builtInEngineNames.includes(modelOptions.engine)
 			if (isBuiltIn) {
 				const builtInModelOptions = modelOptions as BuiltInModelOptions;
-				// can validate and resolve location if built-in
+				// can validate and resolve location of model files if a built-in engine is used
 				validateModelOptions(modelId, builtInModelOptions)
 				modelsWithDefaults[modelId] = {
 					id: modelId,

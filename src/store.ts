@@ -22,7 +22,6 @@ interface ModelFile {
 export interface StoredModel extends ModelConfig {
 	meta?: unknown
 	downloads?: Map<string, DownloadTracker>
-	files?: Map<string, ModelFile>
 	status: 'unloaded' | 'preparing' | 'ready' | 'error'
 }
 
@@ -89,9 +88,8 @@ export class ModelStore {
 		if (!model.downloads) {
 			model.downloads = new Map()
 		}
-		if (progress.totalBytes && progress.totalBytes === progress.loadedBytes) {
-			model.downloads.delete(progress.file)
-		} else if (model.downloads.has(progress.file)) {
+
+		if (model.downloads.has(progress.file)) {
 			const tracker = model.downloads.get(progress.file)!
 			tracker.pushProgress(progress)
 		} else {
@@ -142,12 +140,15 @@ export class ModelStore {
 			}, 10000)
 			try {
 				const modelMeta = await engine.prepareModel(
-					{ config: model, log: this.log },
+					{ config: model, log: this.log, modelsPath: this.modelsPath },
 					(progress) => {
 						this.onDownloadProgress(model.id, progress)
 					},
 					mergeAbortSignals([signal, this.prepareController.signal]),
 				)
+
+				model.downloads = undefined
+				
 				model.meta = modelMeta
 				model.status = 'ready'
 				this.log(LogLevels.info, 'Model ready', {
@@ -180,8 +181,8 @@ export class ModelStore {
 								download.progressBuffer[download.progressBuffer.length - 1]
 							const totalBytes = latestState?.totalBytes ?? 0
 							const loadedBytes = latestState?.loadedBytes ?? 0
-							const eta = status?.eta ?? 0
-							const formattedEta = prettyMilliseconds(eta)
+							const etaSeconds = status?.etaSeconds ?? 0
+							const formattedEta = prettyMilliseconds(etaSeconds * 1000)
 							const formattedTotalBytes = prettyBytes(totalBytes)
 							const formattedLoadedBytes = prettyBytes(loadedBytes)
 							acc.push({
@@ -192,7 +193,7 @@ export class ModelStore {
 								formattedTotalBytes,
 								percent: formatFloat(status?.percent),
 								speed: formatFloat(status?.speed),
-								eta: formatFloat(eta),
+								etaSeconds: formatFloat(etaSeconds),
 								formattedEta,
 							})
 							return acc
@@ -226,7 +227,7 @@ type ProgressState = {
 type DownloadStatus = {
 	percent: number
 	speed: number
-	eta: number
+	etaSeconds: number
 	loadedBytes: number
 	totalBytes: number
 }
@@ -269,7 +270,7 @@ class DownloadTracker {
 
 		return {
 			speed,
-			eta,
+			etaSeconds: eta,
 			percent: latestState.loadedBytes / latestState.totalBytes,
 			loadedBytes: latestState.loadedBytes,
 			totalBytes: latestState.totalBytes,

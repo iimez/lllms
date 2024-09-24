@@ -1,13 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-	Llama,
-	LlamaGrammar,
 	ChatHistoryItem,
 	ChatModelResponse,
 	LlamaTextJSON,
+	ChatModelFunctionCall,
 } from 'node-llama-cpp'
-import { getGrammarsFolder } from 'node-llama-cpp/dist/utils/getGrammarsFolder'
 import { CompletionFinishReason, ChatMessage } from '#lllms/types/index.js'
 import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
 import { LlamaChatResult } from './types.js'
@@ -40,43 +38,45 @@ export function addFunctionCallToChatHistory({
 	callParams,
 	callResult,
 	rawCall,
+	startsNewChunk
 }: {
-	chatHistory: ChatHistoryItem[]
-	functionName: string
-	functionDescription?: string
-	callParams: any
-	callResult: any
-	rawCall?: LlamaTextJSON
+	chatHistory: ChatHistoryItem[],
+	functionName: string,
+	functionDescription?: string,
+	callParams: any,
+	callResult: any,
+	rawCall?: LlamaTextJSON,
+	startsNewChunk?: boolean
 }) {
-	const newChatHistory = chatHistory.slice()
-	if (
-		newChatHistory.length === 0 ||
-		newChatHistory[newChatHistory.length - 1].type !== 'model'
-	)
-		newChatHistory.push({
-			type: 'model',
-			response: [],
-		})
+	const newChatHistory = chatHistory.slice();
+	if (newChatHistory.length === 0 || newChatHistory[newChatHistory.length - 1]!.type !== "model")
+			newChatHistory.push({
+					type: "model",
+					response: []
+			});
 
-	const lastModelResponseItem = newChatHistory[
-		newChatHistory.length - 1
-	] as ChatModelResponse
-	const newLastModelResponseItem = { ...lastModelResponseItem }
-	newChatHistory[newChatHistory.length - 1] = newLastModelResponseItem
+	const lastModelResponseItem = newChatHistory[newChatHistory.length - 1] as ChatModelResponse;
+	const newLastModelResponseItem = {...lastModelResponseItem};
+	newChatHistory[newChatHistory.length - 1] = newLastModelResponseItem;
 
-	const modelResponse = newLastModelResponseItem.response.slice()
-	newLastModelResponseItem.response = modelResponse
+	const modelResponse = newLastModelResponseItem.response.slice();
+	newLastModelResponseItem.response = modelResponse;
 
-	modelResponse.push({
-		type: 'functionCall',
-		name: functionName,
-		description: functionDescription,
-		params: callParams,
-		result: callResult,
-		rawCall,
-	})
+	const functionCall: ChatModelFunctionCall = {
+			type: "functionCall",
+			name: functionName,
+			description: functionDescription,
+			params: callParams,
+			result: callResult,
+			rawCall
+	};
 
-	return newChatHistory
+	if (startsNewChunk)
+			functionCall.startsNewChunk = true;
+
+	modelResponse.push(functionCall);
+
+	return newChatHistory;
 }
 
 export function createChatMessageArray(

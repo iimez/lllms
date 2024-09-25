@@ -20,7 +20,7 @@
 		"clean": "rimraf dist",
 		"download-test-models": "node scripts/download-test-models.js",
 		"prebuild": "npm run clean",
-		"build": "tsc --build tsconfig.release.json --force && tsc-alias -p tsconfig.release.json",
+		"build": "tsc -p tsconfig.release.json && tsc-alias -p tsconfig.release.json",
 		"test": "vitest --run",
 		"test:pool": "vitest tests/pool.test.ts",
 		"test:openai": "vitest tests/openai.test.ts",

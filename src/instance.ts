@@ -15,7 +15,7 @@ import {
 	EngineChatCompletionResult,
 	EngineTextCompletionResult,
 } from '#lllms/types/index.js'
-import { calculateChatIdentity } from '#lllms/lib/calculateChatIdentity.js'
+import { calculateContextIdentity } from '#lllms/lib/calculateContextIdentity.js'
 import {
 	LogLevels,
 	Logger,
@@ -48,7 +48,7 @@ export class ModelInstance<TEngineState = unknown> {
 	log: Logger
 
 	private engine: ModelEngine
-	private contextStateIdentity?: string
+	private contextIdentity?: string
 	private needsContextReset: boolean = false
 	private engineInstance?: TEngineState | unknown
 	private currentRequest?: ModelInstanceRequest | null
@@ -119,12 +119,15 @@ export class ModelInstance<TEngineState = unknown> {
 				abortSignal,
 			)
 			this.status = 'idle'
-			if (this.config.preload) {
-				if ('messages' in this.config.preload) {
-					this.contextStateIdentity = calculateChatIdentity(
-						this.config.preload.messages,
-					)
-				}
+			if (this.config.initialMessages?.length) {
+				this.contextIdentity = calculateContextIdentity({
+					messages: this.config.initialMessages,
+				})
+			}
+			if (this.config.prefix) {
+				this.contextIdentity = calculateContextIdentity({
+					text: this.config.prefix,
+				})
 			}
 			this.log(LogLevels.debug, 'Instance loaded', {
 				elapsed: elapsedMillis(loadBegin),
@@ -160,31 +163,47 @@ export class ModelInstance<TEngineState = unknown> {
 		this.currentRequest = null
 	}
 
-	reset() {
+	resetContext() {
 		this.needsContextReset = true
 	}
 
 	getContextStateIdentity() {
-		return this.contextStateIdentity
+		return this.contextIdentity
 	}
 
 	hasContextState() {
-		return this.contextStateIdentity !== undefined
+		return this.contextIdentity !== undefined
 	}
 
 	matchesContextState(request: ModelInstanceRequest) {
-		if (!this.contextStateIdentity) {
+		if (!this.contextIdentity) {
 			return false
 		}
-		if (!('messages' in request)) {
+		let incomingContextIdentity = ''
+		if ('messages' in request && request.messages?.length) {
+			incomingContextIdentity = calculateContextIdentity({
+				messages: request.messages,
+				dropLastMessage: true,
+			})
+		} else if ('prompt' in request && request.prompt) {
+			incomingContextIdentity = calculateContextIdentity({
+				text: request.prompt,
+			})
+		}
+
+		if (!incomingContextIdentity) {
 			return false
 		}
-		const incomingStateIdentity = calculateChatIdentity(request.messages, true)
-		return this.contextStateIdentity === incomingStateIdentity
+
+		return (
+			this.contextIdentity === incomingContextIdentity ||
+			incomingContextIdentity.startsWith(this.contextIdentity)
+		)
 	}
 
 	matchesRequirements(request: ModelInstanceRequest) {
-		const requiresGpu = !!this.config.device?.gpu && this.config.device?.gpu !== 'auto'
+		const requiresGpu =
+			!!this.config.device?.gpu && this.config.device?.gpu !== 'auto'
 		const modelMatches = this.modelId === request.model
 		const gpuMatches = requiresGpu ? this.gpu : true
 		return modelMatches && gpuMatches
@@ -249,7 +268,7 @@ export class ModelInstance<TEngineState = unknown> {
 		// checking if this instance has been flagged for reset
 		let resetContext = false
 		if (this.needsContextReset) {
-			this.contextStateIdentity = undefined
+			this.contextIdentity = undefined
 			this.needsContextReset = false
 			resetContext = true
 		}
@@ -277,10 +296,9 @@ export class ModelInstance<TEngineState = unknown> {
 				} else if (controller.cancelSignal.aborted) {
 					result.finishReason = 'cancel'
 				}
-				this.contextStateIdentity = calculateChatIdentity([
-					...request.messages,
-					result.message,
-				])
+				this.contextIdentity = calculateContextIdentity({
+					messages: [...request.messages, result.message],
+				})
 				return result
 			})
 			.catch((error) => {
@@ -349,11 +367,19 @@ export class ModelInstance<TEngineState = unknown> {
 			signal: options?.signal,
 		})
 		taskLogger(LogLevels.verbose, 'Creating text completion task')
+		// pass on resetContext if this instance has been flagged for reset
+		let resetContext = false
+		if (this.needsContextReset) {
+			this.contextIdentity = undefined
+			this.needsContextReset = false
+			resetContext = true
+		}
 		const taskBegin = process.hrtime.bigint()
 		const completionPromise = this.engine.processTextCompletionTask!(
 			{
 				request,
 				config: this.config,
+				resetContext,
 				log: taskLogger,
 				onChunk: options?.onChunk,
 			},
@@ -366,10 +392,9 @@ export class ModelInstance<TEngineState = unknown> {
 				} else if (controller.cancelSignal.aborted) {
 					result.finishReason = 'cancel'
 				}
-				// TODO allow continueing / caching prefix for text completions?
-				// this.contextStateIdentity = calculateChatIdentity([
-				// 	prompt: request.prompt,
-				// ])
+				this.contextIdentity = calculateContextIdentity({
+					text: request.prompt + result.text,
+				})
 				return result
 			})
 			.catch((error) => {

@@ -107,9 +107,7 @@ suite('preload', () => {
 				engine: 'gpt4all',
 				prepare: 'blocking',
 				maxInstances: 2,
-				preload: {
-					messages: preloadedMessages,
-				},
+				initialMessages: preloadedMessages,
 			},
 		},
 	})

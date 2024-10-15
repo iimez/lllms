@@ -6,7 +6,6 @@ import { ModelInstance } from '#lllms/instance.js'
 import { ModelStore, StoredModel } from '#lllms/store.js'
 import {
 	ModelOptions,
-	ModelConfig,
 	IncomingRequest,
 	CompletionProcessingOptions,
 	ChatCompletionRequest,
@@ -156,12 +155,16 @@ export class ModelServer {
 	
 	async stop() {
 		this.log(LogLevels.info, 'Stopping model server')
-		// TODO pool should be able to keep track of all running task and be able to cancel them.
 		this.pool.queue.clear()
 		this.store.dispose()
 		// need to make sure all tasks are canceled, waiting for idle can make stop hang
 		// await this.pool.queue.onIdle() // would wait until all completions are done
-		await this.pool.dispose() // will crash when there are still running tasks
+		try {
+			await this.pool.dispose() // might cause abort errors when there are still running tasks
+		} catch (err) {
+			this.log(LogLevels.error, 'Error while stopping model server', err)
+		}
+
 		this.log(LogLevels.debug, 'Model server stopped')
 	}
 

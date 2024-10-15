@@ -43,8 +43,8 @@ import {
 	FileDownloadProgress,
 	ModelConfig,
 	TextCompletionParams,
-	TextCompletionPreloadOptions,
 	TextCompletionGrammar,
+	ChatMessage,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
@@ -67,7 +67,8 @@ export interface NodeLlamaCppInstance {
 	pendingFunctionCalls: Record<string, any>
 	lastEvaluation?: LlamaChatResponse['lastEvaluation']
 	embeddingContext?: LlamaEmbeddingContext
-	contextTokenCount: number
+	completion?: LlamaCompletion
+	contextSequence: LlamaContextSequence
 }
 
 export interface NodeLlamaCppModelMeta {
@@ -79,8 +80,13 @@ export interface NodeLlamaCppModelConfig extends ModelConfig {
 	grammars?: Record<string, TextCompletionGrammar>
 	sha256?: string
 	completionDefaults?: TextCompletionParams
-	tools?: Record<string, ToolDefinition>
-	preload?: TextCompletionPreloadOptions
+	initialMessages?: ChatMessage[]
+	prefix?: string
+	tools?: {
+		definitions: Record<string, ToolDefinition>
+		includeToolDocumentation?: boolean
+		parallelism?: number
+	}
 	contextSize?: number
 	batchSize?: number
 	lora?: LlamaContextOptions['lora']
@@ -239,61 +245,63 @@ export async function createInstance(
 		chatHistory: [],
 		pendingFunctionCalls: {},
 		lastEvaluation: undefined,
-		contextTokenCount: 0,
+		completion: undefined,
+		contextSequence: context.getSequence(),
 	}
 
-	if (config.preload) {
-		// preloading chat session
-		if ('messages' in config.preload) {
-			const initialChatHistory = createChatMessageArray(config.preload.messages)
-			const chat = new LlamaChat({
-				contextSequence: context.getSequence(),
-				autoDisposeSequence: true,
-			})
+	if (config.initialMessages) {
+		const initialChatHistory = createChatMessageArray(config.initialMessages)
+		const chat = new LlamaChat({
+			contextSequence: instance.contextSequence!,
+			// autoDisposeSequence: true,
+		})
 
-			let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
-			if (config.tools && Object.keys(config.tools).length > 0) {
-				inputFunctions = {}
-				for (const functionName in config.tools) {
-					const functionDef = config.tools[functionName]
-					inputFunctions[functionName] = defineChatSessionFunction<any>({
-						description: functionDef.description,
-						params: functionDef.parameters,
-						handler: functionDef.handler || (() => {}),
-					}) as ChatSessionModelFunction
-				}
-			}
+		let inputFunctions: Record<string, ChatSessionModelFunction> | undefined
 
-			const preloadRes = await chat.loadChatAndCompleteUserMessage(
-				initialChatHistory,
-				{
-					initialUserPrompt: '',
-					functions: inputFunctions,
-					documentFunctionParams: config.preload.toolDocumentation,
-				},
-			)
-
-			instance.chat = chat
-			instance.chatHistory = initialChatHistory
-			instance.lastEvaluation = {
-				cleanHistory: initialChatHistory,
-				contextWindow: preloadRes.lastEvaluation.contextWindow,
-				contextShiftMetadata: preloadRes.lastEvaluation.contextShiftMetadata,
+		if (
+			config.tools?.definitions &&
+			Object.keys(config.tools.definitions).length > 0
+		) {
+			const functionDefs = config.tools.definitions
+			inputFunctions = {}
+			for (const functionName in functionDefs) {
+				const functionDef = functionDefs[functionName]
+				inputFunctions[functionName] = defineChatSessionFunction<any>({
+					description: functionDef.description,
+					params: functionDef.parameters,
+					handler: functionDef.handler || (() => {}),
+				}) as ChatSessionModelFunction
 			}
 		}
 
-		if ('prefix' in config.preload) {
-			// TODO preloading completion prefix
-			// context.getSequence()
-			// const completion = new LlamaCompletion({
-			// 	contextSequence: context.getSequence(),
-			// })
-			// const tokens = model.tokenize(config.preload.prefix)
-			// await completion.generateCompletion(tokens, {
-			// 	maxTokens: 0,
-			// })
-			// completion.dispose()
+		const loadMessagesRes = await chat.loadChatAndCompleteUserMessage(
+			initialChatHistory,
+			{
+				initialUserPrompt: '',
+				functions: inputFunctions,
+				documentFunctionParams: config.tools?.includeToolDocumentation,
+			},
+		)
+
+		instance.chat = chat
+		instance.chatHistory = initialChatHistory
+		instance.lastEvaluation = {
+			cleanHistory: initialChatHistory,
+			contextWindow: loadMessagesRes.lastEvaluation.contextWindow,
+			contextShiftMetadata: loadMessagesRes.lastEvaluation.contextShiftMetadata,
 		}
+	}
+	
+	if (config.prefix) {
+		const contextSequence = instance.contextSequence!
+		const completion = new LlamaCompletion({
+			contextSequence: contextSequence,
+		})
+		await completion.generateCompletion(config.prefix, {
+			maxTokens: 0,
+		})
+		instance.completion = completion
+		instance.contextSequence = contextSequence
 	}
 
 	return instance
@@ -323,9 +331,20 @@ export async function processChatCompletionTask(
 		if (instance.chat) {
 			await instance.chat.dispose()
 		}
+		let contextSequence = instance.contextSequence
+		if (!contextSequence || contextSequence.disposed) {
+			if (instance.context.sequencesLeft) {
+				contextSequence = instance.context.getSequence()
+				instance.contextSequence = contextSequence
+			} else {
+				throw new Error('No context sequence available')
+			}
+		} else {
+			contextSequence.clearHistory()
+		}
 		instance.chat = new LlamaChat({
-			contextSequence: instance.context.getSequence(),
-			autoDisposeSequence: true,
+			contextSequence: contextSequence,
+			// autoDisposeSequence: true,
 		})
 		// reset state and reingest the conversation history
 		instance.lastEvaluation = undefined
@@ -361,13 +380,15 @@ export async function processChatCompletionTask(
 	}
 
 	// setting up available function definitions
-	const toolDefinitions: Record<string, ToolDefinition> = {
-		...config.tools,
+	const functionDefinitions: Record<string, ToolDefinition> = {
+		...config.tools?.definitions,
 		...request.tools,
 	}
 
 	// see if the user submitted any function call results
-	const supportsParallelFunctionCalling = instance.chat.chatWrapper.settings.functions.parallelism != null
+	const supportsParallelFunctionCalling =
+		instance.chat.chatWrapper.settings.functions.parallelism != null &&
+		!!config.tools?.parallelism
 	const resolvedFunctionCalls = []
 	const functionCallResultMessages = request.messages.filter(
 		(m) => m.role === 'tool',
@@ -385,7 +406,7 @@ export async function processChatCompletionTask(
 			result: message.content,
 		})
 		const functionCall = instance.pendingFunctionCalls[message.callId]
-		const functionDef = toolDefinitions[functionCall.functionName]
+		const functionDef = functionDefinitions[functionCall.functionName]
 		resolvedFunctionCalls.push({
 			name: functionCall.functionName,
 			description: functionDef?.description,
@@ -410,6 +431,7 @@ export async function processChatCompletionTask(
 	}
 
 	// add the new user message to the chat history
+	let assistantPrefill: string = ''
 	const lastMessage = request.messages[request.messages.length - 1]
 	if (lastMessage.role === 'user' && lastMessage.content) {
 		const newUserText = flattenMessageTextContent(lastMessage.content)
@@ -419,8 +441,12 @@ export async function processChatCompletionTask(
 				text: newUserText,
 			})
 		}
+	} else if (lastMessage.role === 'assistant') {
+		// use last message as prefill for response, if its an assistant message
+		assistantPrefill = flattenMessageTextContent(lastMessage.content)
 	} else if (!resolvedFunctionCalls.length) {
-		throw new Error('Chat completions require a final user message.')
+		log(LogLevels.warn, 'Tailing message is not valid for chat completion. This is likely a mistake.', lastMessage)
+		throw new Error('Invalid tailing chat message')
 	}
 
 	// only grammar or functions can be used, not both.
@@ -434,10 +460,10 @@ export async function processChatCompletionTask(
 			throw new Error(`Grammar "${request.grammar}" not found.`)
 		}
 		inputGrammar = instance.grammars[request.grammar]
-	} else if (Object.keys(toolDefinitions).length > 0) {
+	} else if (Object.keys(functionDefinitions).length > 0) {
 		inputFunctions = {}
-		for (const functionName in toolDefinitions) {
-			const functionDef = toolDefinitions[functionName]
+		for (const functionName in functionDefinitions) {
+			const functionDef = functionDefinitions[functionName]
 			inputFunctions[functionName] = defineChatSessionFunction<any>({
 				description: functionDef.description,
 				params: functionDef.parameters,
@@ -453,35 +479,35 @@ export async function processChatCompletionTask(
 		? undefined
 		: instance.chatHistory.slice()
 
-	if (instance.chatHistory[instance.chatHistory.length - 1].type !== 'model') {
+	if (instance.chatHistory[instance.chatHistory.length - 1].type !== 'model' || assistantPrefill) {
+		const newModelResponse = assistantPrefill ? [ assistantPrefill ] : []
 		newChatHistory.push({
 			type: 'model',
-			response: [],
+			response: newModelResponse,
 		})
 		if (newContextWindowChatHistory) {
 			newContextWindowChatHistory.push({
 				type: 'model',
-				response: [],
+				response: newModelResponse,
 			})
 		}
 	}
 
-	const initialTokenMeterState = instance.chat.sequence.tokenMeter.getState()
-	let completionResult: LlamaChatResult
-
 	const functionsOrGrammar = inputFunctions
 		? {
 				functions: inputFunctions,
-				documentFunctionParams: true,
-				maxParallelFunctionCalls: 2,
+				documentFunctionParams: config.tools?.includeToolDocumentation ?? true,
+				maxParallelFunctionCalls: config.tools?.parallelism ?? 1,
 				onFunctionCall: (functionCall: LlamaChatResponseFunctionCall<any>) => {
 					// log(LogLevels.debug, 'Called function', functionCall)
 				},
-		  }
+			}
 		: {
 				grammar: inputGrammar,
-		  }
-
+			}
+	
+	const initialTokenMeterState = instance.chat.sequence.tokenMeter.getState()
+	let completionResult: LlamaChatResult
 	while (true) {
 		const {
 			functionCalls,
@@ -534,7 +560,7 @@ export async function processChatCompletionTask(
 			// find leading immediately evokable function calls (=have a handler function)
 			const evokableFunctionCalls = []
 			for (const functionCall of functionCalls) {
-				const functionDef = toolDefinitions[functionCall.functionName]
+				const functionDef = functionDefinitions[functionCall.functionName]
 				if (functionDef.handler) {
 					evokableFunctionCalls.push(functionCall)
 				} else {
@@ -545,7 +571,7 @@ export async function processChatCompletionTask(
 			// resolve their results.
 			const results = await Promise.all(
 				evokableFunctionCalls.map(async (functionCall) => {
-					const functionDef = toolDefinitions[functionCall.functionName]
+					const functionDef = functionDefinitions[functionCall.functionName]
 					if (!functionDef) {
 						throw new Error(
 							`The model tried to call undefined function "${functionCall.functionName}"`,
@@ -640,7 +666,7 @@ export async function processChatCompletionTask(
 		// as is, these may never resolve
 		const pendingFunctionCalls = completionResult.functionCalls.filter(
 			(call) => {
-				const functionDef = toolDefinitions[call.functionName]
+				const functionDef = functionDefinitions[call.functionName]
 				return !functionDef.handler
 			},
 		)
@@ -648,7 +674,7 @@ export async function processChatCompletionTask(
 		// TODO write a test that triggers a parallel call to a deferred function and to an IE function
 		const tailingFunctionCalls = completionResult.functionCalls.filter(
 			(call) => {
-				const functionDef = toolDefinitions[call.functionName]
+				const functionDef = functionDefinitions[call.functionName]
 				return functionDef.handler
 			},
 		)
@@ -673,7 +699,9 @@ export async function processChatCompletionTask(
 		})
 	}
 
-	const tokenDifference = instance.chat.sequence.tokenMeter.diff(initialTokenMeterState)
+	const tokenDifference = instance.chat.sequence.tokenMeter.diff(
+		initialTokenMeterState,
+	)
 	return {
 		finishReason: mapFinishReason(completionResult.stopReason),
 		message: assistantMessage,
@@ -687,6 +715,7 @@ export async function processTextCompletionTask(
 	{
 		request,
 		config,
+		resetContext,
 		log,
 		onChunk,
 	}: EngineTextCompletionArgs<NodeLlamaCppModelConfig>,
@@ -696,44 +725,50 @@ export async function processTextCompletionTask(
 	if (!request.prompt) {
 		throw new Error('Prompt is required for text completion.')
 	}
-
+	
+	let completion: LlamaCompletion
 	let contextSequence: LlamaContextSequence
-	if (instance.context.sequencesLeft) {
-		log(LogLevels.debug, 'Clearing history', {
-			sequencesLeft: instance.context.sequencesLeft,
-		})
-		contextSequence = instance.context.getSequence()
-		await contextSequence.clearHistory()
-	} else {
-		log(LogLevels.debug, 'No sequencesLeft, recreating context')
-		await instance.context.dispose()
-		instance.context = await instance.model.createContext({
-			lora: config.lora,
-			contextSize: config.contextSize,
-			createSignal: signal,
-			threads: config.device?.cpuThreads,
-			batchSize: config.batchSize,
-			flashAttention: true,
-		})
-		contextSequence = instance.context.getSequence()
-	}
 
-	const completion = new LlamaCompletion({
-		contextSequence: contextSequence,
-		autoDisposeSequence: true,
-	})
+	if (resetContext && instance.contextSequence) {
+		instance.contextSequence.clearHistory()
+	}
+	
+	if (!instance.completion || instance.completion.disposed) {
+		if (instance.contextSequence) {
+			contextSequence = instance.contextSequence
+		} else if (instance.context.sequencesLeft) {
+			contextSequence = instance.context.getSequence()
+		} else {
+			throw new Error('No context sequence available')
+		}
+		instance.contextSequence = contextSequence
+		completion = new LlamaCompletion({
+			contextSequence,
+		})
+		instance.completion = completion
+	} else {
+		completion = instance.completion
+		contextSequence = instance.contextSequence!
+	}
+	
+	if (!contextSequence || contextSequence.disposed) {
+		contextSequence = instance.context.getSequence()
+		instance.contextSequence = contextSequence
+		completion = new LlamaCompletion({
+			contextSequence,
+		})
+		instance.completion = completion
+	}
 
 	const stopGenerationTriggers: StopGenerationTrigger[] = []
 	const stopTrigger = request.stop ?? config.completionDefaults?.stop
 	if (stopTrigger) {
 		stopGenerationTriggers.push(...stopTrigger.map((t) => [t]))
 	}
-	
-	const initialTokenMeterState = contextSequence.tokenMeter.getState()
 
-	const tokens = instance.model.tokenize(request.prompt)
+	const initialTokenMeterState = contextSequence.tokenMeter.getState()
 	const defaults = config.completionDefaults ?? {}
-	const result = await completion.generateCompletionWithMeta(tokens, {
+	const result = await completion.generateCompletionWithMeta(request.prompt, {
 		maxTokens: request.maxTokens ?? defaults.maxTokens,
 		temperature: request.temperature ?? defaults.temperature,
 		topP: request.topP ?? defaults.topP,
@@ -749,9 +784,7 @@ export async function processTextCompletionTask(
 			? stopGenerationTriggers
 			: undefined,
 		seed:
-			request.seed ??
-			config.completionDefaults?.seed ??
-			createSeed(0, 1000000),
+			request.seed ?? config.completionDefaults?.seed ?? createSeed(0, 1000000),
 		onToken: (tokens) => {
 			const text = instance.model.detokenize(tokens)
 			if (onChunk) {
@@ -763,8 +796,9 @@ export async function processTextCompletionTask(
 		},
 	})
 
-	const tokenDifference = contextSequence.tokenMeter.diff(initialTokenMeterState)
-	completion.dispose()
+	const tokenDifference = contextSequence.tokenMeter.diff(
+		initialTokenMeterState,
+	)
 
 	return {
 		finishReason: mapFinishReason(result.metadata.stopReason),
@@ -776,7 +810,7 @@ export async function processTextCompletionTask(
 }
 
 export async function processEmbeddingTask(
-	{ request, config }: EngineEmbeddingArgs<NodeLlamaCppModelConfig>,
+	{ request, config, log }: EngineEmbeddingArgs<NodeLlamaCppModelConfig>,
 	instance: NodeLlamaCppInstance,
 	signal?: AbortSignal,
 ): Promise<EngineEmbeddingResult> {
@@ -803,18 +837,25 @@ export async function processEmbeddingTask(
 			batchSize: config.batchSize,
 			createSignal: signal,
 			threads: config.device?.cpuThreads,
+			contextSize: config.contextSize,
 		})
 	}
+
+	// @ts-ignore - private property
+	const contextSize = embeddingContext._llamaContext.contextSize
 
 	const embeddings: Float32Array[] = []
 	let inputTokens = 0
 
 	for (const text of texts) {
-		const tokenizedInput = instance.model.tokenize(text)
+		let tokenizedInput = instance.model.tokenize(text)
+		if (tokenizedInput.length > contextSize) {
+			log(LogLevels.warn, 'Truncated input that exceeds context size')
+			tokenizedInput = tokenizedInput.slice(0, contextSize)
+		}
 		inputTokens += tokenizedInput.length
-		const embedding = await instance.embeddingContext.getEmbeddingFor(
-			tokenizedInput,
-		)
+		const embedding =
+			await instance.embeddingContext.getEmbeddingFor(tokenizedInput)
 		embeddings.push(new Float32Array(embedding.vector))
 		if (signal?.aborted) {
 			break

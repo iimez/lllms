@@ -260,7 +260,9 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		options: { signal?: AbortSignal; emit?: boolean } = {},
 	) {
 		if (!this.engines) {
-			throw new Error('No engines available - did you call init()?')
+			throw new Error(
+				'No engines available. Make sure the pool is initialized and ModelServer.start() or ModelPool.init() were called.',
+			)
 		}
 		const model = this.config.models[modelId]
 		const engine = this.engines[model.engine]
@@ -301,7 +303,6 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 				await this.prepareInstance(instance, abortSignal)
 				instance.status = 'idle'
 			} catch (error) {
-				console.error('Error preparing instance', error)
 				this.log(LogLevels.error, 'Error preparing instance', {
 					model: modelId,
 					instance: instance.id,
@@ -416,8 +417,8 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		request: ModelInstanceRequest,
 		signal?: AbortSignal,
 	) {
-		if ('messages' in request) {
-			// for chat completions first search for an instance that has the messages already ingested and the context ready
+		if ('messages' in request || 'prompt' in request) {
+			// for text and chat completions first search for an instance that has the context ready
 			for (const key in this.instances) {
 				const instance = this.instances[key]
 				if (
@@ -466,6 +467,11 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 			const instance = await this.spawnInstance(request.model, {
 				emit: false,
 			})
+			// reset the context if the request doesnt match the instances preloaded context state
+			const hasInitialContextState = instance.config.initialMessages?.length || instance.config.prefix
+			if (hasInitialContextState && !instance.matchesContextState(request)) {
+				instance.resetContext()
+			}
 			this.log(LogLevels.debug, 'Spawned instance acquired', {
 				instance: instance.id,
 				sequence: request.sequence,
@@ -488,7 +494,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 				sequence: request.sequence,
 			})
 			lruInstance.lock(request)
-			lruInstance.reset() // make sure we reset its cache.
+			lruInstance.resetContext() // make sure we reset its cache.
 			return lruInstance
 		}
 
@@ -552,7 +558,7 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 		return ++this.requestSequence
 	}
 
-	// requests an language model instance from the pool
+	// requests a model instance from the pool
 	async requestInstance(
 		incomingRequest: IncomingRequest,
 		signal?: AbortSignal,
@@ -602,10 +608,17 @@ export class ModelPool extends EventEmitter3<ModelPoolEvent> {
 				})
 			})
 			.then((task) => {
-				// if theres more requests waiting, prioritize handling them first
-				if (!this.pendingRequests.size && this.canSpawnInstance(request.model)) {
-					this.spawnInstance(request.model)
-				}
+				// if there are more requests waiting, prioritize handling them before spawning new instances
+				// deferred to avoid AbortError when the pool is disposed right after the operation
+				process.nextTick(() => {
+					if (
+						!this.pendingRequests.size &&
+						this.canSpawnInstance(request.model) && 
+						!this.shutdownController.signal.aborted 
+					) {
+						this.spawnInstance(request.model)
+					}
+				})
 				if (task?.instance) {
 					this.emit('release', instance)
 				}

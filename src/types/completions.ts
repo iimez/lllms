@@ -10,14 +10,17 @@ export type CompletionFinishReason =
 	| 'cancel'
 	| 'timeout'
 
-
 export interface AssistantToolCall {
 	id: string
 	name: string
 	parameters?: Record<string, any>
 }
 
-export type ChatMessage = UserMessage | SystemMessage | AssistantMessage | ToolCallResultMessage
+export type ChatMessage =
+	| UserMessage
+	| SystemMessage
+	| AssistantMessage
+	| ToolCallResultMessage
 
 export interface MessageTextContentPart {
 	type: 'text'
@@ -30,7 +33,9 @@ export interface MessageImageContentPart {
 	image?: Sharp
 }
 
-export type MessageContentPart = MessageTextContentPart | MessageImageContentPart
+export type MessageContentPart =
+	| MessageTextContentPart
+	| MessageImageContentPart
 
 export interface UserMessage {
 	role: 'user'
@@ -81,14 +86,3 @@ export interface TextCompletionParams {
 	topK?: number
 	tokenBias?: Record<string, number>
 }
-
-export interface ChatPreloadOptions {
-	messages: ChatMessage[]
-	toolDocumentation?: boolean
-}
-
-export interface PromptPrefixPreloadOptions {
-	prefix: string
-}
-
-export type TextCompletionPreloadOptions = ChatPreloadOptions | PromptPrefixPreloadOptions

@@ -33,7 +33,7 @@ export async function createChatCompletion(
 	return { task, result, device }
 }
 
-export async function createCompletion(
+export async function createTextCompletion(
 	server: ModelServer,
 	args: Omit<TextCompletionRequest, 'model'> & { model?: string },
 	timeout = defaultTimeout

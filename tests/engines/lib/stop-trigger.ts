@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
 import { ModelServer } from '#lllms/server.js'
-import { createChatCompletion, createCompletion } from '../../util.js'
+import { createChatCompletion, createTextCompletion } from '../../util.js'
 
 export async function runStopTriggerTest(llms: ModelServer) {
 	const chat = await createChatCompletion(llms, {
@@ -18,7 +18,7 @@ export async function runStopTriggerTest(llms: ModelServer) {
 	// })
 	expect(chat.result.finishReason).toBe('stopTrigger')
 	expect(chat.result.message.content).toBe('')
-	const completion = await createCompletion(llms, {
+	const completion = await createTextCompletion(llms, {
 		prompt: "Let's count to four. One, two,",
 		stop: [' three'],
 		maxTokens: 10,

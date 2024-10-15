@@ -40,7 +40,7 @@ export async function runContextLeakTest(
 
 	messagesA.push(responseA1.result.message, {
 		role: 'user',
-		content: 'Remind me of one animal fact? One Sentence.',
+		content: 'Remind me of one animal fact I mentioned earlier? One Sentence.',
 	})
 	const responseA2 = await createChatCompletion(llms, {
 		stop: ['\n'],

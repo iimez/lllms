@@ -21,8 +21,8 @@ import {
 	EngineEmbeddingResult,
 	FileDownloadProgress,
 	ModelConfig,
-	TextCompletionPreloadOptions,
 	TextCompletionParams,
+	ChatMessage,
 } from '#lllms/types/index.js'
 import { LogLevels } from '#lllms/lib/logger.js'
 import { downloadLargeFile } from '#lllms/lib/downloadLargeFile.js'
@@ -48,7 +48,8 @@ export interface GPT4AllModelConfig extends ModelConfig {
 	contextSize?: number
 	batchSize?: number
 	task: 'text-completion' | 'embedding'
-	preload?: TextCompletionPreloadOptions
+	// preload?: TextCompletionPreloadOptions
+	initialMessages?: ChatMessage[]
 	completionDefaults?: TextCompletionParams
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
@@ -82,17 +83,15 @@ export async function prepareModel(
 	} else {
 		modelList = JSON.parse(fs.readFileSync(modelMetaPath, 'utf-8'))
 	}
-	const foundModelMeta = modelList.find(
-		(item) => {
-			if (config.md5 && item.md5sum) {
-				return item.md5sum === config.md5
-			}
-			if (config.url && item.url) {
-				return item.url === config.url
-			}
-			return item.filename === path.basename(config.location)
-		},
-	)
+	const foundModelMeta = modelList.find((item) => {
+		if (config.md5 && item.md5sum) {
+			return item.md5sum === config.md5
+		}
+		if (config.url && item.url) {
+			return item.url === config.url
+		}
+		return item.filename === path.basename(config.location)
+	})
 	if (foundModelMeta) {
 		modelMeta = foundModelMeta
 	}
@@ -167,12 +166,10 @@ export async function createInstance(
 	if (config.device?.cpuThreads) {
 		instance.llm.setThreadCount(config.device.cpuThreads)
 	}
-	
-	let contextTokenCount = 0
 
-	if (config.preload && 'generate' in instance) {
-		if ('messages' in config.preload) {
-			let messages = createChatMessageArray(config.preload.messages)
+	if ('generate' in instance) {
+		if (config.initialMessages?.length) {
+			let messages = createChatMessageArray(config.initialMessages)
 			let systemPrompt
 			if (messages[0].role === 'system') {
 				systemPrompt = messages[0].content
@@ -182,8 +179,8 @@ export async function createInstance(
 				systemPrompt,
 				messages,
 			})
-		} else if ('prefix' in config.preload) {
-			await instance.generate(config.preload.prefix, {
+		} else if (config.prefix) {
+			await instance.generate(config.prefix, {
 				nPredict: 0,
 			})
 		} else {
@@ -291,6 +288,7 @@ export async function processChatCompletionTask(
 		request,
 		config,
 		resetContext,
+		log,
 		onChunk,
 	}: EngineChatCompletionArgs<GPT4AllModelConfig>,
 	instance: GPT4AllInstance,
@@ -301,6 +299,7 @@ export async function processChatCompletionTask(
 	}
 	let session = instance.activeChatSession
 	if (!session || resetContext) {
+		log(LogLevels.debug, 'Resetting chat context')
 		let messages = createChatMessageArray(request.messages)
 		let systemPrompt
 		if (messages[0].role === 'system') {

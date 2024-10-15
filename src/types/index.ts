@@ -10,9 +10,7 @@ import {
 	CompletionFinishReason,
 	TextCompletionParams,
 	ToolDefinition,
-	TextCompletionPreloadOptions,
 } from '#lllms/types/completions.js'
-import type { PreTrainedModel, PreTrainedTokenizer, Processor } from '@huggingface/transformers'
 import type { ContextShiftStrategy } from '#lllms/engines/node-llama-cpp/types.js'
 export * from '#lllms/types/completions.js'
 
@@ -46,19 +44,24 @@ export interface ModelConfigBase extends ModelOptionsBase {
 export interface ModelConfig extends ModelConfigBase {
 	url?: string
 	location?: string
-	task: ModelTaskType | string & {}
-	engine: BuiltInEngineName | string & {}
+	task: ModelTaskType | (string & {})
+	engine: BuiltInEngineName | (string & {})
 	minInstances: number
 	maxInstances: number
 	ttl?: number
-	preload?: TextCompletionPreloadOptions
+	prefix?: string
+	initialMessages?: ChatMessage[]
 	device?: {
-		gpu?: boolean | 'auto' | string & {}
+		gpu?: boolean | 'auto' | (string & {})
 		// gpuLayers?: number
 		// cpuThreads?: number
 		// memLock?: boolean
 	}
 }
+
+// export interface ChatModelConfig extends ModelConfig {
+// 	initialMessages?: ChatMessage[]
+// }
 
 export interface CompletionChunk {
 	tokens: number[]
@@ -159,6 +162,7 @@ export interface EngineTextCompletionArgs<
 	TModelMeta = unknown,
 > extends EngineContext<TModelConfig, TModelMeta> {
 	onChunk?: (chunk: CompletionChunk) => void
+	resetContext?: boolean
 	request: TextCompletionRequest
 }
 
@@ -258,9 +262,9 @@ interface TextCompletionModelOptions {
 	task: 'text-completion'
 	contextSize?: number
 	grammars?: Record<string, TextCompletionGrammar>
-	tools?: Record<string, ToolDefinition>
 	completionDefaults?: TextCompletionParams
-	preload?: TextCompletionPreloadOptions
+	initialMessages?: ChatMessage[]
+	prefix?: string
 	batchSize?: number
 }
 
@@ -271,6 +275,11 @@ interface LlamaCppModelOptionsBase extends BuiltInModelOptionsBase {
 	file?: string
 	batchSize?: number
 	contextShiftStrategy?: ContextShiftStrategy
+	tools?: {
+		definitions: Record<string, ToolDefinition>
+		includeParamsDocumentation?: boolean
+		parallelism?: number
+	}
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
 		gpuLayers?: number
@@ -279,11 +288,15 @@ interface LlamaCppModelOptionsBase extends BuiltInModelOptionsBase {
 	}
 }
 
-interface LlamaCppEmbeddingModelOptions extends LlamaCppModelOptionsBase, EmbeddingModelOptions {
+interface LlamaCppEmbeddingModelOptions
+	extends LlamaCppModelOptionsBase,
+		EmbeddingModelOptions {
 	task: 'embedding'
 }
 
-export interface LlamaCppTextCompletionModelOptions extends LlamaCppModelOptionsBase, TextCompletionModelOptions {
+export interface LlamaCppTextCompletionModelOptions
+	extends LlamaCppModelOptionsBase,
+		TextCompletionModelOptions {
 	task: 'text-completion'
 }
 
@@ -319,16 +332,15 @@ export interface TransformersJsModel {
 interface TransformersJsModelOptions extends BuiltInModelOptionsBase {
 	engine: 'transformers-js'
 	task: 'image-to-text' | 'speech-to-text' | 'text-completion' | 'embedding'
-	textModel?: TransformersJsModel,
-	visionModel?: TransformersJsModel,
-	speechModel?: TransformersJsModel,
+	textModel?: TransformersJsModel
+	visionModel?: TransformersJsModel
+	speechModel?: TransformersJsModel
 	device?: {
 		gpu?: boolean | 'auto' | (string & {})
 	}
 }
 
-export interface CustomEngineModelOptions extends ModelOptionsBase {
-}
+export interface CustomEngineModelOptions extends ModelOptionsBase {}
 
 export type BuiltInModelOptions =
 	| LlamaCppTextCompletionModelOptions
@@ -336,7 +348,7 @@ export type BuiltInModelOptions =
 	| GPT4AllTextCompletionModelOptions
 	| GPT4AllEmbeddingModelOptions
 	| TransformersJsModelOptions
-	
+
 export type ModelOptions = BuiltInModelOptions | CustomEngineModelOptions
 
 export interface EngineEmbeddingResult {

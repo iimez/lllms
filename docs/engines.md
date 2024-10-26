@@ -5,9 +5,7 @@ Currently the built-in inference engines are `node-llama-cpp`, `gpt4all` and `tr
 
 #### node-llama-cpp
 
-Can be used for `text-completion` and `embedding` tasks. See the [beta v3 discussion](https://github.com/withcatai/node-llama-cpp/discussions/109) for more information. Until there is more docs:
-- For how to use function calling take a look at the [tests](./tests/engines/lib/feature-functions.ts).
-- For grammar see [here](./tests/engines/lib/feature-grammar.ts).
+Can be used for `text-completion` and `embedding` tasks. See the [node-llama-cpp docs](https://node-llama-cpp.withcat.ai/) for more information.
 
 Find available GGUF models on [huggingface.co](https://huggingface.co/models?library=gguf).
 
@@ -19,7 +17,11 @@ You can find available models [here](https://github.com/nomic-ai/gpt4all/blob/c7
 
 #### transformers-js
 
-Currently supporting `speech-to-text` and `image-to-text` tasks. Peer dependency requires `github:xenova/transformers.js#v3`.
+Currently supporting `speech-to-text` and `image-to-text` tasks. See [tests](./tests/engines/transformers.test.ts).
+
+#### node-stable-diffusion-cpp
+
+WIP. See [tests](./tests/engines/stable-diffusion.test.ts).
 
 #### Custom Engines
 

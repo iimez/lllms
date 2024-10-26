@@ -1,14 +1,12 @@
-import type { ModelPool } from '#lllms/pool.js'
-import type { ModelStore } from '#lllms/store.js'
-import { ModelEngine, EngineStartContext, ModelOptions, BuiltInModelOptions } from '#lllms/types/index.js'
-// export type { NodeLlamaCppEngineOptions } from './node-llama-cpp/engine.js'
-// export type { GPT4AllEngineOptions } from './gpt4all/engine.js'
-// export type { TransformersJsEngineOptions } from './transformers-js/engine.js'
+import type { ModelPool } from '#package/pool.js'
+import type { ModelStore } from '#package/store.js'
+import { ModelEngine, EngineStartContext, ModelOptions, BuiltInModelOptions } from '#package/types/index.js'
 
 export const BuiltInEngines = {
 	gpt4all: 'gpt4all',
 	nodeLlamaCpp: 'node-llama-cpp',
 	transformersJs: 'transformers-js',
+	stableDiffusionCpp: 'stable-diffusion-cpp',
 } as const
 
 export type BuiltInEngineName = typeof BuiltInEngines[keyof typeof BuiltInEngines];
@@ -26,19 +24,5 @@ export class CustomEngine implements ModelEngine {
 	}
 	async prepareModel() {}
 	async createInstance() {}
-	async disposeInstance() {}
-}
-
-export class NestedEngine implements ModelEngine {
-	pool!: ModelPool
-	store!: ModelStore
-	async start() {
-		// this.pool = pool
-		// this.store = store
-	}
-	async prepareModel() {}
-	async createInstance() {
-		
-	}
 	async disposeInstance() {}
 }

@@ -1,5 +1,5 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
+import { ModelServer } from '#package/server.js'
 import { createChatCompletion } from './util.js'
 
 suite('basic', () => {

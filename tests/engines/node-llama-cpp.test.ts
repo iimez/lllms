@@ -1,10 +1,10 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'node:fs'
-import { ModelServer } from '#lllms/server.js'
+import { ModelServer } from '#package/server.js'
 import {
 	ChatMessage,
 	ModelOptions,
-} from '#lllms/types/index.js'
+} from '#package/types/index.js'
 import {
 	runStopTriggerTest,
 	runTokenBiasTest,

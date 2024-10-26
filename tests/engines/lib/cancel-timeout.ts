@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
-import { ChatCompletionRequest } from '#lllms/types/index.js'
+import { ModelServer } from '#package/server.js'
+import { ChatCompletionRequest } from '#package/types/index.js'
 
 export async function runTimeoutTest(llms: ModelServer) {
 	const args: ChatCompletionRequest = {

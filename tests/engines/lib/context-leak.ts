@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
-import { ChatMessage } from '#lllms/types/index.js'
+import { ModelServer } from '#package/server.js'
+import { ChatMessage } from '#package/types/index.js'
 import { createChatCompletion, parseInstanceId } from '../../util.js'
 
 // conversation that tests whether reused instances leak their context

@@ -1,5 +1,5 @@
-import type { ModelServer } from '#lllms/server.js'
-import { ChatCompletionRequest, TextCompletionRequest } from '#lllms/types/index.js'
+import type { ModelServer } from '#package/server.js'
+import { ChatCompletionRequest, TextCompletionRequest } from '#package/types/index.js'
 
 const testDefaults = {
 	model: 'test',

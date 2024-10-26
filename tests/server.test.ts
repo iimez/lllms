@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import request from 'supertest'
 import express, { Express } from 'express'
-import { ModelServer, ModelServerOptions } from '#lllms/server.js'
-import { createExpressMiddleware } from '#lllms/http.js'
+import { ModelServer, ModelServerOptions } from '#package/server.js'
+import { createExpressMiddleware } from '#package/http.js'
 
 const testModel = 'phi3-mini-4k'
 

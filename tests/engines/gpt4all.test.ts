@@ -1,10 +1,10 @@
 import { suite, it, test, beforeAll, afterAll, expect } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
+import { ModelServer } from '#package/server.js'
 import {
 	ChatCompletionRequest,
 	ChatMessage,
 	ModelOptions,
-} from '#lllms/types/index.js'
+} from '#package/types/index.js'
 import {
 	runContextLeakTest,
 	runContextReuseTest,

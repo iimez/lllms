@@ -1,6 +1,6 @@
 import fs from 'node:fs'
-import { ModelServer } from '#lllms/server.js'
-import { ChatMessage } from '#lllms/types/index.js'
+import { ModelServer } from '#package/server.js'
+import { ChatMessage } from '#package/types/index.js'
 import { createChatCompletion } from '../../util.js'
 
 export async function runFileIngestionTest(

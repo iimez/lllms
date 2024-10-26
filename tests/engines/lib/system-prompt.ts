@@ -1,5 +1,5 @@
 import { expect } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
+import { ModelServer } from '#package/server.js'
 import { createChatCompletion } from '../../util.js'
 
 export async function runSystemMessageTest(llms: ModelServer) {

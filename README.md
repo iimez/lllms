@@ -2,7 +2,7 @@
 
 Libraries and server to build AI applications doing local inference in node. Use it within your application, or as a microservice. Adapters to [llama.cpp](https://github.com/ggerganov/llama.cpp/) via [node-llama-cpp](https://github.com/withcatai/node-llama-cpp) and [gpt4all](https://github.com/nomic-ai/gpt4all). And [transformers.js](https://github.com/xenova/transformers.js/) using [ONNX](https://github.com/microsoft/onnxruntime/tree/main/js#onnxruntime-node)!
 
-The project includes a model resource pool, an inference queue and a HTTP API server. Model file management is abstracted away as much as possible - configure a URL and go. Especially useful for quick model evaluations and experiments (in JavaScript), small-scale chatbots, resource efficient local assistants, or any applications where private & offline are interesting criteria. For other - not node-based solutions - check out the [related solutions](#related-solutions) section.
+The project includes a model resource pool, an inference queue and a HTTP API server. Model file management is abstracted away as much as possible - configure a URL and go. This package is useful for quick model evaluations and experiments (in JavaScript), small-scale chatbots, resource efficient assistants on edge devices, or any applications where private & offline are interesting criteria. For other - not node-based solutions - check out the [related solutions](#related-solutions) section.
 
 ⚠️ This package is currently in beta. APIs may change. Things may break. [Help is welcome](#contributing).
 
@@ -12,7 +12,7 @@ The project includes a model resource pool, an inference queue and a HTTP API se
 - Adjust the pool `concurrency`, and the models `maxInstances`, `ttl` and `contextSize` to fit your usecase. Combine multiple pools for more complex setups.
 - Can be tuned to either use no resources when idle or to always keep a model ready with context preloaded.
 - A chat session cache that will effectively reuse context across multiple turns or stateless requests.
-- OpenAI spec API endpoints. See [HTTP API docs](./docs/http-api.md) for details. A "native" API is not yet implemented.
+- OpenAI spec API endpoints. See [HTTP API docs](./docs/http-api.md) for details. A "native" HTTP API is not yet implemented.
 - BYO web server or use the provided express server and middleware. Incoming requests are queued - stall, if needed - and processed as soon as resources are available.
 - Have as many ModelServers running as you want, they can share the same cache directory. (Multiple processes can as well)
 - Use the [ModelPool](./examples/pool.js) class directly for a lowerlevel transaction-like API to aquire/release model instances.
@@ -105,7 +105,7 @@ Currently supported inference engines are:
 | --- | --- |
 | node-llama-cpp | `node-llama-cpp >= 3.0.0` |
 | gpt4all | `gpt4all >= 4.0.0` |
-| transformers-js | `@huggingface/transformers >= 3.0.0-alpha.9` |
+| transformers-js | `@huggingface/transformers >= 3.0.0` |
 
 See [engine docs](./docs/engines.md) for more information on each.
 
@@ -121,7 +121,7 @@ System role messages are supported only as the first message in a chat completio
 Note that the current context cache implementation only works if (apart from the final user message) the _same messages_ are resent in the _same order_. This is because the messages will be hashed to be compared during follow up turns, to match requests to the correct session. If no hash matches everything will still work, but slower. Because a fresh context will be used and the whole input conversation will be reingested, instead of just the new user message.
 
 ##### Function Calling
-Only available when using node-llama-cpp and a model that supports function calling, like [functionary models](https://functionary.meetkai.com/) and Llama3 instruct. `tool_choice` can currently not be controlled and will always be `auto`. GBNF grammars cannot be used together with function calling.
+Only available when using node-llama-cpp and a model that supports function calling. `tool_choice` can currently not be controlled and will always be `auto`. GBNF grammars cannot be used together with function calling.
 
 ##### Huge node_modules when installing all engines
 CUDA binaries are distributed with each engine seperately, which leads to an extra 0.5-1GB of disk use. Unfortunately there is nothing I can do about that.
@@ -169,7 +169,7 @@ Not in any particular order:
 - [x] non-chat text completions: Support preloading of prefixes
 - [ ] Add some light jsdoc for server/pool/store methods
 - [ ] utilize node-llama-cpp's support to reuse LlamaModel instances with multiple contexts
-- [ ] Support transformer.js for text-completion tasks ([not yet supported in Node.js](https://github.com/xenova/transformers.js/blob/38a3bf6dab2265d9f0c2f613064535863194e6b9/src/models.js#L205-L207))
+- [ ] Support transformer.js for text-completion tasks ([not yet supported in Node.js](https://github.com/huggingface/transformers.js/blob/e129c47c65a049173f35e6263fd8d9f660dfc1a7/src/models.js#L240-L242))
 - [ ] Implement more transformer.js tasks (`imageToImage`, `textToImage`, `textToSpeech`?)
 - [ ] Infill completion support https://github.com/withcatai/node-llama-cpp/blob/beta/src/evaluator/LlamaCompletion.ts#L322-L336
 - [ ] Find a way to type available custom engines (and their options?)
@@ -211,3 +211,4 @@ If you look at this package, you might also want to take a look at these other s
 - [LM Studio](https://lmstudio.ai/docs/local-server) - Also has a local server.
 - [LocalAI](https://github.com/mudler/LocalAI) - Similar project in go.
 - [Petals](https://github.com/bigscience-workshop/petals) - Local (and distributed!) inference in python.
+- [cortex.cpp](https://github.com/janhq/cortex.cpp/) - A C++ API for OpenAI's GPT-3.

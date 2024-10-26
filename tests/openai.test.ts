@@ -1,6 +1,6 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
 import OpenAI from 'openai'
-import { ModelHTTPServer } from '#lllms/http.js'
+import { ModelHTTPServer } from '#package/http.js'
 
 const chatModel = 'chat'
 const embeddingsModel = 'text-embed'

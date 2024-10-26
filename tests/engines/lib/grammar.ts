@@ -1,7 +1,7 @@
 import { expect } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
+import { ModelServer } from '#package/server.js'
 import { createChatCompletion } from '../../util.js'
-import { ChatMessage } from '#lllms/types/index.js'
+import { ChatMessage } from '#package/types/index.js'
 
 export async function runBuiltInGrammarTest(llms: ModelServer) {
 	const messages: ChatMessage[] = [

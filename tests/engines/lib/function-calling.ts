@@ -1,6 +1,6 @@
 import { expect } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
-import { ChatMessage, ToolDefinition } from '#lllms/types/index.js'
+import { ModelServer } from '#package/server.js'
+import { ChatMessage, ToolDefinition } from '#package/types/index.js'
 import { createChatCompletion } from '../../util.js'
 
 interface GetLocationWeatherParams {

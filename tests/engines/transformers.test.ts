@@ -1,6 +1,7 @@
 import { suite, test, expect, beforeAll, afterAll } from 'vitest'
-import { ModelServer } from '#lllms/server.js'
-import { cosineSimilarity } from '#lllms/lib/math.js'
+import { ModelServer } from '#package/server.js'
+import { cosineSimilarity } from '#package/lib/math.js'
+import { loadImageFromFile } from '#package/lib/images.js'
 import {
 	CLIPTextModelWithProjection,
 	CLIPVisionModelWithProjection,
@@ -15,7 +16,6 @@ suite('basic', () => {
 			'mxbai-embed-large-v1': {
 				url: 'https://huggingface.co/mixedbread-ai/mxbai-embed-large-v1',
 				engine: 'transformers-js',
-				
 				task: 'embedding',
 				prepare: 'blocking',
 				device: {
@@ -30,9 +30,21 @@ suite('basic', () => {
 					modelClass: CLIPTextModelWithProjection,
 				},
 				visionModel: {
-					processor: 'Xenova/clip-vit-base-patch32', // https://huggingface.co/Xenova/vit-base-patch16-224-in21k/tree/main
+					processor: {
+  					url: 'https://huggingface.co/Xenova/clip-vit-base-patch32',
+  					// url: 'https://huggingface.co/Xenova/vit-base-patch16-224-in21k',
+					},
 					modelClass: CLIPVisionModelWithProjection,
 				},
+				prepare: 'blocking',
+				device: {
+					gpu: false,
+				},
+			},
+			'trocr-printed': {
+				url: 'https://huggingface.co/Xenova/trocr-small-printed',
+				engine: 'transformers-js',
+				task: 'image-to-text',
 				prepare: 'blocking',
 				device: {
 					gpu: false,
@@ -63,27 +75,41 @@ suite('basic', () => {
 	afterAll(async () => {
 		await llms.stop()
 	})
-	
-	test('image to text', async () => {
+
+	test('ocr single line', async () => {
+		const ocrImage = await loadImageFromFile('tests/fixtures/ocr-line.png')
+		const res = await llms.processImageToTextTask({
+			model: 'trocr-printed',
+			image: ocrImage,
+		})
+		expect(res.text.match(/OVER THE \$43,456.78 <LAZY> #90 DOG/)).toBeTruthy()
+	})
+
+	test('ocr multiline', async () => {
+		const ocrImage = await loadImageFromFile('tests/fixtures/ocr-multiline.png')
 		const res = await llms.processImageToTextTask({
 			model: 'florence2-large',
-			file: 'tests/fixtures/ocr.png',
+			image: ocrImage,
 			prompt: 'What is the text in the image?',
 		})
 		expect(res.text.startsWith('The (quick) [brown] {fox} jumps!')).toBe(true)
 	})
 
 	test('multimodal embedding', async () => {
+		const [blueCatImage, redCatImage] = await Promise.all([
+			loadImageFromFile('tests/fixtures/blue-cat.jpg'),
+			loadImageFromFile('tests/fixtures/red-cat.jpg'),
+		])
 		const res = await llms.processEmbeddingTask({
 			model: 'jina-clip-v1',
 			input: [
 				{
 					type: 'image',
-					url: 'https://i.pinimg.com/600x315/21/48/7e/21487e8e0970dd366dafaed6ab25d8d8.jpg',
+					content: blueCatImage,
 				},
 				{
 					type: 'image',
-					url: 'https://i.pinimg.com/736x/c9/f2/3e/c9f23e212529f13f19bad5602d84b78b.jpg',
+					content: redCatImage,
 				},
 				'A blue cat',
 				'A red cat',

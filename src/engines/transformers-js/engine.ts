@@ -13,7 +13,7 @@ import {
 	ImageEmbeddingInput,
 	TransformersJsModel,
 	TextEmbeddingInput,
-} from '#lllms/types/index.js'
+} from '#package/types/index.js'
 import {
 	env,
 	AutoModel,
@@ -22,23 +22,20 @@ import {
 	RawImage,
 	TextStreamer,
 	mean_pooling,
+	Processor,
+	PreTrainedModel,
+	PreTrainedTokenizer,
 } from '@huggingface/transformers'
-import { LogLevels } from '#lllms/lib/logger.js'
-import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
-import { copyDirectory } from '#lllms/lib/copyDirectory.js'
-import { decodeAudio } from '#lllms/lib/audio.js'
-import {
-	parseModelUrl,
-	remoteFileExists,
-	checkModelExists,
-} from './util.js'
-
-// TODO transformers.js types currently hard to fix, until v3 is released on npm (with typedefs)
+import { LogLevels } from '#package/lib/logger.js'
+import { acquireFileLock } from '#package/lib/acquireFileLock.js'
+import { copyDirectory } from '#package/lib/copyDirectory.js'
+import { decodeAudio } from '#package/lib/audio.js'
+import { parseModelUrl, remoteFileExists } from './util.js'
 
 interface TransformersJsModelComponents {
-	model?: any
-	processor?: any
-	tokenizer?: any
+	model?: PreTrainedModel
+	processor?: Processor
+	tokenizer?: PreTrainedTokenizer
 }
 
 interface TransformersJsInstance {
@@ -83,6 +80,214 @@ function configureEnvironment(modelsPath: string) {
 	didConfigureEnvironment = true
 }
 
+async function loadModelComponents(
+	modelOpts: TransformersJsModel,
+	config: TransformersJsModelConfig,
+	modelPath: string,
+): Promise<TransformersJsModelComponents> {
+	const device = config.device?.gpu ? 'gpu' : 'cpu'
+	const modelClass = modelOpts.modelClass ?? AutoModel
+	const loadPromises = []
+	const modelPromise = modelClass.from_pretrained(modelPath, {
+		local_files_only: true,
+		device: device,
+		dtype: modelOpts.dtype || 'fp32',
+	})
+	loadPromises.push(modelPromise)
+	const tokenizerClass = modelOpts.tokenizerClass ?? AutoTokenizer
+	const tokenizerPromise = tokenizerClass.from_pretrained(modelPath, {
+		local_files_only: true,
+	})
+	loadPromises.push(tokenizerPromise)
+
+	const hasPreprocessor = fs.existsSync(modelPath + 'preprocessor_config.json')
+	const hasProcessor = fs.existsSync(modelPath + 'processor_config.json')
+
+	if (hasProcessor || hasPreprocessor || modelOpts.processor) {
+		const processorClass = modelOpts.processorClass ?? AutoProcessor
+		if (modelOpts.processor) {
+			const { modelId } = parseModelUrl(modelOpts.processor.url)
+			const processorPromise = processorClass.from_pretrained(modelId)
+			loadPromises.push(processorPromise)
+		} else {
+			const processorPromise = processorClass.from_pretrained(modelPath, {
+				local_files_only: true,
+			})
+			loadPromises.push(processorPromise)
+		}
+	}
+
+	const loadedComponents = await Promise.all(loadPromises)
+	const modelComponents: TransformersJsModelComponents = {}
+	if (loadedComponents[0]) {
+		modelComponents.model = loadedComponents[0] as PreTrainedModel
+	}
+	if (loadedComponents[1]) {
+		modelComponents.tokenizer = loadedComponents[1] as PreTrainedTokenizer
+	}
+	if (loadedComponents[2]) {
+		modelComponents.processor = loadedComponents[2] as Processor
+	}
+	return modelComponents
+}
+
+async function disposeModelComponents(
+	modelComponents: TransformersJsModelComponents,
+) {
+	if (modelComponents.model && 'dispose' in modelComponents.model) {
+		await modelComponents.model.dispose()
+	}
+}
+
+async function validateModel(
+	modelOpts: TransformersJsModel,
+	config: TransformersJsModelConfig,
+	modelPath: string,
+): Promise<string | undefined> {
+	const modelClass = modelOpts.modelClass ?? AutoModel
+	const device = config.device?.gpu ? 'gpu' : 'cpu'
+	try {
+		const model = await modelClass.from_pretrained(modelPath, {
+			local_files_only: true,
+			device: device,
+			dtype: modelOpts.dtype || 'fp32',
+		})
+		await model.dispose()
+	} catch (error) {
+		return `failed to load model: ${error}`
+	}
+	return undefined
+}
+
+async function validateTokenizer(
+	modelOpts: TransformersJsModel,
+	modelPath: string,
+): Promise<string | undefined> {
+	const tokenizerClass = modelOpts.tokenizerClass ?? AutoTokenizer
+	try {
+		await tokenizerClass.from_pretrained(modelPath, {
+			local_files_only: true,
+		})
+	} catch (error) {
+		return `failed to load tokenizer: ${error}`
+	}
+	return undefined
+}
+
+async function validateProcessor(
+	modelOpts: TransformersJsModel,
+	modelPath: string,
+): Promise<string | undefined> {
+	const processorClass = modelOpts.processorClass ?? AutoProcessor
+	try {
+		if (modelOpts.processor) {
+			const { modelId } = parseModelUrl(modelOpts.processor.url)
+			await processorClass.from_pretrained(modelId, {
+				local_files_only: true,
+			})
+		} else {
+			await processorClass.from_pretrained(modelPath, {
+				local_files_only: true,
+			})
+		}
+	} catch (error) {
+		return `failed to load processor: ${error}`
+	}
+	return undefined
+}
+
+interface ComponentValidationErrors {
+	model?: string
+	tokenizer?: string
+	processor?: string
+}
+
+interface ModelValidationErrors {
+	textModel?: ComponentValidationErrors
+	visionModel?: ComponentValidationErrors
+	speechModel?: ComponentValidationErrors
+}
+
+interface ModelFileValidationResult {
+	message: string
+	errors?: ModelValidationErrors
+}
+
+async function validateModelFiles(
+	config: TransformersJsModelConfig,
+): Promise<ModelFileValidationResult | undefined> {
+	if (!fs.existsSync(config.location)) {
+		return {
+			message: `model directory does not exist: ${config.location}`,
+		}
+	}
+
+	let modelPath = config.location
+	if (!modelPath.endsWith('/')) {
+		modelPath += '/'
+	}
+
+	const validateModelComponents = async (modelOpts: TransformersJsModel) => {
+		const componentValidationPromises = [
+			validateModel(modelOpts, config, modelPath),
+			validateTokenizer(modelOpts, modelPath),
+		]
+		if (modelOpts.processor) {
+			componentValidationPromises.push(validateProcessor(modelOpts, modelPath))
+		}
+		const [model, tokenizer, processor] = await Promise.all(
+			componentValidationPromises,
+		)
+		const result: ComponentValidationErrors = {}
+		if (model) result.model = model
+		if (tokenizer) result.tokenizer = tokenizer
+		if (processor) result.processor = processor
+		return result
+	}
+
+	const modelValidationPromises: any = {}
+	const noModelConfigured =
+		!config.textModel && !config.visionModel && !config.speechModel
+	if (config.textModel || noModelConfigured) {
+		modelValidationPromises.textModel = validateModelComponents(
+			config.textModel || {},
+		)
+	}
+	if (config.visionModel) {
+		modelValidationPromises.visionModel = validateModelComponents(
+			config.visionModel,
+		)
+	}
+	if (config.speechModel) {
+		modelValidationPromises.speechModel = validateModelComponents(
+			config.speechModel,
+		)
+	}
+
+	await Promise.all(Object.values(modelValidationPromises))
+	const validationErrors: ModelValidationErrors = {}
+	const textModelErrors = await modelValidationPromises.textModel
+	if (textModelErrors && Object.keys(textModelErrors).length) {
+		validationErrors.textModel = textModelErrors
+	}
+	const visionModelErrors = await modelValidationPromises.visionModel
+	if (visionModelErrors && Object.keys(visionModelErrors).length) {
+		validationErrors.visionModel = visionModelErrors
+	}
+	const speechModelErrors = await modelValidationPromises.speechModel
+	if (speechModelErrors && Object.keys(speechModelErrors).length) {
+		validationErrors.speechModel = speechModelErrors
+	}
+
+	if (Object.keys(validationErrors).length > 0) {
+		return {
+			message: 'failed to load model components',
+			errors: validationErrors,
+		}
+	}
+	return undefined
+}
+
 export async function prepareModel(
 	{ config, log, modelsPath }: EngineContext<TransformersJsModelConfig>,
 	onProgress?: (progress: FileDownloadProgress) => void,
@@ -108,95 +313,153 @@ export async function prepareModel(
 	const configMeta: any = {}
 	const downloadedFileSet = new Set<string>()
 
-	const downloadModelFiles = async (modelOpts: TransformersJsModel) => {
+	const downloadModelFiles = async (
+		modelOpts: TransformersJsModel,
+		requiredComponents: string[] = ['model', 'tokenizer', 'processor'],
+	) => {
 		const modelClass = modelOpts.modelClass ?? AutoModel
-		const downloadPromises = []
-		const modelDownloadPromise = modelClass.from_pretrained(modelId, {
-			revision: branch,
-			dtype: modelOpts.dtype,
-			// use_external_data_format: true, // https://github.com/xenova/transformers.js/blob/38a3bf6dab2265d9f0c2f613064535863194e6b9/src/models.js#L205-L207
-			progress_callback: (progress: any) => {
-				if (onProgress && progress.status === 'progress') {
-					downloadedFileSet.add(progress.file)
-					onProgress({
-						file: env.cacheDir + modelId + '/' + progress.file,
-						loadedBytes: progress.loaded,
-						totalBytes: progress.total,
-					})
-				}
-			},
-		})
-		downloadPromises.push(modelDownloadPromise)
-
-		const hasTokenizer = await remoteFileExists(
-			`${config.url}/blob/${branch}/tokenizer.json`,
-		)
-		if (hasTokenizer) {
-			const TokenizerClass = modelOpts.tokenizerClass ?? AutoTokenizer
-			const tokenizerDownload = TokenizerClass.from_pretrained(modelId, {
-				revision: branch,
-				// use_external_data_format: true,
-			})
-			downloadPromises.push(tokenizerDownload)
-		}
-
-		const hasProcessor = await remoteFileExists(
-			`${config.url}/blob/${branch}/processor_config.json`,
-		)
-		if (hasProcessor) {
-			const ProcessorClass = modelOpts.processorClass ?? AutoProcessor
-			if (typeof modelOpts.processor === 'string') {
-				const processorDownload = ProcessorClass.from_pretrained(modelId)
-				downloadPromises.push(processorDownload)
-			} else {
-				const processorDownload = ProcessorClass.from_pretrained(modelId, {
-					revision: branch,
-					// use_external_data_format: true,
+		const downloadPromises: Record<string, Promise<any> | undefined> = {}
+		const progressCallback = (progress: any) => {
+			if (onProgress && progress.status === 'progress') {
+				downloadedFileSet.add(progress.file)
+				onProgress({
+					file: env.cacheDir + modelId + '/' + progress.file,
+					loadedBytes: progress.loaded,
+					totalBytes: progress.total,
 				})
-				downloadPromises.push(processorDownload)
 			}
 		}
-		return await Promise.all(downloadPromises)
+		if (requiredComponents.includes('model')) {
+			const modelDownloadPromise = modelClass.from_pretrained(modelId, {
+				revision: branch,
+				dtype: modelOpts.dtype || 'fp32',
+				progress_callback: progressCallback,
+				// use_external_data_format: true, // https://github.com/xenova/transformers.js/blob/38a3bf6dab2265d9f0c2f613064535863194e6b9/src/models.js#L205-L207
+			})
+			downloadPromises.model = modelDownloadPromise
+		}
+		if (requiredComponents.includes('tokenizer')) {
+			const hasTokenizer = await remoteFileExists(
+				`${config.url}/blob/${branch}/tokenizer.json`,
+			)
+			if (hasTokenizer) {
+				const tokenizerClass = modelOpts.tokenizerClass ?? AutoTokenizer
+				const tokenizerDownload = tokenizerClass.from_pretrained(modelId, {
+					revision: branch,
+					progress_callback: progressCallback,
+					// use_external_data_format: true,
+				})
+				downloadPromises.tokenizer = tokenizerDownload
+			}
+		}
+
+		if (requiredComponents.includes('processor')) {
+			if (modelOpts.processor) {
+				const { modelId, branch } = parseModelUrl(modelOpts.processor.url)
+				const processorDownload = AutoProcessor.from_pretrained(modelId, {
+					revision: branch,
+					progress_callback: progressCallback,
+				})
+				downloadPromises.processor = processorDownload
+			} else {
+				const [hasProcessor, hasPreprocessor] = await Promise.all([
+					remoteFileExists(
+						`${config.url}/blob/${branch}/processor_config.json`,
+					),
+					remoteFileExists(
+						`${config.url}/blob/${branch}/preprocessor_config.json`,
+					),
+				])
+				if (hasProcessor || hasPreprocessor) {
+					const processorDownload = AutoProcessor.from_pretrained(modelId, {
+						revision: branch,
+						progress_callback: progressCallback,
+						// use_external_data_format: true,
+					})
+					downloadPromises.processor = processorDownload
+				}
+			}
+		}
+		await Promise.all(Object.values(downloadPromises))
+		const modelComponents: TransformersJsModelComponents = {}
+		if (downloadPromises.model) {
+			modelComponents.model = (await downloadPromises.model) as PreTrainedModel
+		}
+		if (downloadPromises.tokenizer) {
+			modelComponents.tokenizer =
+				(await downloadPromises.tokenizer) as PreTrainedTokenizer
+		}
+		if (downloadPromises.processor) {
+			modelComponents.processor =
+				(await downloadPromises.processor) as Processor
+		}
+		return modelComponents
 	}
 
-	if (!checkModelExists(config)) {
-		if (!config.url) {
-			throw new Error(`Cannot download "${config.id}" - no URL configured`)
-		}
-		log(LogLevels.info, `Downloading ${config.id}`, {
-			url: config.url,
-			location: config.location,
-			cacheDir: env.cacheDir,
-			localModelPath: env.localModelPath,
-			// modelId: modelId,
-			branch,
-		})
+	const downloadModel = async (validationResult: ModelFileValidationResult) => {
+		log(
+			LogLevels.info,
+			`${validationResult.message} - Downloading model files`,
+			{
+				model: config.id,
+				url: config.url,
+				location: config.location,
+				errors: validationResult.errors,
+			},
+		)
 		const modelDownloadPromises = []
 		const noModelConfigured =
 			!config.textModel && !config.visionModel && !config.speechModel
 		if (config.textModel || noModelConfigured) {
-			modelDownloadPromises.push(downloadModelFiles(config.textModel || {}))
+			const requiredComponents = validationResult.errors?.textModel
+				? Object.keys(validationResult.errors.textModel)
+				: undefined
+			modelDownloadPromises.push(
+				downloadModelFiles(config.textModel || {}, requiredComponents),
+			)
 		}
 		if (config.visionModel) {
-			modelDownloadPromises.push(downloadModelFiles(config.visionModel))
+			const requiredComponents = validationResult.errors?.visionModel
+				? Object.keys(validationResult.errors.visionModel)
+				: undefined
+			modelDownloadPromises.push(
+				downloadModelFiles(config.visionModel, requiredComponents),
+			)
 		}
 		if (config.speechModel) {
-			modelDownloadPromises.push(downloadModelFiles(config.speechModel))
+			const requiredComponents = validationResult.errors?.speechModel
+				? Object.keys(validationResult.errors.speechModel)
+				: undefined
+			modelDownloadPromises.push(
+				downloadModelFiles(config.speechModel, requiredComponents),
+			)
 		}
-
 		const models = await Promise.all(modelDownloadPromises)
-		for (const model of models) {
-			for (const modelComponent of model) {
-				if (modelComponent.dispose) {
-					modelComponent.dispose()
-				}
-			}
+		for (const modelComponents of models) {
+			disposeModelComponents(modelComponents)
 		}
 		if (signal?.aborted) {
 			return
 		}
 		const modelCacheDir = path.join(env.cacheDir, modelId)
 		await copyDirectory(modelCacheDir, config.location)
+	}
+
+	try {
+		const validationResults = await validateModelFiles(config)
+		if (signal?.aborted) {
+			return
+		}
+		if (validationResults) {
+			if (config.url) {
+				await downloadModel(validationResults)
+			} else {
+				throw new Error(`Model files are invalid: ${validationResults.message}`)
+			}
+		}
+	} catch (err) {
+		clearFileLock()
+		throw err
 	}
 
 	const files = fs.readdirSync(config.location, { recursive: true })
@@ -229,60 +492,28 @@ export async function createInstance(
 		modelPath += '/'
 	}
 
-	const loadModel = async (modelOpts: TransformersJsModel) => {
-		const modelClass = modelOpts.modelClass ?? AutoModel
-		const loadPromises = []
-		const modelPromise = modelClass.from_pretrained(modelPath, {
-			local_files_only: true,
-			dtype: modelOpts.dtype,
-			device: config.device?.gpu ? 'gpu' : 'cpu',
-		})
-		loadPromises.push(modelPromise)
-		const TokenizerClass = modelOpts.tokenizerClass ?? AutoTokenizer
-		const tokenizerPromise = TokenizerClass.from_pretrained(modelPath, {
-			local_files_only: true,
-		})
-		loadPromises.push(tokenizerPromise)
-
-		const hasProcessor = fs.existsSync(modelPath + 'preprocessor_config.json')
-		if (hasProcessor) {
-			const ProcessorClass = modelOpts.processorClass ?? AutoProcessor
-			if (typeof modelOpts.processor === 'string') {
-				const processorPromise = ProcessorClass.from_pretrained(
-					modelOpts.processor,
-				)
-				loadPromises.push(processorPromise)
-			} else {
-				const processorPromise = ProcessorClass.from_pretrained(modelPath, {
-					local_files_only: true,
-				})
-				loadPromises.push(processorPromise)
-			}
-		}
-
-		const results = await Promise.all(loadPromises)
-		return {
-			model: results[0],
-			tokenizer: results[1],
-			processor: results[2],
-		}
-	}
 	const modelLoadPromises = []
 	const noModelConfigured =
 		!config.textModel && !config.visionModel && !config.speechModel
 
 	if (config.textModel || noModelConfigured) {
-		modelLoadPromises.push(loadModel(config.textModel || {}))
+		modelLoadPromises.push(
+			loadModelComponents(config.textModel || {}, config, modelPath),
+		)
 	} else {
 		modelLoadPromises.push(Promise.resolve(undefined))
 	}
 	if (config.visionModel) {
-		modelLoadPromises.push(loadModel(config.visionModel))
+		modelLoadPromises.push(
+			loadModelComponents(config.visionModel, config, modelPath),
+		)
 	} else {
 		modelLoadPromises.push(Promise.resolve(undefined))
 	}
 	if (config.speechModel) {
-		modelLoadPromises.push(loadModel(config.speechModel))
+		modelLoadPromises.push(
+			loadModelComponents(config.speechModel, config, modelPath),
+		)
 	} else {
 		modelLoadPromises.push(Promise.resolve(undefined))
 	}
@@ -304,15 +535,17 @@ export async function createInstance(
 }
 
 export async function disposeInstance(instance: TransformersJsInstance) {
+	const disposePromises = []
 	if (instance.textModel) {
-		instance.textModel.model.dispose()
+		disposePromises.push(disposeModelComponents(instance.textModel))
 	}
 	if (instance.visionModel) {
-		instance.visionModel.model.dispose()
+		disposePromises.push(disposeModelComponents(instance.visionModel))
 	}
 	if (instance.speechModel) {
-		instance.speechModel.model.dispose()
+		disposePromises.push(disposeModelComponents(instance.speechModel))
 	}
+	await Promise.all(disposePromises)
 }
 
 export async function processTextCompletionTask(
@@ -328,20 +561,26 @@ export async function processTextCompletionTask(
 	if (!request.prompt) {
 		throw new Error('Prompt is required for text completion.')
 	}
-	const inputTokens = instance.textModel!.tokenizer(request.prompt)
-	const outputTokens = await instance.textModel!.model.generate({
+	if (!(instance.textModel?.tokenizer && instance.textModel?.model)) {
+		throw new Error('Text model is not loaded.')
+	}
+	const inputTokens = instance.textModel.tokenizer(request.prompt)
+	const outputTokens = await instance.textModel.model.generate({
 		...inputTokens,
 		max_new_tokens: request.maxTokens ?? 128,
 	})
-	const outputText = instance.textModel!.tokenizer.batch_decode(outputTokens, {
+	// @ts-ignore
+	const outputText = instance.textModel.tokenizer.batch_decode(outputTokens, {
 		skip_special_tokens: true,
 	})
 
 	return {
 		finishReason: 'eogToken',
-		text: outputText,
+		text: outputText[0],
 		promptTokens: inputTokens.length,
+		// @ts-ignore
 		completionTokens: outputTokens.length,
+		// @ts-ignore
 		contextTokens: inputTokens.length + outputTokens.length,
 	}
 }
@@ -397,30 +636,35 @@ export async function processEmbeddingTask(
 		let result
 		let modelInputs
 		if (embeddingInput.type === 'text') {
-			modelInputs = instance.textModel!.tokenizer(embeddingInput.content, {
+			if (!instance.textModel?.tokenizer || !instance.textModel?.model) {
+				throw new Error('Text model is not loaded.')
+			}
+			modelInputs = instance.textModel.tokenizer(embeddingInput.content, {
 				padding: true, // pads input if it is shorter than context window
 				truncation: true, // truncates input if it exceeds context window
 			})
 			inputTokens += modelInputs.input_ids.size
-			const modelOutputs = await instance.textModel!.model(modelInputs)
+			const modelOutputs = await instance.textModel.model(modelInputs)
 			result =
 				modelOutputs.last_hidden_state ??
 				modelOutputs.logits ??
 				modelOutputs.token_embeddings ??
 				modelOutputs.text_embeds
 		} else if (embeddingInput.type === 'image') {
-			let image: RawImage
-			if (embeddingInput.url) {
-				image = await RawImage.fromURL(embeddingInput.url)
-			} else if (embeddingInput.file) {
-				const fileBuffer = fs.readFileSync(embeddingInput.file)
-				const blob = new Blob([fileBuffer])
-				image = await RawImage.fromBlob(blob)
-			} else {
-				throw new Error('Invalid image input')
+			if (!instance.visionModel?.processor || !instance.visionModel?.model) {
+				throw new Error('Vision model is not loaded.')
 			}
-			modelInputs = await instance.visionModel!.processor(image)
-			const modelOutputs = await instance.visionModel!.model(modelInputs)
+			const { data, info } = await embeddingInput.content.handle
+				.raw()
+				.toBuffer({ resolveWithObject: true })
+			const image = new RawImage(
+				new Uint8ClampedArray(data),
+				info.width,
+				info.height,
+				info.channels,
+			)
+			modelInputs = await instance.visionModel.processor!(image)
+			const modelOutputs = await instance.visionModel.model(modelInputs)
 			result =
 				modelOutputs.last_hidden_state ??
 				modelOutputs.logits ??
@@ -448,41 +692,41 @@ export async function processImageToTextTask(
 	instance: TransformersJsInstance,
 	signal?: AbortSignal,
 ) {
-	let image: any = request.image
-
-	if (request.url) {
-		image = await RawImage.fromURL(request.url)
-	} else if (request.file) {
-		const fileBuffer = fs.readFileSync(request.file)
-		const blob = new Blob([fileBuffer])
-		image = await RawImage.fromBlob(blob)
-	}
-
-	if (!image) {
+	if (!request.image) {
 		throw new Error('No image provided')
 	}
+	const { data, info } = await request.image.handle
+		.raw()
+		.toBuffer({ resolveWithObject: true })
+	const image = new RawImage(
+		new Uint8ClampedArray(data),
+		info.width,
+		info.height,
+		info.channels,
+	)
 
 	if (signal?.aborted) {
 		return
 	}
 
-	// Process inputs
+	const model = instance.visionModel || instance.textModel
+	if (!(model && model.tokenizer && model.processor && model.model)) {
+		throw new Error('No model loaded')
+	}
 	let textInputs = {}
 	if (request.prompt) {
-		textInputs = instance.visionModel!.tokenizer(request.prompt)
+		textInputs = model!.tokenizer(request.prompt)
 	}
-	const visionInputs = await instance.visionModel!.processor(image)
-	const outputTokens = await instance.visionModel!.model.generate({
+	const imageInputs = await model.processor(image)
+	const outputTokens = await model.model.generate({
 		...textInputs,
-		...visionInputs,
+		...imageInputs,
 		max_new_tokens: request.maxTokens ?? 128,
 	})
-	const outputText = instance.visionModel!.tokenizer.batch_decode(
-		outputTokens,
-		{
-			skip_special_tokens: true,
-		},
-	)
+	// @ts-ignore
+	const outputText = model.tokenizer.batch_decode(outputTokens, {
+		skip_special_tokens: true,
+	})
 
 	return {
 		text: outputText[0],
@@ -515,7 +759,10 @@ export async function processSpeechToTextTask(
 	instance: TransformersJsInstance,
 	signal?: AbortSignal,
 ) {
-	const streamer = new TextStreamer(instance.speechModel!.tokenizer, {
+	if (!(instance.speechModel?.tokenizer && instance.speechModel?.model)) {
+		throw new Error('No speech model loaded')
+	}
+	const streamer = new TextStreamer(instance.speechModel.tokenizer, {
 		skip_prompt: true,
 		// skip_special_tokens: true,
 		callback_function: (output: any) => {
@@ -527,17 +774,18 @@ export async function processSpeechToTextTask(
 	let inputs
 	if (request.file) {
 		const audio = await readAudioFile(request.file)
-		inputs = await instance.speechModel!.processor(audio)
+		inputs = await instance.speechModel.processor!(audio)
 	}
 
-	const outputs = await instance.speechModel!.model.generate({
+	const outputs = await instance.speechModel.model.generate({
 		...inputs,
 		max_new_tokens: request.maxTokens ?? 128,
 		language: request.language ?? 'en',
 		streamer,
 	})
 
-	const outputText = instance.speechModel!.tokenizer.batch_decode(outputs, {
+	// @ts-ignore
+	const outputText = instance.speechModel.tokenizer.batch_decode(outputs, {
 		skip_special_tokens: true,
 	})
 

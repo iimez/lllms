@@ -1,6 +1,6 @@
 
-import { EngineChatCompletionArgs, ImageToTextRequest, ModelEngine } from '#lllms/types/index.js'
-import { CustomEngine } from '#lllms/engines/index.js'
+import { EngineChatCompletionArgs, ImageToTextRequest, ModelEngine } from '#package/types/index.js'
+import { CustomEngine } from '#package/engines/index.js'
 
 // an experimental engine that replaces images with their descriptions before passing them to a chat model
 
@@ -56,9 +56,10 @@ export class ChatWithVisionEngine extends CustomEngine implements ModelEngine {
 					// 	"<REGION_TO_DESCRIPTION>": "What does the region {input} describe?",
 					// 	"<REGION_TO_OCR>": "What text is in the region {input}?"
 					// }
+					// const imageData = await fetch(contentPart.image.url).then((res) => res.arrayBuffer())
 					const task = imageToTextModel.instance.processImageToTextTask({
 						model: this.imageToTextModel,
-						url: contentPart.url,
+						// url: contentPart.url,
 						image: contentPart.image,
 						prompt: 'What does the image describe?',
 					})

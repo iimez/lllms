@@ -3,12 +3,12 @@ import {
 	Florence2ForConditionalGeneration,
 	WhisperForConditionalGeneration,
 } from '@huggingface/transformers'
-import { ModelServer } from '#lllms/server.js'
+import { ModelServer } from '#package/server.js'
 import {
 	ChatMessage,
-} from '#lllms/types/index.js'
-import { ChatWithVisionEngine } from '#lllms/experiments/ChatWithVision.js'
-import { VoiceFunctionCallEngine } from '#lllms/experiments/VoiceFunctionCall.js'
+} from '#package/types/index.js'
+import { ChatWithVisionEngine } from '#package/experiments/ChatWithVision.js'
+import { VoiceFunctionCallEngine } from '#package/experiments/VoiceFunctionCall.js'
 import { createChatCompletion } from '../util'
 
 suite('chat with vision', () => {

@@ -2,8 +2,8 @@ import {
 	EngineSpeechToTextArgs,
 	ModelEngine,
 	ToolDefinition,
-} from '#lllms/types/index.js'
-import { CustomEngine } from '#lllms/engines/index.js'
+} from '#package/types/index.js'
+import { CustomEngine } from '#package/engines/index.js'
 
 type EngineArgs = {
 	speechToTextModel: string

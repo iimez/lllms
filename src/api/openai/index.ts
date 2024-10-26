@@ -1,4 +1,4 @@
-import type { ModelServer } from '#lllms/server.js'
+import type { ModelServer } from '#package/server.js'
 import { createChatCompletionHandler } from './handlers/chat.js'
 import { createCompletionHandler } from './handlers/completions.js'
 import { createModelsHandler } from './handlers/models.js'

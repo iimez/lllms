@@ -1,9 +1,9 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import { EmbeddingRequest } from '#lllms/types/index.js'
-import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
-import { omitEmptyValues } from '#lllms/lib/util.js'
-import { ModelServer } from '#lllms/server.js'
+import { EmbeddingRequest } from '#package/types/index.js'
+import { parseJSONRequestBody } from '#package/api/parseJSONRequestBody.js'
+import { omitEmptyValues } from '#package/lib/util.js'
+import { ModelServer } from '#package/server.js'
 
 type OpenAIEmbeddingsParams = OpenAI.EmbeddingCreateParams
 

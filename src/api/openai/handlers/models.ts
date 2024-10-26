@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'node:path'
 import type { OpenAI } from 'openai'
-import type { ModelServer } from '#lllms/server'
+import type { ModelServer } from '#package/server'
 
 // https://platform.openai.com/docs/api-reference/models/list
 export function createModelsHandler(llms: ModelServer) {

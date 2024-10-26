@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { ChatMessage } from '#lllms/types/index.js'
+import { ChatMessage } from '#package/types/index.js'
 import { flattenMessageTextContent } from './flattenMessageTextContent.js'
 
 export interface CalculateContextIdentityOptions {

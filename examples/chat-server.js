@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { startModelServer } from '#lllms/index.js'
+import { startModelServer } from '#package/index.js'
 
 // A minimal chat server using the ModelServer.
 

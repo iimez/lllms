@@ -1,7 +1,7 @@
 import { ChatMessage as GPT4AllChatMessage } from 'gpt4all'
-import { ChatMessage } from '#lllms/types/index.js'
-import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
-import { calculateFileChecksum } from '#lllms/lib/calculateFileChecksum.js'
+import { ChatMessage } from '#package/types/index.js'
+import { flattenMessageTextContent } from '#package/lib/flattenMessageTextContent.js'
+import { calculateFileChecksum } from '#package/lib/calculateFileChecksum.js'
 
 export function createChatMessageArray(
 	messages: ChatMessage[],

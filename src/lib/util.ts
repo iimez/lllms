@@ -28,6 +28,12 @@ export function mergeAbortSignals(
 	return controller.signal
 }
 
+export function getRandomNumber(min: number, max: number) {
+	min = Math.ceil(min)
+	max = Math.floor(max)
+	return Math.floor(Math.random() * (max - min)) + min
+}
+
 export function printActiveHandles() {
 	//@ts-ignore
 	const handles = process._getActiveHandles();

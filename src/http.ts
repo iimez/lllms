@@ -2,10 +2,10 @@ import http from 'node:http'
 import { ListenOptions } from 'node:net'
 import express from 'express'
 import cors from 'cors'
-import { createOpenAIRequestHandlers } from '#lllms/api/openai/index.js'
-import { createAPIMiddleware } from '#lllms/api/v1/index.js'
-import { LogLevel } from '#lllms/lib/logger.js'
-import { ModelServer, ModelServerOptions, startModelServer } from '#lllms/server.js'
+import { createOpenAIRequestHandlers } from '#package/api/openai/index.js'
+import { createAPIMiddleware } from '#package/api/v1/index.js'
+import { LogLevel } from '#package/lib/logger.js'
+import { ModelServer, ModelServerOptions, startModelServer } from '#package/server.js'
 
 export function createOpenAIMiddleware(modelServer: ModelServer) {
 	const router = express.Router()

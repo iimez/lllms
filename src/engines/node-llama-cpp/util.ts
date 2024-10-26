@@ -6,8 +6,8 @@ import {
 	LlamaTextJSON,
 	ChatModelFunctionCall,
 } from 'node-llama-cpp'
-import { CompletionFinishReason, ChatMessage } from '#lllms/types/index.js'
-import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
+import { CompletionFinishReason, ChatMessage } from '#package/types/index.js'
+import { flattenMessageTextContent } from '#package/lib/flattenMessageTextContent.js'
 import { LlamaChatResult } from './types.js'
 
 export function mapFinishReason(
@@ -23,12 +23,6 @@ export function mapFinishReason(
 		default:
 			return nodeLlamaCppFinishReason
 	}
-}
-
-export function createSeed(min: number, max: number) {
-	min = Math.ceil(min)
-	max = Math.floor(max)
-	return Math.floor(Math.random() * (max - min)) + min
 }
 
 export function addFunctionCallToChatHistory({

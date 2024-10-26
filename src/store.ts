@@ -6,14 +6,14 @@ import {
 	FileDownloadProgress,
 	ModelConfig,
 	ModelEngine,
-} from '#lllms/types/index.js'
+} from '#package/types/index.js'
 import {
 	Logger,
 	LogLevels,
 	LogLevel,
 	createSublogger,
-} from '#lllms/lib/logger.js'
-import { mergeAbortSignals } from '#lllms/lib/util.js'
+} from '#package/lib/logger.js'
+import { mergeAbortSignals } from '#package/lib/util.js'
 
 interface ModelFile {
 	size: number

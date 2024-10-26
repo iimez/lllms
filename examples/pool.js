@@ -1,9 +1,9 @@
 import os from 'node:os'
 import path from 'node:path'
 import chalk from 'chalk'
-import { ModelPool } from '#lllms/index.js'
-import { elapsedMillis } from '#lllms/lib/util.js'
-import * as LlamaCppEngine from '#lllms/engines/node-llama-cpp/engine.js'
+import { ModelPool } from '#package/index.js'
+import { elapsedMillis } from '#package/lib/util.js'
+import * as LlamaCppEngine from '#package/engines/node-llama-cpp/engine.js'
 
 // Complete multiple prompts concurrently using ModelPool.
 

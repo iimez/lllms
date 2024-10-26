@@ -14,15 +14,17 @@ import {
 	SpeechToTextProcessingOptions,
 	EngineChatCompletionResult,
 	EngineTextCompletionResult,
-} from '#lllms/types/index.js'
-import { calculateContextIdentity } from '#lllms/lib/calculateContextIdentity.js'
+	TextToImageRequest,
+	ImageToImageRequest,
+} from '#package/types/index.js'
+import { calculateContextIdentity } from '#package/lib/calculateContextIdentity.js'
 import {
 	LogLevels,
 	Logger,
 	createLogger,
 	withLogMeta,
-} from '#lllms/lib/logger.js'
-import { elapsedMillis, mergeAbortSignals } from '#lllms/lib/util.js'
+} from '#package/lib/logger.js'
+import { elapsedMillis, mergeAbortSignals } from '#package/lib/util.js'
 
 const idAlphabet =
 	'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -549,6 +551,62 @@ export class ModelInstance<TEngineState = unknown> {
 			result,
 		}
 	}
+	
+	processImageToImageTask(
+		request: ImageToImageRequest,
+		options?: ProcessingOptions,
+	) {
+		if (!('processImageToImageTask' in this.engine)) {
+			throw new Error(
+				`Engine "${this.config.engine}" does not implement image to image`,
+			)
+		}
+		this.lastUsed = Date.now()
+		const id = this.generateTaskId()
+		const taskLogger = withLogMeta(this.log, {
+			sequence: this.currentRequest!.sequence,
+			task: id,
+		})
+		const controller = this.createTaskController({
+			timeout: options?.timeout,
+			signal: options?.signal,
+		})
+		const taskBegin = process.hrtime.bigint()
+		const result = this.engine.processImageToImageTask!(
+			{
+				request,
+				config: this.config,
+				log: taskLogger,
+			},
+			this.engineInstance,
+			controller.signal,
+		)
+			.then((result) => {
+				const timeElapsed = elapsedMillis(taskBegin)
+				controller.complete()
+				if (controller.timeoutSignal.aborted) {
+					taskLogger(LogLevels.warn, 'ImageToImage task timed out')
+				}
+				taskLogger(LogLevels.verbose, 'ImageToImage task done', {
+					elapsed: timeElapsed,
+				})
+				return result
+			})
+			.catch((error) => {
+				taskLogger(LogLevels.error, 'Task failed - ', {
+					error,
+				})
+				throw error
+			})
+
+		return {
+			id,
+			model: this.modelId,
+			createdAt: new Date(),
+			cancel: controller.cancel,
+			result,
+		}
+	}
 
 	processSpeechToTextTask(
 		request: SpeechToTextRequest,
@@ -605,4 +663,61 @@ export class ModelInstance<TEngineState = unknown> {
 			result,
 		}
 	}
+	
+	processTextToImageTask(
+		request: TextToImageRequest,
+		options?: ProcessingOptions,
+	) {
+		if (!('processTextToImageTask' in this.engine)) {
+			throw new Error(
+				`Engine "${this.config.engine}" does not implement text to image`,
+			)
+		}
+		this.lastUsed = Date.now()
+		const id = this.generateTaskId()
+		const taskLogger = withLogMeta(this.log, {
+			sequence: this.currentRequest!.sequence,
+			task: id,
+		})
+		const controller = this.createTaskController({
+			timeout: options?.timeout,
+			signal: options?.signal,
+		})
+		const taskBegin = process.hrtime.bigint()
+		const result = this.engine.processTextToImageTask!(
+			{
+				request,
+				config: this.config,
+				log: taskLogger,
+			},
+			this.engineInstance,
+			controller.signal,
+		)
+			.then((result) => {
+				const timeElapsed = elapsedMillis(taskBegin)
+				controller.complete()
+				if (controller.timeoutSignal.aborted) {
+					taskLogger(LogLevels.warn, 'TextToImage task timed out')
+				}
+				taskLogger(LogLevels.verbose, 'TextToImage task done', {
+					elapsed: timeElapsed,
+				})
+				return result
+			})
+			.catch((error) => {
+				taskLogger(LogLevels.error, 'Task failed - ', {
+					error,
+				})
+				throw error
+			})
+
+		return {
+			id,
+			model: this.modelId,
+			createdAt: new Date(),
+			cancel: controller.cancel,
+			result,
+		}
+	}
+	
 }

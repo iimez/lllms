@@ -22,7 +22,7 @@
 		"allowSyntheticDefaultImports": true,
 		"skipLibCheck": true,
 		"paths": {
-			"#lllms/*": ["./src/*"]
+			"#package/*": ["./src/*"]
 		}
 	},
 	"include": ["src/**/*"]

@@ -1,5 +1,5 @@
-import { BuiltInModelOptions } from '#lllms/types/index.js'
-import { builtInEngineNames } from '#lllms/engines/index.js'
+import { BuiltInModelOptions } from '#package/types/index.js'
+import { builtInEngineNames } from '#package/engines/index.js'
 
 const modelIdPattern = /^[a-zA-Z0-9_\-\.]+$/
 export function validateModelId(id: string) {

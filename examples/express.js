@@ -1,8 +1,8 @@
 import http from 'node:http'
 import express from 'express'
 import OpenAI from 'openai'
-import { ModelServer } from '#lllms/server.js'
-import { createExpressMiddleware } from '#lllms/http.js'
+import { ModelServer } from '#package/server.js'
+import { createExpressMiddleware } from '#package/http.js'
 
 // Demonstration of using the ModelServer + Express middleware to serve an OpenAI API.
 

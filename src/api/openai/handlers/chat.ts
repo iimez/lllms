@@ -1,19 +1,18 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import type { ModelServer } from '#lllms/server.js'
+import type { ModelServer } from '#package/server.js'
 import {
 	ChatCompletionRequest,
 	ToolDefinition,
 	ChatMessage,
-	ToolCallResultMessage,
-	UserMessage,
-	AssistantMessage,
-	SystemMessage,
 	MessageContentPart,
-} from '#lllms/types/index.js'
-import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
-import { omitEmptyValues } from '#lllms/lib/util.js'
+	Image,
+} from '#package/types/index.js'
+import { parseJSONRequestBody } from '#package/api/parseJSONRequestBody.js'
+import { omitEmptyValues } from '#package/lib/util.js'
 import { finishReasonMap, messageRoleMap } from '../enums.js'
+import { ChatCompletionMessageParam } from 'openai/resources/chat/completions.js'
+import { loadImageFromUrl } from '#package/lib/images.js'
 
 interface OpenAIChatCompletionParams
 	extends Omit<OpenAI.ChatCompletionCreateParamsStreaming, 'stream'> {
@@ -25,6 +24,99 @@ interface OpenAIChatCompletionParams
 
 interface OpenAIChatCompletionChunk extends OpenAI.ChatCompletionChunk {
 	usage?: OpenAI.CompletionUsage
+}
+
+async function prepareIncomingMessages(
+	messages: ChatCompletionMessageParam[]
+): Promise<ChatMessage[]> {
+	const downloadPromises: Record<string, Promise<Image>> = {}
+	const resultMessages: ChatMessage[] = []
+	
+	for (const message of messages) {
+		const role = messageRoleMap[message.role]
+		const resultMessage: any = {
+			role,
+			content: [],
+		}
+		if (role === 'tool' && 'tool_call_id' in message) {
+			resultMessage.callId = message.tool_call_id
+		}
+
+		if (typeof message.content === 'string') {
+			resultMessage.content.push({
+				type: 'text',
+				text: message.content,
+			})
+		} else if (Array.isArray(message.content)) {
+			for (const part of message.content) {
+				
+				if (typeof part === 'string') {
+					resultMessage.content.push({
+						type: 'text',
+						text: part,
+					})
+				} else if (part.type === 'text') {
+					resultMessage.content.push({
+						type: 'text',
+						text: part.text,
+					})
+				} else if (part.type === 'image_url') {
+					if (!downloadPromises[part.image_url.url]) {
+						downloadPromises[part.image_url.url] = loadImageFromUrl(part.image_url.url)
+					}
+					const content: Partial<MessageContentPart> = {
+						type: 'image',
+					}
+					resultMessage.content.push(content)
+					downloadPromises[part.image_url.url].then((image) => {
+						content.image = image
+					})
+				} else if (part.type === 'input_audio') {
+					resultMessage.content.push({
+						type: 'audio',
+						audio: part.input_audio,
+					})
+				} else if (part.type === 'refusal') {
+					resultMessage.content.push({
+						type: 'text',
+						text: part.refusal,
+					})
+				}
+			}
+		} else {
+			throw new Error('Invalid message content')
+		}
+		
+		resultMessages.push(resultMessage)
+	}
+	
+	await Promise.all(Object.values(downloadPromises))
+	
+	return resultMessages
+	
+}
+
+function createResponseMessageContent(
+	content: string | MessageContentPart[]
+): OpenAI.ChatCompletionMessage['content'] {
+	if (!content) {
+		return null
+	}
+	if (typeof content === 'string') {
+		return content
+	}
+	if (!Array.isArray(content)) {
+		throw new Error('Invalid response message content')
+	}
+
+	let text = ''
+	for (const part of content) {
+		if (part.type === 'text') {
+			text += part.text
+		}
+		// assistant may only respond with text in openai chat completions
+	}
+	return text
 }
 
 // v1/chat/completions
@@ -126,43 +218,11 @@ export function createChatCompletionHandler(llms: ModelServer) {
 					}
 				}
 			}
-
+			
+			const messages = await prepareIncomingMessages(args.messages)
 			const completionReq = omitEmptyValues<ChatCompletionRequest>({
 				model: args.model,
-				messages: args.messages.map((msg) => {
-					const role = messageRoleMap[msg.role]
-					let content: ChatMessage['content']
-					if (Array.isArray(msg.content)) {
-						content = msg.content.map((part) => {
-							if (typeof part === 'string') {
-								return {
-									type: 'text',
-									text: part,
-								} as MessageContentPart
-							}
-							if (part.type === 'image_url') {
-								return {
-									type: 'image',
-									url: part.image_url.url,
-								} as MessageContentPart
-							}
-							return part as MessageContentPart
-						})
-					} else {
-						content = msg.content || ''
-					}
-					if (role === 'tool' && 'tool_call_id' in msg) {
-						return {
-							role,
-							content,
-							callId: msg.tool_call_id,
-						} as ToolCallResultMessage
-					}
-					return {
-						role,
-						content,
-					} as UserMessage | AssistantMessage | SystemMessage
-				}),
+				messages,
 				temperature: args.temperature ? args.temperature : undefined,
 				stream: args.stream ? Boolean(args.stream) : false,
 				maxTokens: args.max_tokens ? args.max_tokens : undefined,
@@ -301,7 +361,7 @@ export function createChatCompletionHandler(llms: ModelServer) {
 							index: 0,
 							message: {
 								role: 'assistant',
-								content: result.message.content || null,
+								content: createResponseMessageContent(result.message.content),
 								refusal: null,
 							},
 							logprobs: null,

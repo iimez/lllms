@@ -1,7 +1,7 @@
 {
 	"name": "lllms",
-	"version": "1.0.0-beta.16",
-	"description": "Local Large Language Models. Providing node.js tools to run and serve AI models on any machine.",
+	"version": "1.0.0-beta.17",
+	"description": "Libraries and server to build AI applications. Adapters to various native bindings allowing local inference. Integrate it with your application, or use as a microservice.",
 	"main": "dist/index.js",
 	"source": "src/index.ts",
 	"types": "dist/index.d.ts",
@@ -27,6 +27,7 @@
 		"test:gpt4all": "vitest tests/engines/gpt4all.test.ts",
 		"test:llama": "vitest tests/engines/node-llama-cpp.test.ts",
 		"test:transformers": "vitest tests/engines/transformers.test.ts",
+		"test:sd": "vitest tests/engines/stable-diffusion.test.ts",
 		"test:experiments": "vitest tests/engines/experiments.test.ts",
 		"test:server": "vitest tests/server.test.ts",
 		"prewatch": "npm run clean",
@@ -52,12 +53,13 @@
 		"node": ">=18.16.0"
 	},
 	"imports": {
-		"#lllms/*": "./dist/*"
+		"#package/*": "./dist/*"
 	},
 	"peerDependencies": {
-		"@huggingface/transformers": ">=3.0.0-alpha.9",
+		"@huggingface/transformers": ">=3.0.0",
 		"gpt4all": ">=4.0.0",
-		"node-llama-cpp": ">=3.0.0"
+		"node-llama-cpp": ">=3.0.0",
+		"@lmagder/node-stable-diffusion-cpp": ">=0.1.6"
 	},
 	"peerDependenciesMeta": {
 		"node-llama-cpp": {
@@ -68,10 +70,14 @@
 		},
 		"@huggingface/transformers": {
 			"optional": true
+		},
+		"@lmagder/node-stable-diffusion-cpp": {
+			"optional": true
 		}
 	},
 	"dependencies": {
 		"@alexanderolsen/libsamplerate-js": "^2.1.2",
+		"@huggingface/gguf": "^0.1.12",
 		"ajv": "^8.17.1",
 		"audio-decode": "^2.2.2",
 		"chalk": "^5.3.0",
@@ -86,15 +92,16 @@
 		"sharp": "^0.33.5"
 	},
 	"devDependencies": {
-		"@huggingface/transformers": "^3.0.0-alpha.21",
+		"@huggingface/transformers": "^3.0.1",
+		"@lmagder/node-stable-diffusion-cpp": "^0.1.5",
 		"@types/cors": "^2.8.17",
 		"@types/express": "^5.0.0",
-		"@types/node": "^22.7.5",
+		"@types/node": "^22.8.1",
 		"@types/supertest": "^6.0.2",
 		"cross-env": "^7.0.3",
 		"gpt4all": "^4.0.0",
 		"node-llama-cpp": "^3.1.1",
-		"openai": "^4.67.3",
+		"openai": "^4.68.4",
 		"supertest": "^7.0.0",
 		"tsc-alias": "^1.8.10",
 		"typescript": "^5.6.3",

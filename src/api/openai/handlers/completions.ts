@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { OpenAI } from 'openai'
-import type { ModelServer } from '#lllms/server.js'
-import { TextCompletionRequest } from '#lllms/types/index.js'
-import { parseJSONRequestBody } from '#lllms/api/parseJSONRequestBody.js'
-import { omitEmptyValues } from '#lllms/lib/util.js'
+import type { ModelServer } from '#package/server.js'
+import { TextCompletionRequest } from '#package/types/index.js'
+import { parseJSONRequestBody } from '#package/api/parseJSONRequestBody.js'
+import { omitEmptyValues } from '#package/lib/util.js'
 import { finishReasonMap } from '../enums.js'
 
 interface OpenAICompletionParams

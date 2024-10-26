@@ -1,23 +1,36 @@
 import type { SomeJSONSchema } from 'ajv/dist/types/json-schema'
 import type { Sharp } from 'sharp'
-import type { BuiltInEngineName } from '#lllms/engines/index.js'
-import type { Logger } from '#lllms/lib/logger.js'
-import type { ModelPool } from '#lllms/pool.js'
-import type { ModelStore } from '#lllms/store.js'
+import type { BuiltInEngineName } from '#package/engines/index.js'
+import type { Logger } from '#package/lib/logger.js'
+import type { ModelPool } from '#package/pool.js'
+import type { ModelStore } from '#package/store.js'
 import {
 	AssistantMessage,
 	ChatMessage,
 	CompletionFinishReason,
 	TextCompletionParams,
 	ToolDefinition,
-} from '#lllms/types/completions.js'
-import type { ContextShiftStrategy } from '#lllms/engines/node-llama-cpp/types.js'
-export * from '#lllms/types/completions.js'
+} from '#package/types/completions.js'
+import type { ContextShiftStrategy } from '#package/engines/node-llama-cpp/types.js'
+import type {
+	StableDiffusionWeightType,
+	StableDiffusionSamplingMethod,
+  StableDiffusionSchedule,
+} from '#package/engines/stable-diffusion-cpp/types.js'
+import type {
+  TransformersJsModelClass,
+  TransformersJsTokenizerClass,
+  TransformersJsProcessorClass,
+  TransformersJsDataType,
+} from '#package/engines/transformers-js/types.js'
+export * from '#package/types/completions.js'
 
 export type ModelTaskType =
 	| 'text-completion'
 	| 'embedding'
 	| 'image-to-text'
+	| 'image-to-image'
+	| 'text-to-image'
 	| 'speech-to-text'
 
 export interface ModelOptionsBase {
@@ -73,6 +86,15 @@ export interface ProcessingOptions {
 	signal?: AbortSignal
 }
 
+export interface Image {
+	handle: Sharp
+	width: number
+	height: number
+	channels: 1 | 2 | 3 | 4
+}
+
+// export type Image = Sharp
+
 export interface CompletionProcessingOptions extends ProcessingOptions {
 	onChunk?: (chunk: CompletionChunk) => void
 }
@@ -113,9 +135,9 @@ export interface TextEmbeddingInput {
 
 export interface ImageEmbeddingInput {
 	type: 'image'
-	content?: Sharp
-	url?: string
-	file?: string
+	content: Image
+	// url?: string
+	// file?: string
 }
 
 export type EmbeddingInput = TextEmbeddingInput | ImageEmbeddingInput | string
@@ -129,11 +151,38 @@ export interface EmbeddingRequest {
 
 export interface ImageToTextRequest {
 	model: string
-	url?: string
-	file?: string
-	image?: Sharp
+	image: Image
 	prompt?: string
 	maxTokens?: number
+}
+
+export interface StableDiffusionRequest {
+	negativePrompt?: string
+	guidance?: number
+	styleRatio?: number
+	strength?: number
+	sampleSteps?: number
+	batchCount?: number
+	samplingMethod?: StableDiffusionSamplingMethod
+	cfgScale?: number
+	controlStrength?: number
+}
+
+export interface TextToImageRequest extends StableDiffusionRequest {
+	model: string
+	prompt: string
+	width?: number
+	height?: number
+	seed?: number
+}
+
+export interface ImageToImageRequest extends StableDiffusionRequest {
+	model: string
+	image: Image
+	prompt: string
+	width?: number
+	height?: number
+	seed?: number
 }
 
 export interface SpeechToTextRequest {
@@ -187,6 +236,20 @@ export interface EngineImageToTextArgs<
 	TModelMeta = unknown,
 > extends EngineContext<TModelConfig, TModelMeta> {
 	request: ImageToTextRequest
+}
+
+export interface EngineTextToImageArgs<
+	TModelConfig = unknown,
+	TModelMeta = unknown,
+> extends EngineContext<TModelConfig, TModelMeta> {
+	request: TextToImageRequest
+}
+
+export interface EngineImageToImageArgs<
+	TModelConfig = unknown,
+	TModelMeta = unknown,
+> extends EngineContext<TModelConfig, TModelMeta> {
+	request: ImageToImageRequest
 }
 
 export interface EngineSpeechToTextArgs<
@@ -250,6 +313,16 @@ export interface ModelEngine<
 		instance: TInstance,
 		signal?: AbortSignal,
 	) => Promise<EngineSpeechToTextResult>
+	processTextToImageTask?: (
+		args: EngineTextToImageArgs<TModelConfig, TModelMeta>,
+		instance: TInstance,
+		signal?: AbortSignal,
+	) => Promise<EngineTextToImageResult>
+	processImageToImageTask?: (
+		args: EngineImageToImageArgs<TModelConfig, TModelMeta>,
+		instance: TInstance,
+		signal?: AbortSignal,
+	) => Promise<EngineImageToImageResult>
 }
 
 interface EmbeddingModelOptions {
@@ -318,15 +391,13 @@ type GPT4AllTextCompletionModelOptions = TextCompletionModelOptions &
 type GPT4AllEmbeddingModelOptions = GPT4AllModelOptions & EmbeddingModelOptions
 
 export interface TransformersJsModel {
-	processor?: string
-	// TODO classes not working
-	// processorClass?: Processor
-	// tokenizerClass?: PreTrainedTokenizer
-	// modelClass?: PreTrainedModel
-	processorClass?: any
-	tokenizerClass?: any
-	modelClass?: any
-	dtype?: Record<string, string> | string
+	processor?: {
+  	url: string
+	}
+	processorClass?: TransformersJsProcessorClass
+	tokenizerClass?: TransformersJsTokenizerClass
+	modelClass?: TransformersJsModelClass
+	dtype?: Record<string, TransformersJsDataType> | TransformersJsDataType
 }
 
 interface TransformersJsModelOptions extends BuiltInModelOptionsBase {
@@ -340,6 +411,30 @@ interface TransformersJsModelOptions extends BuiltInModelOptionsBase {
 	}
 }
 
+export interface ModelFileSource {
+	url?: string
+	file?: string
+	sha256?: string
+}
+
+interface StableDiffusionModelOptions extends BuiltInModelOptionsBase {
+	engine: 'stable-diffusion-cpp'
+	task: 'image-to-text' | 'text-to-image' | 'image-to-image'
+	sha256?: string
+	url?: string
+	diffusionModel?: boolean
+	vae?: ModelFileSource
+	clipL?: ModelFileSource
+	clipG?: ModelFileSource
+	t5xxl?: ModelFileSource
+	taesd?: ModelFileSource
+	controlNet?: ModelFileSource
+	samplingMethod?: StableDiffusionSamplingMethod
+	weightType?: StableDiffusionWeightType
+	schedule?: StableDiffusionSchedule
+	loras?: ModelFileSource[]
+}
+
 export interface CustomEngineModelOptions extends ModelOptionsBase {}
 
 export type BuiltInModelOptions =
@@ -348,6 +443,7 @@ export type BuiltInModelOptions =
 	| GPT4AllTextCompletionModelOptions
 	| GPT4AllEmbeddingModelOptions
 	| TransformersJsModelOptions
+	| StableDiffusionModelOptions
 
 export type ModelOptions = BuiltInModelOptions | CustomEngineModelOptions
 
@@ -379,6 +475,16 @@ export interface EngineTextCompletionResult {
 
 export interface EngineImageToTextResult {
 	text: string
+}
+
+export interface EngineTextToImageResult {
+	images: Image[]
+	seed: number
+}
+
+export interface EngineImageToImageResult {
+	images: Image[]
+	seed: number
 }
 
 export interface EngineSpeechToTextResult {

@@ -1,4 +1,4 @@
-import { CompletionFinishReason, ChatMessage } from '#lllms/types/index.js'
+import { CompletionFinishReason, ChatMessage } from '#package/types/index.js'
 import OpenAI from 'openai'
 
 export const finishReasonMap: Record<CompletionFinishReason, OpenAI.ChatCompletion.Choice['finish_reason']> = {

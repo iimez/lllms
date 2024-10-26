@@ -1,9 +1,9 @@
 import os from 'node:os'
 import path from 'node:path'
-import { builtInEngineNames } from '#lllms/engines/index.js'
-import { ModelPool } from '#lllms/pool.js'
-import { ModelInstance } from '#lllms/instance.js'
-import { ModelStore, StoredModel } from '#lllms/store.js'
+import { builtInEngineNames } from '#package/engines/index.js'
+import { ModelPool } from '#package/pool.js'
+import { ModelInstance } from '#package/instance.js'
+import { ModelStore, StoredModel } from '#package/store.js'
 import {
 	ModelOptions,
 	IncomingRequest,
@@ -19,10 +19,12 @@ import {
 	BuiltInModelOptions,
 	CustomEngineModelOptions,
 	ModelConfigBase,
-} from '#lllms/types/index.js'
-import { Logger, LogLevel, createSublogger, LogLevels } from '#lllms/lib/logger.js'
-import { resolveModelLocation } from '#lllms/lib/resolveModelLocation.js'
-import { validateModelOptions } from '#lllms/lib/validation.js'
+	TextToImageRequest,
+	ImageToImageRequest,
+} from '#package/types/index.js'
+import { Logger, LogLevel, createSublogger, LogLevels } from '#package/lib/logger.js'
+import { resolveModelLocation } from '#package/lib/resolveModelLocation.js'
+import { validateModelOptions } from '#package/lib/validation.js'
 
 export interface ModelServerOptions {
 	engines?: Record<string, ModelEngine>
@@ -47,7 +49,7 @@ export class ModelServer {
 	constructor(options: ModelServerOptions) {
 		this.log = createSublogger(options.log)
 		const modelsPath =
-			options?.modelsPath || path.resolve(os.homedir(), '.cache/lllms')
+			options?.modelsPath || path.resolve(os.homedir(), '.cache/inference-server')
 
 		const modelsWithDefaults: Record<string, ModelConfigBase> = {}
 		const usedEngines: Array<{ model: string; engine: string }> = []
@@ -134,7 +136,7 @@ export class ModelServer {
 			engineStartPromises.push(
 				new Promise(async (resolve, reject) => {
 					try {
-						const engine = await import(`#lllms/engines/${key}/engine.js`)
+						const engine = await import(`#package/engines/${key}/engine.js`)
 						this.engines[key] = engine
 						resolve({
 							key,
@@ -247,6 +249,28 @@ export class ModelServer {
 	) {
 		const lock = await this.requestInstance(args)
 		const task = lock.instance.processSpeechToTextTask(args, options)
+		const result = await task.result
+		await lock.release()
+		return result
+	}
+	
+	async processTextToImageTask(
+		args: TextToImageRequest,
+		options?: ProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const task = lock.instance.processTextToImageTask(args, options)
+		const result = await task.result
+		await lock.release()
+		return result
+	}
+	
+	async processImageToImageTask(
+		args: ImageToImageRequest,
+		options?: ProcessingOptions,
+	) {
+		const lock = await this.requestInstance(args)
+		const task = lock.instance.processImageToImageTask(args, options)
 		const result = await task.result
 		await lock.release()
 		return result

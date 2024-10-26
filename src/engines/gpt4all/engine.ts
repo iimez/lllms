@@ -23,10 +23,10 @@ import {
 	ModelConfig,
 	TextCompletionParams,
 	ChatMessage,
-} from '#lllms/types/index.js'
-import { LogLevels } from '#lllms/lib/logger.js'
-import { downloadLargeFile } from '#lllms/lib/downloadLargeFile.js'
-import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
+} from '#package/types/index.js'
+import { LogLevels } from '#package/lib/logger.js'
+import { downloadModelFile } from '#package/lib/downloadModelFile.js'
+import { acquireFileLock } from '#package/lib/acquireFileLock.js'
 import { createChatMessageArray, verifyModelFile } from './util.js'
 
 export type GPT4AllInstance = InferenceModel | EmbeddingModel
@@ -108,7 +108,7 @@ export async function prepareModel(
 			url: config.url,
 			location: config.location,
 		})
-		await downloadLargeFile({
+		await downloadModelFile({
 			url: config.url,
 			file: config.location,
 			onProgress,

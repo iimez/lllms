@@ -2,7 +2,7 @@ import {
 	ChatMessage,
 	MessageContentPart,
 	MessageTextContentPart,
-} from '#lllms/types/index.js'
+} from '#package/types/index.js'
 
 function isTextContentPart(
 	part: MessageContentPart,

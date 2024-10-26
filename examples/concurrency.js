@@ -1,4 +1,4 @@
-import { startHTTPServer } from '#lllms/http.js'
+import { startHTTPServer } from '#package/http.js'
 import OpenAI from 'openai'
 import readline from 'node:readline'
 

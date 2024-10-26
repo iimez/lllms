@@ -1,6 +1,6 @@
 import readline from 'node:readline'
 import chalk from 'chalk'
-import { ModelServer } from '#lllms/index.js'
+import { ModelServer } from '#package/index.js'
 
 // A command-line chat example using the ModelServer.
 

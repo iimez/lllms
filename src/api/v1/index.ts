@@ -1,7 +1,7 @@
 import { IncomingMessage, ServerResponse } from 'node:http'
 import express from 'express'
-import { ModelPool } from '#lllms/pool.js'
-import { ModelServer } from '#lllms/server.js'
+import { ModelPool } from '#package/pool.js'
+import { ModelServer } from '#package/server.js'
 
 export function createAPIMiddleware(server: ModelServer) {
 	const router = express.Router()

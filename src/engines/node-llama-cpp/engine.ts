@@ -45,18 +45,18 @@ import {
 	TextCompletionParams,
 	TextCompletionGrammar,
 	ChatMessage,
-} from '#lllms/types/index.js'
-import { LogLevels } from '#lllms/lib/logger.js'
-import { flattenMessageTextContent } from '#lllms/lib/flattenMessageTextContent.js'
-import { calculateFileChecksum } from '#lllms/lib/calculateFileChecksum.js'
-import { acquireFileLock } from '#lllms/lib/acquireFileLock.js'
+} from '#package/types/index.js'
+import { LogLevels } from '#package/lib/logger.js'
+import { flattenMessageTextContent } from '#package/lib/flattenMessageTextContent.js'
+import { calculateFileChecksum } from '#package/lib/calculateFileChecksum.js'
+import { acquireFileLock } from '#package/lib/acquireFileLock.js'
+import { getRandomNumber } from '#package/lib/util.js'
 import {
-	createSeed,
 	createChatMessageArray,
 	addFunctionCallToChatHistory,
 	mapFinishReason,
 } from './util.js'
-import { LlamaChatResult, ContextShiftStrategy } from './types.js'
+import { LlamaChatResult } from './types.js'
 
 export interface NodeLlamaCppInstance {
 	model: LlamaModel
@@ -291,7 +291,7 @@ export async function createInstance(
 			contextShiftMetadata: loadMessagesRes.lastEvaluation.contextShiftMetadata,
 		}
 	}
-	
+
 	if (config.prefix) {
 		const contextSequence = instance.contextSequence!
 		const completion = new LlamaCompletion({
@@ -445,7 +445,11 @@ export async function processChatCompletionTask(
 		// use last message as prefill for response, if its an assistant message
 		assistantPrefill = flattenMessageTextContent(lastMessage.content)
 	} else if (!resolvedFunctionCalls.length) {
-		log(LogLevels.warn, 'Tailing message is not valid for chat completion. This is likely a mistake.', lastMessage)
+		log(
+			LogLevels.warn,
+			'Tailing message is not valid for chat completion. This is likely a mistake.',
+			lastMessage,
+		)
 		throw new Error('Invalid tailing chat message')
 	}
 
@@ -479,8 +483,11 @@ export async function processChatCompletionTask(
 		? undefined
 		: instance.chatHistory.slice()
 
-	if (instance.chatHistory[instance.chatHistory.length - 1].type !== 'model' || assistantPrefill) {
-		const newModelResponse = assistantPrefill ? [ assistantPrefill ] : []
+	if (
+		instance.chatHistory[instance.chatHistory.length - 1].type !== 'model' ||
+		assistantPrefill
+	) {
+		const newModelResponse = assistantPrefill ? [assistantPrefill] : []
 		newChatHistory.push({
 			type: 'model',
 			response: newModelResponse,
@@ -501,11 +508,11 @@ export async function processChatCompletionTask(
 				onFunctionCall: (functionCall: LlamaChatResponseFunctionCall<any>) => {
 					// log(LogLevels.debug, 'Called function', functionCall)
 				},
-			}
+		  }
 		: {
 				grammar: inputGrammar,
-			}
-	
+		  }
+
 	const initialTokenMeterState = instance.chat.sequence.tokenMeter.getState()
 	let completionResult: LlamaChatResult
 	while (true) {
@@ -524,7 +531,7 @@ export async function processChatCompletionTask(
 			seed:
 				request.seed ??
 				config.completionDefaults?.seed ??
-				createSeed(0, 1000000),
+				getRandomNumber(0, 1000000),
 			tokenBias,
 			customStopTriggers,
 			trimWhitespaceSuffix: false,
@@ -725,14 +732,14 @@ export async function processTextCompletionTask(
 	if (!request.prompt) {
 		throw new Error('Prompt is required for text completion.')
 	}
-	
+
 	let completion: LlamaCompletion
 	let contextSequence: LlamaContextSequence
 
 	if (resetContext && instance.contextSequence) {
 		instance.contextSequence.clearHistory()
 	}
-	
+
 	if (!instance.completion || instance.completion.disposed) {
 		if (instance.contextSequence) {
 			contextSequence = instance.contextSequence
@@ -750,7 +757,7 @@ export async function processTextCompletionTask(
 		completion = instance.completion
 		contextSequence = instance.contextSequence!
 	}
-	
+
 	if (!contextSequence || contextSequence.disposed) {
 		contextSequence = instance.context.getSequence()
 		instance.contextSequence = contextSequence
@@ -784,7 +791,7 @@ export async function processTextCompletionTask(
 			? stopGenerationTriggers
 			: undefined,
 		seed:
-			request.seed ?? config.completionDefaults?.seed ?? createSeed(0, 1000000),
+			request.seed ?? config.completionDefaults?.seed ?? getRandomNumber(0, 1000000),
 		onToken: (tokens) => {
 			const text = instance.model.detokenize(tokens)
 			if (onChunk) {
@@ -854,8 +861,9 @@ export async function processEmbeddingTask(
 			tokenizedInput = tokenizedInput.slice(0, contextSize)
 		}
 		inputTokens += tokenizedInput.length
-		const embedding =
-			await instance.embeddingContext.getEmbeddingFor(tokenizedInput)
+		const embedding = await instance.embeddingContext.getEmbeddingFor(
+			tokenizedInput,
+		)
 		embeddings.push(new Float32Array(embedding.vector))
 		if (signal?.aborted) {
 			break

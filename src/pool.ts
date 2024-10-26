@@ -1,20 +1,20 @@
 import process from 'node:process'
 import PQueue from 'p-queue'
 import EventEmitter3 from 'eventemitter3'
-import { ModelInstance } from '#lllms/instance.js'
+import { ModelInstance } from '#package/instance.js'
 import {
 	ModelConfig,
 	IncomingRequest,
 	ModelInstanceRequest,
 	ModelEngine,
-} from '#lllms/types/index.js'
+} from '#package/types/index.js'
 import {
 	Logger,
 	LogLevels,
 	createSublogger,
 	LogLevel,
-} from '#lllms/lib/logger.js'
-import { mergeAbortSignals } from '#lllms/lib/util.js'
+} from '#package/lib/logger.js'
+import { mergeAbortSignals } from '#package/lib/util.js'
 
 export interface ModelInstanceHandle {
 	instance: ModelInstance

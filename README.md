@@ -211,4 +211,4 @@ If you look at this package, you might also want to take a look at these other s
 - [LM Studio](https://lmstudio.ai/docs/local-server) - Also has a local server.
 - [LocalAI](https://github.com/mudler/LocalAI) - Similar project in go.
 - [Petals](https://github.com/bigscience-workshop/petals) - Local (and distributed!) inference in python.
-- [cortex.cpp](https://github.com/janhq/cortex.cpp/) - A C++ API for OpenAI's GPT-3.
+- [cortex.cpp](https://github.com/janhq/cortex.cpp/)

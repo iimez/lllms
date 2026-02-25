@@ -4,7 +4,7 @@ Libraries and server to build AI applications doing local inference in node. Use
 
 The project includes a model resource pool, an inference queue and a HTTP API server. Model file management is abstracted away as much as possible - configure a URL and go. This package is useful for quick model evaluations and experiments (in JavaScript), small-scale chatbots, resource efficient assistants on edge devices, or any applications where private & offline are interesting criteria. For other - not node-based solutions - check out the [related solutions](#related-solutions) section.
 
-⚠️ This package is currently in beta. APIs may change. Things may break. [Help is welcome](#contributing).
+⚠️ This is no longer being actively worked on. I kept it up as it may serve as an (outdated) example of building an OpenAI-compatible chat completions API server based on node-llama-cpp.
 
 ### Features
 
